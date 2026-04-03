@@ -263,6 +263,90 @@
           );
         }
 
+        // ==========================================
+        // 세부 컴포넌트들
+        // ==========================================
+        function LoginScreen({ appPin, onLogin }) {
+          const [input, setInput] = useState('');
+          const [error, setError] = useState(false);
+
+          const handleNumClick = (num) => {
+            if (input.length < 6) {
+              const newInput = input + num;
+              setInput(newInput);
+              setError(false);
+              if (newInput.length === 6 && newInput === appPin) {
+                setTimeout(onLogin, 100);
+              } else if (newInput.length === 6) {
+                setError(true);
+                setTimeout(() => setInput(''), 500);
+              }
+            }
+          };
+
+          const handleDelete = () => setInput(prev => prev.slice(0, -1));
+
+          useEffect(() => {
+            const handleKeyDown = (e) => {
+              if (/[0-9]/.test(e.key)) handleNumClick(e.key);
+              if (e.key === 'Backspace') handleDelete();
+              if (e.key === 'Enter' && input === appPin) onLogin();
+            };
+            window.addEventListener('keydown', handleKeyDown);
+            return () => window.removeEventListener('keydown', handleKeyDown);
+          }, [input, appPin]);
+
+          return (
+            <div className="min-h-screen bg-gray-100 flex flex-col items-center justify-center p-4">
+              <div className="bg-white p-8 rounded-2xl shadow-xl w-full max-w-sm text-center">
+                <div className="bg-yellow-100 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
+                  <Lock className="w-8 h-8 text-yellow-600" />
+                </div>
+                <h2 className="text-2xl font-bold text-gray-800 mb-2">알바트래커 v1.0</h2>
+                <p className="text-gray-500 mb-6 text-sm">
+                  {appPin === INITIAL_PIN ? '초기 비밀번호는 "000000"입니다.' : '비밀번호를 입력해주세요.'}
+                </p>
+
+                <div className="flex justify-center gap-3 mb-8">
+                  {[...Array(6)].map((_, i) => (
+                    <div 
+                      key={i} 
+                      className={`w-4 h-4 rounded-full transition-all ${
+                        i < input.length ? 'bg-green-600' : 'bg-gray-200'
+                      } ${error ? 'bg-red-500' : ''}`}
+                    />
+                  ))}
+                </div>
+
+                <div className="grid grid-cols-3 gap-3">
+                  {[1, 2, 3, 4, 5, 6, 7, 8, 9].map(num => (
+                    <button
+                      key={num}
+                      onClick={() => handleNumClick(num.toString())}
+                      className="h-14 bg-gray-50 hover:bg-gray-100 rounded-xl text-xl font-medium text-gray-700 transition active:scale-95"
+                    >
+                      {num}
+                    </button>
+                  ))}
+                  <div className="h-14"></div>
+                  <button
+                    onClick={() => handleNumClick('0')}
+                    className="h-14 bg-gray-50 hover:bg-gray-100 rounded-xl text-xl font-medium text-gray-700 transition active:scale-95"
+                  >
+                    0
+                  </button>
+                  <button
+                    onClick={handleDelete}
+                    className="h-14 bg-gray-50 hover:bg-gray-100 rounded-xl text-lg font-medium text-gray-700 flex items-center justify-center transition active:scale-95"
+                  >
+                    <X className="w-6 h-6" />
+                  </button>
+                </div>
+              </div>
+            </div>
+          );
+        }
+
         function TabEmployees({ employees, setEmployees, nextEmpId, setNextEmpId, getEmployeeStats, globalMinWage, setGlobalMinWage }) {
           const [searchTerm, setSearchTerm] = useState('');
           const [isModalOpen, setIsModalOpen] = useState(false);

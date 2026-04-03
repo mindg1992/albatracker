@@ -95,7 +95,7 @@
             return defaultVal;
         };
 
-        // --- 공통 연/월 직접입력 컴포넌트 ---
+        // --- 공통 연/월 이동 컴포넌트 ---
         function MonthYearSelector({ year, month, onChange }) {
           const [y, setY] = useState(year);
           const [m, setM] = useState(month);
@@ -143,7 +143,7 @@
                 onClick={handleApply}
                 className="ml-1 md:ml-2 text-xs bg-gray-200 text-gray-700 hover:bg-gray-300 px-3 py-1.5 rounded-md font-bold transition shadow-sm whitespace-nowrap"
               >
-                직접입력
+                이동
               </button>
             </div>
           );

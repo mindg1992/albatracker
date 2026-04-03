@@ -95,6 +95,60 @@
             return defaultVal;
         };
 
+        // --- 공통 연/월 직접입력 컴포넌트 ---
+        function MonthYearSelector({ year, month, onChange }) {
+          const [y, setY] = useState(year);
+          const [m, setM] = useState(month);
+
+          useEffect(() => {
+            setY(year);
+            setM(month);
+          }, [year, month]);
+
+          const handleApply = () => {
+            let newY = parseInt(y);
+            let newM = parseInt(m);
+            if (isNaN(newY) || newY < 1900) newY = new Date().getFullYear();
+            if (isNaN(newM) || newM < 1) newM = 1;
+            if (newM > 12) newM = 12;
+
+            setY(newY);
+            setM(newM);
+            onChange(newY, newM);
+          };
+
+          const handleKeyDown = (e) => {
+            if (e.key === 'Enter') handleApply();
+          };
+
+          return (
+            <div className="flex items-center gap-1 justify-center">
+              <input
+                type="number"
+                value={y}
+                onChange={e => setY(e.target.value)}
+                onKeyDown={handleKeyDown}
+                className="text-lg md:text-xl font-bold text-gray-800 bg-transparent border-b-2 border-gray-300 focus:border-green-500 w-16 md:w-20 text-center outline-none transition-colors"
+              />
+              <span className="text-lg md:text-xl font-bold text-gray-800">년</span>
+              <input
+                type="number"
+                value={m}
+                onChange={e => setM(e.target.value)}
+                onKeyDown={handleKeyDown}
+                className="text-lg md:text-xl font-bold text-gray-800 bg-transparent border-b-2 border-gray-300 focus:border-green-500 w-10 md:w-12 text-center outline-none transition-colors"
+              />
+              <span className="text-lg md:text-xl font-bold text-gray-800">월</span>
+              <button
+                onClick={handleApply}
+                className="ml-1 md:ml-2 text-xs bg-gray-200 text-gray-700 hover:bg-gray-300 px-3 py-1.5 rounded-md font-bold transition shadow-sm whitespace-nowrap"
+              >
+                직접입력
+              </button>
+            </div>
+          );
+        }
+
         // --- 메인 애플리케이션 컴포넌트 ---
         function AlbaTracker() {
           const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -640,13 +694,6 @@
           const prevMonth = () => setCurrentDate(new Date(year, month - 2, 1));
           const nextMonth = () => setCurrentDate(new Date(year, month, 1));
 
-          const handleMonthChange = (e) => {
-            if (e.target.value) {
-              const [y, m] = e.target.value.split('-');
-              setCurrentDate(new Date(y, parseInt(m) - 1, 1));
-            }
-          };
-
           // 이번달 총매출 업데이트 함수
           const handleTotalRevenueChange = (e) => {
             const val = e.target.value === '' ? '' : Number(e.target.value);
@@ -687,12 +734,10 @@
               <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200 flex flex-col xl:flex-row justify-between items-start xl:items-center gap-4">
                 <div className="flex items-center gap-2 md:gap-4 shrink-0">
                   <button onClick={prevMonth} className="p-2 hover:bg-gray-100 rounded-full transition"><ChevronLeft className="w-5 h-5 md:w-6 md:h-6" /></button>
-                  <input 
-                    type="month"
-                    value={`${year}-${month.toString().padStart(2, '0')}`}
-                    onChange={handleMonthChange}
-                    required
-                    className="text-lg md:text-2xl font-bold text-gray-800 bg-transparent border-none cursor-pointer focus:ring-2 focus:ring-green-500 rounded px-2 outline-none"
+                  <MonthYearSelector 
+                    year={year} 
+                    month={month} 
+                    onChange={(y, m) => setCurrentDate(new Date(y, m - 1, 1))} 
                   />
                   <button onClick={nextMonth} className="p-2 hover:bg-gray-100 rounded-full transition"><ChevronRight className="w-5 h-5 md:w-6 md:h-6" /></button>
                 </div>
@@ -1099,13 +1144,6 @@
 
           const prevMonth = () => setCurrentDate(new Date(year, month - 2, 1));
           const nextMonth = () => setCurrentDate(new Date(year, month, 1));
-          
-          const handleMonthChange = (e) => {
-            if (e.target.value) {
-              const [y, m] = e.target.value.split('-');
-              setCurrentDate(new Date(y, parseInt(m) - 1, 1));
-            }
-          };
 
           const payrollList = useMemo(() => {
             const list = {};
@@ -1140,12 +1178,10 @@
             <div className="space-y-4 max-w-5xl mx-auto">
               <div className="flex justify-between items-center bg-white p-4 rounded-xl shadow-sm border border-gray-200">
                 <button onClick={prevMonth} className="p-2 hover:bg-gray-100 rounded-full transition"><ChevronLeft /></button>
-                <input 
-                  type="month"
-                  value={`${year}-${month.toString().padStart(2, '0')}`}
-                  onChange={handleMonthChange}
-                  required
-                  className="text-xl font-bold text-gray-800 bg-transparent border-none cursor-pointer focus:ring-2 focus:ring-green-500 rounded px-2 outline-none text-center"
+                <MonthYearSelector 
+                  year={year} 
+                  month={month} 
+                  onChange={(y, m) => setCurrentDate(new Date(y, m - 1, 1))} 
                 />
                 <button onClick={nextMonth} className="p-2 hover:bg-gray-100 rounded-full transition"><ChevronRight /></button>
               </div>

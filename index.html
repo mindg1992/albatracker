@@ -25,6 +25,22 @@
             scrollbar-width: none;
         }
         body { font-family: 'Pretendard', sans-serif; }
+        
+        /* input number 화살표 숨김 */
+        input[type="number"]::-webkit-outer-spin-button,
+        input[type="number"]::-webkit-inner-spin-button {
+            -webkit-appearance: none;
+            margin: 0;
+        }
+        input[type="number"] {
+            -moz-appearance: textfield;
+        }
+
+        /* 월 선택 입력칸의 기본 'X(삭제)' 버튼 숨김 */
+        input[type="month"]::-webkit-clear-button {
+            display: none;
+            -webkit-appearance: none;
+        }
     </style>
 </head>
 <body>
@@ -73,6 +89,7 @@
           
           const [employees, setEmployees] = useState([]);
           const [nextEmpId, setNextEmpId] = useState(1);
+          // monthlyData format: 'YYYY-MM': { totalRevenue?: number, days: { 1: { revenue: 0, entries: { empId: { hours, pay, name, wage } } } } }
           const [monthlyData, setMonthlyData] = useState({}); 
           const [globalMinWage, setGlobalMinWage] = useState(MIN_WAGE);
 
@@ -155,7 +172,6 @@
 
             Object.values(monthlyData).forEach(monthData => {
               Object.values(monthData.days || {}).forEach(dayData => {
-                // 저장된 구조는 { ...entries: { empId: { ... } } } 
                 if (dayData.entries && dayData.entries[empId] && dayData.entries[empId].hours > 0) {
                   totalDays++;
                   totalHours += dayData.entries[empId].hours;
@@ -370,7 +386,6 @@
           }, [employees, searchTerm]);
 
           const handleSave = (empData) => {
-            // displayId는 저장용이 아니므로 원본 상태에서 제거해서 저장
             const { displayId, ...dataToSave } = empData;
 
             if (editingEmp) {
@@ -610,8 +625,20 @@
             }
           };
 
+          // 이번달 총매출 업데이트 함수
+          const handleTotalRevenueChange = (e) => {
+            const val = e.target.value === '' ? '' : Number(e.target.value);
+            setMonthlyData(prev => ({
+              ...prev,
+              [monthKey]: {
+                ...(prev[monthKey] || { days: {} }),
+                totalRevenue: val
+              }
+            }));
+          };
+
           let totalMonthPay = 0;
-          let totalMonthRevenue = 0;
+          let sumOfDailyRevenue = 0;
 
           const daysInMonth = getDaysInMonth(year, month);
           const firstDay = getFirstDayOfMonth(year, month);
@@ -622,20 +649,22 @@
           for (let d = 1; d <= daysInMonth; d++) {
             calendarDays.push(d);
             const dayData = currentMonthData.days[d] || {};
-            totalMonthRevenue += (dayData.revenue || 0);
+            sumOfDailyRevenue += (dayData.revenue || 0);
             Object.values(dayData.entries || {}).forEach(entry => {
               totalMonthPay += (entry.pay || 0);
             });
           }
 
-          const payRatio = totalMonthRevenue > 0 ? ((totalMonthPay / totalMonthRevenue) * 100).toFixed(1) : 0;
+          // 총매출 입력값이 있으면 우선 반영, 없으면 일별 매출 총합 반영
+          const explicitTotalRevenue = currentMonthData.totalRevenue || 0;
+          const effectiveRevenue = explicitTotalRevenue > 0 ? explicitTotalRevenue : sumOfDailyRevenue;
+          const payRatio = effectiveRevenue > 0 ? ((totalMonthPay / effectiveRevenue) * 100).toFixed(1) : 0;
 
           return (
             <div className="space-y-4">
-              <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200 flex flex-col md:flex-row justify-between items-center gap-4">
-                <div className="flex items-center gap-2 md:gap-4">
+              <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200 flex flex-col xl:flex-row justify-between items-start xl:items-center gap-4">
+                <div className="flex items-center gap-2 md:gap-4 shrink-0">
                   <button onClick={prevMonth} className="p-2 hover:bg-gray-100 rounded-full transition"><ChevronLeft className="w-5 h-5 md:w-6 md:h-6" /></button>
-                  {/* 월 직접 선택 네비게이터 */}
                   <input 
                     type="month"
                     value={`${year}-${month.toString().padStart(2, '0')}`}
@@ -645,13 +674,24 @@
                   <button onClick={nextMonth} className="p-2 hover:bg-gray-100 rounded-full transition"><ChevronRight className="w-5 h-5 md:w-6 md:h-6" /></button>
                 </div>
 
-                <div className="flex flex-col md:flex-row items-center gap-4 text-sm md:text-base">
-                  <div className="bg-green-50 text-green-800 px-4 py-2 rounded-lg font-medium border border-green-200 text-center w-full md:w-auto">
+                <div className="flex flex-col xl:flex-row items-center gap-4 text-sm md:text-base w-full xl:w-auto">
+                  <div className="flex items-center gap-2 bg-white border border-gray-300 rounded-lg px-3 py-2 shadow-sm w-full xl:w-auto shrink-0">
+                    <label className="text-sm font-medium text-gray-700 whitespace-nowrap">이번달 총매출:</label>
+                    <input 
+                      type="number"
+                      value={currentMonthData.totalRevenue ?? ''}
+                      onChange={handleTotalRevenueChange}
+                      placeholder={sumOfDailyRevenue > 0 ? sumOfDailyRevenue.toString() : '0'}
+                      className="w-full xl:w-28 border-none focus:ring-0 text-sm text-right outline-none bg-transparent p-0"
+                    />
+                    <span className="text-sm text-gray-500 font-medium whitespace-nowrap">원</span>
+                  </div>
+                  <div className="bg-green-50 text-green-800 px-4 py-2 rounded-lg font-medium border border-green-200 text-center w-full xl:w-auto whitespace-nowrap shrink-0">
                     총 인건비: {formatCurrency(totalMonthPay)} <span className="text-xs text-green-600 ml-1">(매출 대비 {payRatio}%)</span>
                   </div>
                   <button 
                     onClick={() => setIsBulkInputOpen(true)}
-                    className="w-full md:w-auto bg-gray-800 text-white px-5 py-2.5 rounded-lg hover:bg-gray-900 transition flex items-center justify-center gap-2 shadow-sm whitespace-nowrap"
+                    className="w-full xl:w-auto bg-gray-800 text-white px-5 py-2.5 rounded-lg hover:bg-gray-900 transition flex items-center justify-center gap-2 shadow-sm whitespace-nowrap shrink-0"
                   >
                     <Edit2 className="w-4 h-4" />
                     이번달 근무시간 입력
@@ -782,7 +822,7 @@
               initData[d] = {};
               const dayData = currentMonthData.days[d] || { entries: {} };
               activeEmployees.forEach(emp => {
-                initData[d][emp.id] = dayData.entries[emp.id]?.hours || '';
+                initData[d][emp.id] = dayData.entries[emp.id]?.hours ?? '';
               });
             }
             setLocalData(initData);
@@ -796,12 +836,30 @@
           };
 
           const handleKeyDown = (e, day, empIdx) => {
+            // 숫자, 소수점, 방향키 등 유효한 키 외의 입력 방지 ('e', 'E', '+', '-' 차단)
+            if (['e', 'E', '+', '-'].includes(e.key)) {
+                e.preventDefault();
+                return;
+            }
+
             let nextDay = day;
             let nextEmpIdx = empIdx;
 
             if (e.key === 'Enter' || e.key === 'ArrowDown') {
               e.preventDefault();
-              nextDay = Math.min(day + 1, daysInMonth);
+              if (day === daysInMonth) {
+                  // 마지막 날짜인 경우, 다음 근무자의 1일로 이동
+                  if (empIdx < activeEmployees.length - 1) {
+                      nextDay = 1;
+                      nextEmpIdx = empIdx + 1;
+                  } else {
+                      // 마지막 근무자의 마지막 날짜인 경우 이동하지 않음
+                      nextDay = day;
+                      nextEmpIdx = empIdx;
+                  }
+              } else {
+                  nextDay = Math.min(day + 1, daysInMonth);
+              }
             } else if (e.key === 'ArrowUp') {
               e.preventDefault();
               nextDay = Math.max(day - 1, 1);
@@ -863,7 +921,7 @@
                 <div className="p-4 border-b flex justify-between items-center bg-gray-50 rounded-t-xl shrink-0">
                   <div>
                     <h3 className="text-lg font-bold text-gray-800">{year}년 {month}월 근무시간 일괄 입력</h3>
-                    <p className="text-xs text-gray-500 mt-1">방향키, Tab, Enter를 이용해 셀을 이동하세요. 빈칸은 0으로 자동 저장됩니다.</p>
+                    <p className="text-xs text-gray-500 mt-1">방향키, Tab, Enter를 이용해 셀을 이동하세요. 맨 아래칸에서 엔터를 누르면 다음 사람으로 넘어갑니다.</p>
                   </div>
                   <button onClick={onClose} className="p-2 hover:bg-gray-200 rounded-full"><X className="w-5 h-5"/></button>
                 </div>
@@ -1193,14 +1251,20 @@
               const [y, m] = key.split('-');
               if (parseInt(y) === selectedYear) {
                 const monthIdx = parseInt(m) - 1;
-                const days = monthlyData[key].days || {};
+                const monthObj = monthlyData[key] || {};
+                const days = monthObj.days || {};
                 
+                let dailySumRev = 0;
                 Object.values(days).forEach(day => {
-                  data[monthIdx].revenue += (day.revenue || 0) / 10000; 
+                  dailySumRev += (day.revenue || 0);
                   Object.values(day.entries || {}).forEach(entry => {
                     data[monthIdx].pay += (entry.pay || 0) / 10000;
                   });
                 });
+                
+                // 이번달 총매출이 기입되었으면 우선, 아니면 일별 매출 합산 사용
+                const effectiveRev = monthObj.totalRevenue > 0 ? monthObj.totalRevenue : dailySumRev;
+                data[monthIdx].revenue += effectiveRev / 10000;
               }
             });
             return data;
@@ -1211,47 +1275,52 @@
 
           // 원형 차트 연산: 특정 월
           const pieMonthData = useMemo(() => {
-            let rev = 0, pay = 0;
-            const days = monthlyData[pieMonth]?.days || {};
-            Object.values(days).forEach(day => {
-              rev += (day.revenue || 0);
+            let dailyRevSum = 0, pay = 0;
+            const monthObj = monthlyData[pieMonth] || { days: {} };
+            Object.values(monthObj.days).forEach(day => {
+              dailyRevSum += (day.revenue || 0);
               Object.values(day.entries || {}).forEach(entry => {
                 pay += (entry.pay || 0);
               });
             });
-            return { revenue: rev, pay: pay };
+            const effectiveRev = monthObj.totalRevenue > 0 ? monthObj.totalRevenue : dailyRevSum;
+            return { revenue: effectiveRev, pay: pay };
           }, [monthlyData, pieMonth]);
 
           // 원형 차트 연산: 특정 년도
           const pieYearData = useMemo(() => {
-            let rev = 0, pay = 0;
+            let totalEffectiveRev = 0, totalPay = 0;
             Object.keys(monthlyData).forEach(key => {
               if (key.startsWith(pieYear.toString())) {
-                const days = monthlyData[key].days || {};
-                Object.values(days).forEach(day => {
-                  rev += (day.revenue || 0);
+                const monthObj = monthlyData[key];
+                let dailyRevSum = 0;
+                Object.values(monthObj.days || {}).forEach(day => {
+                  dailyRevSum += (day.revenue || 0);
                   Object.values(day.entries || {}).forEach(entry => {
-                    pay += (entry.pay || 0);
+                    totalPay += (entry.pay || 0);
                   });
                 });
+                totalEffectiveRev += monthObj.totalRevenue > 0 ? monthObj.totalRevenue : dailyRevSum;
               }
             });
-            return { revenue: rev, pay: pay };
+            return { revenue: totalEffectiveRev, pay: totalPay };
           }, [monthlyData, pieYear]);
 
           // 원형 차트 연산: 전체 누적
           const pieTotalData = useMemo(() => {
-            let rev = 0, pay = 0;
+            let totalEffectiveRev = 0, totalPay = 0;
             Object.keys(monthlyData).forEach(key => {
-              const days = monthlyData[key].days || {};
-              Object.values(days).forEach(day => {
-                rev += (day.revenue || 0);
-                Object.values(day.entries || {}).forEach(entry => {
-                  pay += (entry.pay || 0);
+                const monthObj = monthlyData[key];
+                let dailyRevSum = 0;
+                Object.values(monthObj.days || {}).forEach(day => {
+                  dailyRevSum += (day.revenue || 0);
+                  Object.values(day.entries || {}).forEach(entry => {
+                    totalPay += (entry.pay || 0);
+                  });
                 });
-              });
+                totalEffectiveRev += monthObj.totalRevenue > 0 ? monthObj.totalRevenue : dailyRevSum;
             });
-            return { revenue: rev, pay: pay };
+            return { revenue: totalEffectiveRev, pay: totalPay };
           }, [monthlyData]);
 
           return (

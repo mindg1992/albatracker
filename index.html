@@ -36,8 +36,9 @@
             -moz-appearance: textfield;
         }
 
-        /* 월 선택 입력칸의 기본 'X(삭제)' 버튼 숨김 */
-        input[type="month"]::-webkit-clear-button {
+        /* 월 선택 입력칸의 기본 'X(삭제)' 버튼 숨김 (입력칸 내부) */
+        input[type="month"]::-webkit-clear-button,
+        input[type="month"]::-webkit-inner-spin-button {
             display: none;
             -webkit-appearance: none;
         }
@@ -690,6 +691,7 @@
                     type="month"
                     value={`${year}-${month.toString().padStart(2, '0')}`}
                     onChange={handleMonthChange}
+                    required
                     className="text-lg md:text-2xl font-bold text-gray-800 bg-transparent border-none cursor-pointer focus:ring-2 focus:ring-green-500 rounded px-2 outline-none"
                   />
                   <button onClick={nextMonth} className="p-2 hover:bg-gray-100 rounded-full transition"><ChevronRight className="w-5 h-5 md:w-6 md:h-6" /></button>
@@ -1142,6 +1144,7 @@
                   type="month"
                   value={`${year}-${month.toString().padStart(2, '0')}`}
                   onChange={handleMonthChange}
+                  required
                   className="text-xl font-bold text-gray-800 bg-transparent border-none cursor-pointer focus:ring-2 focus:ring-green-500 rounded px-2 outline-none text-center"
                 />
                 <button onClick={nextMonth} className="p-2 hover:bg-gray-100 rounded-full transition"><ChevronRight /></button>
@@ -1422,6 +1425,7 @@
                       type="month" 
                       value={pieMonth} 
                       onChange={e => setPieMonth(e.target.value)}
+                      required
                       className="font-bold text-gray-800 bg-white border border-gray-200 cursor-pointer focus:ring-2 focus:ring-green-500 rounded-lg px-3 py-1 outline-none text-center shadow-sm w-full"
                     />
                   </DonutGauge>

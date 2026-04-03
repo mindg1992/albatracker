@@ -81,17 +81,38 @@
         const getDaysInMonth = (year, month) => new Date(year, month, 0).getDate();
         const getFirstDayOfMonth = (year, month) => new Date(year, month - 1, 1).getDay();
 
+        // LocalStorage 로드 유틸리티
+        const loadData = (key, defaultVal) => {
+            try {
+                const saved = localStorage.getItem(key);
+                if (saved !== null) {
+                    return JSON.parse(saved);
+                }
+            } catch (e) {
+                console.error(`로컬스토리지 로드 에러 (${key}):`, e);
+            }
+            return defaultVal;
+        };
+
         // --- 메인 애플리케이션 컴포넌트 ---
         function AlbaTracker() {
           const [isAuthenticated, setIsAuthenticated] = useState(false);
-          const [appPin, setAppPin] = useState(INITIAL_PIN);
-          const [activeTab, setActiveTab] = useState('employees');
           
-          const [employees, setEmployees] = useState([]);
-          const [nextEmpId, setNextEmpId] = useState(1);
+          // 초기 로딩 시 로컬스토리지에서 값 불러오기
+          const [appPin, setAppPin] = useState(() => loadData('albaTracker_appPin', INITIAL_PIN));
+          const [activeTab, setActiveTab] = useState('employees');
+          const [employees, setEmployees] = useState(() => loadData('albaTracker_employees', []));
+          const [nextEmpId, setNextEmpId] = useState(() => loadData('albaTracker_nextEmpId', 1));
           // monthlyData format: 'YYYY-MM': { totalRevenue?: number, days: { 1: { revenue: 0, entries: { empId: { hours, pay, name, wage } } } } }
-          const [monthlyData, setMonthlyData] = useState({}); 
-          const [globalMinWage, setGlobalMinWage] = useState(MIN_WAGE);
+          const [monthlyData, setMonthlyData] = useState(() => loadData('albaTracker_monthlyData', {})); 
+          const [globalMinWage, setGlobalMinWage] = useState(() => loadData('albaTracker_globalMinWage', MIN_WAGE));
+
+          // 값이 변경될 때마다 로컬스토리지에 자동 저장
+          useEffect(() => { localStorage.setItem('albaTracker_appPin', JSON.stringify(appPin)); }, [appPin]);
+          useEffect(() => { localStorage.setItem('albaTracker_employees', JSON.stringify(employees)); }, [employees]);
+          useEffect(() => { localStorage.setItem('albaTracker_nextEmpId', JSON.stringify(nextEmpId)); }, [nextEmpId]);
+          useEffect(() => { localStorage.setItem('albaTracker_monthlyData', JSON.stringify(monthlyData)); }, [monthlyData]);
+          useEffect(() => { localStorage.setItem('albaTracker_globalMinWage', JSON.stringify(globalMinWage)); }, [globalMinWage]);
 
           // 동적 구분번호 매기기: 최초입사일(hireDate) 빠른 순서대로 정렬하여 displayId 부여
           const employeesWithDisplayId = useMemo(() => {

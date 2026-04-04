@@ -220,7 +220,8 @@
           const [employees, setEmployees] = useState(() => loadData('albaTracker_employees', []));
           const [nextEmpId, setNextEmpId] = useState(() => loadData('albaTracker_nextEmpId', 1));
           // monthlyData format: 'YYYY-MM': { totalRevenue?: number, days: { 1: { revenue: 0, entries: { empId: { hours, pay, name, wage } } } } }
-          const [monthlyData, setMonthlyData] = useState(() => loadData('albaTracker_monthlyData', {})); 
+          const [monthlyData, setMonthlyData] = useState(() => loadData('albaTracker_monthlyData', {}));
+          const [predictData, setPredictData] = useState(() => loadData('albaTracker_predictData', {}));
           const [globalMinWage, setGlobalMinWage] = useState(() => loadData('albaTracker_globalMinWage', MIN_WAGE));
 
           // 값이 변경될 때마다 로컬스토리지에 자동 저장
@@ -228,6 +229,7 @@
           useEffect(() => { localStorage.setItem('albaTracker_employees', JSON.stringify(employees)); }, [employees]);
           useEffect(() => { localStorage.setItem('albaTracker_nextEmpId', JSON.stringify(nextEmpId)); }, [nextEmpId]);
           useEffect(() => { localStorage.setItem('albaTracker_monthlyData', JSON.stringify(monthlyData)); }, [monthlyData]);
+          useEffect(() => { localStorage.setItem('albaTracker_predictData', JSON.stringify(predictData)); }, [predictData]);
           useEffect(() => { localStorage.setItem('albaTracker_globalMinWage', JSON.stringify(globalMinWage)); }, [globalMinWage]);
 
           // 동적 구분번호 매기기: 최초입사일(hireDate) 빠른 순서대로 정렬하여 displayId 부여
@@ -378,6 +380,7 @@
                     { id: 'calendar', label: '월별 근무현황', icon: CalendarIcon },
                     { id: 'payroll', label: '인건비 지급', icon: Wallet },
                     { id: 'chart', label: '인건비 차트', icon: BarChart3 },
+                    { id: 'predict', label: '주휴수당 예측', icon: Search },
                     { id: 'settings', label: '비밀번호 설정', icon: Settings },
                   ].map(tab => (
                     <button
@@ -423,6 +426,13 @@
                 )}
                 {activeTab === 'chart' && (
                   <TabChart monthlyData={monthlyData} employees={employeesWithDisplayId} />
+                )}
+                {activeTab === 'predict' && (
+                  <TabPredict
+                    employees={employeesWithDisplayId}
+                    predictData={predictData}
+                    setPredictData={setPredictData}
+                  />
                 )}
                 {activeTab === 'settings' && (
                   <TabSettings 
@@ -725,13 +735,13 @@
 
           return (
             <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
-              <div className="bg-white rounded-xl shadow-xl w-full max-w-md overflow-hidden">
-                <div className="flex justify-between items-center p-4 border-b">
+              <div className="bg-white rounded-xl shadow-xl w-full max-w-md max-h-[90vh] flex flex-col overflow-hidden">
+                <div className="flex justify-between items-center p-4 border-b flex-shrink-0">
                   <h3 className="text-lg font-bold">근무자 정보 {employee ? '수정' : '입력'}</h3>
                   <button type="button" onClick={onClose} className="text-gray-500 hover:bg-gray-100 p-1 rounded-full"><X className="w-5 h-5"/></button>
                 </div>
-                
-                <form onSubmit={handleSubmit} className="p-4 space-y-4">
+
+                <form onSubmit={handleSubmit} className="p-4 space-y-3 overflow-y-auto flex-1">
                   <div className="grid grid-cols-2 gap-4">
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">구분번호</label>
@@ -897,10 +907,16 @@
             });
           }
 
+          // 이번달 주휴수당 합산
+          const totalMonthHolidayPay = Object.entries(holidayPayBySunday)
+            .filter(([s]) => { const [sy, sm] = s.split('-').map(Number); return sy === year && sm === month; })
+            .reduce((sum, [, wd]) => sum + wd.reduce((s, h) => s + h.holidayPay, 0), 0);
+          const totalMonthGrandPay = totalMonthPay + totalMonthHolidayPay;
+
           // 총매출 입력값이 있으면 우선 반영, 없으면 일별 매출 총합 반영
           const explicitTotalRevenue = currentMonthData.totalRevenue || 0;
           const effectiveRevenue = explicitTotalRevenue > 0 ? explicitTotalRevenue : sumOfDailyRevenue;
-          const payRatio = effectiveRevenue > 0 ? ((totalMonthPay / effectiveRevenue) * 100).toFixed(1) : 0;
+          const payRatio = effectiveRevenue > 0 ? ((totalMonthGrandPay / effectiveRevenue) * 100).toFixed(1) : 0;
 
           return (
             <div className="space-y-4">
@@ -927,8 +943,16 @@
                     />
                     <span className="text-sm text-gray-500 font-medium whitespace-nowrap">원</span>
                   </div>
-                  <div className="bg-green-50 text-green-800 px-4 py-2 rounded-lg font-medium border border-green-200 text-center w-full xl:w-auto whitespace-nowrap shrink-0">
-                    총 인건비: {formatCurrency(totalMonthPay)} <span className="text-xs text-green-600 ml-1">(매출 대비 {payRatio}%)</span>
+                  <div className="flex flex-col sm:flex-row gap-2 w-full xl:w-auto shrink-0">
+                    <div className="bg-green-50 text-green-800 px-3 py-2 rounded-lg font-medium border border-green-200 text-center whitespace-nowrap text-sm">
+                      순수 급여: {formatCurrency(totalMonthPay)}
+                    </div>
+                    <div className="bg-blue-50 text-blue-800 px-3 py-2 rounded-lg font-medium border border-blue-200 text-center whitespace-nowrap text-sm">
+                      주휴수당: {formatCurrency(totalMonthHolidayPay)}
+                    </div>
+                    <div className="bg-purple-50 text-purple-800 px-3 py-2 rounded-lg font-bold border border-purple-200 text-center whitespace-nowrap text-sm">
+                      총 급여: {formatCurrency(totalMonthGrandPay)} <span className="text-xs font-normal text-purple-600">({payRatio}%)</span>
+                    </div>
                   </div>
                   <button 
                     onClick={() => setIsBulkInputOpen(true)}
@@ -1782,6 +1806,207 @@
                     </div>
                   </DonutGauge>
                 </div>
+              </div>
+            </div>
+          );
+        }
+
+        // ==========================================
+        // 주휴수당 예측 탭 (독립 데이터, 근무 중인 직원만 연동)
+        // ==========================================
+        function TabPredict({ employees, predictData, setPredictData }) {
+          const [currentDate, setCurrentDate] = useState(new Date());
+          const [isBulkInputOpen, setIsBulkInputOpen] = useState(false);
+          const [editDayModal, setEditDayModal] = useState(null);
+
+          const year = currentDate.getFullYear();
+          const month = currentDate.getMonth() + 1;
+          const monthKey = `${year}-${month.toString().padStart(2, '0')}`;
+
+          const currentMonthData = predictData[monthKey] || { days: {} };
+          const activeEmployees = employees
+            .filter(e => (e.status || (e.isWorking === false ? 'resigned' : 'working')) === 'working')
+            .sort((a, b) => a.displayId - b.displayId);
+
+          const prevMonth = () => setCurrentDate(new Date(year, month - 2, 1));
+          const nextMonth = () => setCurrentDate(new Date(year, month, 1));
+
+          useEffect(() => {
+            const handleKeyDown = (e) => {
+              if (isBulkInputOpen || editDayModal) return;
+              if (['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) return;
+              if (e.key === 'ArrowLeft') prevMonth();
+              if (e.key === 'ArrowRight') nextMonth();
+            };
+            window.addEventListener('keydown', handleKeyDown);
+            return () => window.removeEventListener('keydown', handleKeyDown);
+          }, [year, month, isBulkInputOpen, editDayModal]);
+
+          const handleDeleteDay = (dayToDel) => {
+            if (window.confirm(`${year}년 ${month}월 ${dayToDel}일의 예측 정보를 정말 삭제하시겠습니까?`)) {
+              setPredictData(prev => {
+                const newData = { ...prev };
+                if (newData[monthKey]?.days) {
+                  const updatedDays = { ...newData[monthKey].days };
+                  delete updatedDays[dayToDel];
+                  newData[monthKey] = { ...newData[monthKey], days: updatedDays };
+                }
+                return newData;
+              });
+            }
+          };
+
+          const holidayPayBySunday = useMemo(() => calcHolidayPayBySunday(predictData, employees), [predictData, employees]);
+
+          let totalMonthPay = 0;
+          const daysInMonth = getDaysInMonth(year, month);
+          const firstDay = getFirstDayOfMonth(year, month);
+          const calendarDays = [];
+
+          for (let i = 0; i < firstDay; i++) calendarDays.push(null);
+          for (let d = 1; d <= daysInMonth; d++) {
+            calendarDays.push(d);
+            Object.values((currentMonthData.days[d] || {}).entries || {}).forEach(entry => {
+              totalMonthPay += (entry.pay || 0);
+            });
+          }
+
+          const totalMonthHolidayPay = Object.entries(holidayPayBySunday)
+            .filter(([s]) => { const [sy, sm] = s.split('-').map(Number); return sy === year && sm === month; })
+            .reduce((sum, [, wd]) => sum + wd.reduce((s, h) => s + h.holidayPay, 0), 0);
+
+          return (
+            <div className="space-y-4">
+              {/* 상단 헤더 */}
+              <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200 flex flex-col xl:flex-row justify-between items-start xl:items-center gap-4">
+                <div className="flex items-center gap-2 md:gap-4 shrink-0">
+                  <button onClick={prevMonth} className="p-2 hover:bg-gray-100 rounded-full transition"><ChevronLeft className="w-5 h-5 md:w-6 md:h-6" /></button>
+                  <MonthYearSelector year={year} month={month} onChange={(y, m) => setCurrentDate(new Date(y, m - 1, 1))} />
+                  <button onClick={nextMonth} className="p-2 hover:bg-gray-100 rounded-full transition"><ChevronRight className="w-5 h-5 md:w-6 md:h-6" /></button>
+                </div>
+
+                <div className="flex flex-col sm:flex-row gap-2 items-center w-full xl:w-auto shrink-0">
+                  <div className="bg-amber-50 text-amber-700 px-3 py-1.5 rounded-lg text-xs font-medium border border-amber-200 whitespace-nowrap">
+                    예측 모드 — 실제 데이터와 무관
+                  </div>
+                  <div className="bg-green-50 text-green-800 px-3 py-2 rounded-lg font-medium border border-green-200 text-center whitespace-nowrap text-sm">
+                    순수 급여: {formatCurrency(totalMonthPay)}
+                  </div>
+                  <div className="bg-blue-50 text-blue-800 px-3 py-2 rounded-lg font-medium border border-blue-200 text-center whitespace-nowrap text-sm">
+                    주휴수당: {formatCurrency(totalMonthHolidayPay)}
+                  </div>
+                  <div className="bg-purple-50 text-purple-800 px-3 py-2 rounded-lg font-bold border border-purple-200 text-center whitespace-nowrap text-sm">
+                    예측 총 급여: {formatCurrency(totalMonthPay + totalMonthHolidayPay)}
+                  </div>
+                  <button
+                    onClick={() => setIsBulkInputOpen(true)}
+                    className="w-full xl:w-auto bg-gray-800 text-white px-5 py-2.5 rounded-lg hover:bg-gray-900 transition flex items-center justify-center gap-2 shadow-sm whitespace-nowrap shrink-0"
+                  >
+                    <Edit2 className="w-4 h-4" />
+                    이번달 근무시간 입력
+                  </button>
+                </div>
+              </div>
+
+              {/* 달력 */}
+              <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+                <div className="grid grid-cols-7 bg-gray-50 border-b border-gray-200">
+                  {['일', '월', '화', '수', '목', '금', '토'].map((day, i) => (
+                    <div key={day} className={`text-center py-2 text-sm font-bold ${i === 0 ? 'text-red-500' : i === 6 ? 'text-blue-500' : 'text-gray-600'}`}>
+                      {day}
+                    </div>
+                  ))}
+                </div>
+
+                <div className="grid grid-cols-7 auto-rows-fr">
+                  {calendarDays.map((day, idx) => {
+                    if (!day) return <div key={`ep-${idx}`} className="min-h-[120px] border-b border-r border-gray-100 bg-gray-50/50"></div>;
+
+                    const dayData = currentMonthData.days[day] || { entries: {} };
+                    let dailyTotalPay = 0;
+                    const activeEntries = [];
+                    Object.values(dayData.entries || {}).forEach(entry => {
+                      if (entry.hours > 0) { dailyTotalPay += entry.pay; activeEntries.push(entry); }
+                    });
+
+                    const isSunday = idx % 7 === 0;
+                    const sundayKey = isSunday
+                      ? `${year}-${month.toString().padStart(2, '0')}-${day.toString().padStart(2, '0')}`
+                      : null;
+                    const holidayEntries = sundayKey ? (holidayPayBySunday[sundayKey] || []) : [];
+
+                    return (
+                      <div key={`epd-${day}`} className="min-h-[140px] border-b border-r border-gray-100 p-2 relative group hover:bg-yellow-50/50 transition">
+                        <div className="flex justify-between items-start mb-1">
+                          <span className={`text-sm font-bold w-6 h-6 flex items-center justify-center rounded-full ${idx % 7 === 0 ? 'text-red-500' : idx % 7 === 6 ? 'text-blue-500' : 'text-gray-700'}`}>
+                            {day}
+                          </span>
+                          <div className="opacity-0 group-hover:opacity-100 flex gap-1 transition">
+                            <button onClick={() => setEditDayModal(day)} className="text-xs bg-gray-100 hover:bg-gray-200 text-gray-600 px-2 py-1 rounded">수정</button>
+                            <button onClick={() => handleDeleteDay(day)} className="text-xs bg-red-50 hover:bg-red-100 text-red-500 px-1.5 py-1 rounded flex items-center justify-center" title="삭제">
+                              <X className="w-3 h-3" />
+                            </button>
+                          </div>
+                        </div>
+                        <div className="space-y-1 mt-2">
+                          <div className="text-[10px] md:text-xs text-gray-600 overflow-hidden">
+                            {activeEntries.slice(0, 3).map((e, i) => (
+                              <div key={i} className="truncate">{e.name}: {e.hours}H</div>
+                            ))}
+                            {activeEntries.length > 3 && <div className="text-gray-400 italic">+{activeEntries.length - 3}명...</div>}
+                          </div>
+                          {dailyTotalPay > 0 && (
+                            <div className="mt-2 pt-1 border-t border-gray-100 border-dashed">
+                              <div className="text-[10px] md:text-xs font-semibold text-green-700">예측 인건비: {formatCurrency(dailyTotalPay)}</div>
+                            </div>
+                          )}
+                          {holidayEntries.length > 0 && (
+                            <div className="mt-1 pt-1 border-t border-blue-100 border-dashed">
+                              <div className="text-[10px] font-bold text-blue-600 mb-0.5">주휴수당 예측</div>
+                              {holidayEntries.map((h, i) => (
+                                <div key={i} className="text-[10px] text-blue-500 truncate">
+                                  {h.name}: {formatCurrency(h.holidayPay)}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {isBulkInputOpen && (
+                <BulkInputModal
+                  year={year} month={month} monthKey={monthKey} daysInMonth={daysInMonth}
+                  activeEmployees={activeEmployees}
+                  monthlyData={predictData}
+                  setMonthlyData={setPredictData}
+                  onClose={() => setIsBulkInputOpen(false)}
+                />
+              )}
+              {editDayModal && (
+                <DailyEditModal
+                  year={year} month={month} day={editDayModal} monthKey={monthKey}
+                  activeEmployees={activeEmployees}
+                  monthlyData={predictData}
+                  setMonthlyData={setPredictData}
+                  onClose={() => setEditDayModal(null)}
+                />
+              )}
+
+              <div className="flex justify-end mt-2">
+                <button
+                  onClick={() => {
+                    if (window.confirm(`${year}년 ${month}월 예측 정보를 정말 초기화하시겠습니까?`)) {
+                      setPredictData(prev => { const nd = { ...prev }; delete nd[monthKey]; return nd; });
+                    }
+                  }}
+                  className="text-sm bg-red-50 text-red-600 hover:bg-red-100 px-4 py-2 rounded-lg transition border border-red-200"
+                >
+                  이번달 예측 초기화
+                </button>
               </div>
             </div>
           );

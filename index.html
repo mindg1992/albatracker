@@ -239,6 +239,20 @@
           useEffect(() => { localStorage.setItem('albaTracker_predictData', JSON.stringify(predictData)); }, [predictData]);
           useEffect(() => { localStorage.setItem('albaTracker_globalMinWage', JSON.stringify(globalMinWage)); }, [globalMinWage]);
 
+          // 새로고침/탭 닫기 직전에 최신 상태를 localStorage에 강제 저장
+          useEffect(() => {
+            const handleBeforeUnload = () => {
+              localStorage.setItem('albaTracker_appPin', JSON.stringify(appPin));
+              localStorage.setItem('albaTracker_employees', JSON.stringify(employees));
+              localStorage.setItem('albaTracker_nextEmpId', JSON.stringify(nextEmpId));
+              localStorage.setItem('albaTracker_monthlyData', JSON.stringify(monthlyData));
+              localStorage.setItem('albaTracker_predictData', JSON.stringify(predictData));
+              localStorage.setItem('albaTracker_globalMinWage', JSON.stringify(globalMinWage));
+            };
+            window.addEventListener('beforeunload', handleBeforeUnload);
+            return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+          }, [appPin, employees, nextEmpId, monthlyData, predictData, globalMinWage]);
+
           // 동적 구분번호 매기기: 최초입사일(hireDate) 빠른 순서대로 정렬하여 displayId 부여
           const employeesWithDisplayId = useMemo(() => {
             return [...employees].sort((a, b) => {
@@ -257,6 +271,7 @@
               version: "1.0",
               employees, // 내부 ID 유지한 채 백업
               monthlyData,
+              predictData,
               nextEmpId,
               appPin,
               globalMinWage
@@ -292,6 +307,7 @@
                 if (importedData.employees && importedData.monthlyData) {
                   setEmployees(importedData.employees);
                   setMonthlyData(importedData.monthlyData);
+                  if (importedData.predictData) setPredictData(importedData.predictData);
                   if (importedData.nextEmpId) setNextEmpId(importedData.nextEmpId);
                   if (importedData.appPin) setAppPin(importedData.appPin);
                   if (importedData.globalMinWage) setGlobalMinWage(importedData.globalMinWage);

@@ -927,47 +927,48 @@
 
           return (
             <div className="space-y-4">
-              <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200 flex flex-col xl:flex-row justify-between items-start xl:items-center gap-4">
-                <div className="flex items-center gap-2 md:gap-4 shrink-0">
-                  <button onClick={prevMonth} className="p-2 hover:bg-gray-100 rounded-full transition"><ChevronLeft className="w-5 h-5 md:w-6 md:h-6" /></button>
-                  <MonthYearSelector 
-                    year={year} 
-                    month={month} 
-                    onChange={(y, m) => setCurrentDate(new Date(y, m - 1, 1))} 
-                  />
-                  <button onClick={nextMonth} className="p-2 hover:bg-gray-100 rounded-full transition"><ChevronRight className="w-5 h-5 md:w-6 md:h-6" /></button>
-                </div>
-
-                <div className="flex flex-col xl:flex-row items-center gap-4 text-sm md:text-base w-full xl:w-auto">
-                  <div className="flex items-center gap-2 bg-white border border-gray-300 rounded-lg px-3 py-2 shadow-sm w-full xl:w-auto shrink-0">
-                    <label className="text-sm font-medium text-gray-700 whitespace-nowrap">이번달 총매출:</label>
-                    <input 
-                      type="number"
-                      value={currentMonthData.totalRevenue ?? ''}
-                      onChange={handleTotalRevenueChange}
-                      placeholder={sumOfDailyRevenue > 0 ? sumOfDailyRevenue.toString() : '0'}
-                      className="w-full xl:w-28 border-none focus:ring-0 text-sm text-right outline-none bg-transparent p-0"
+              <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200 space-y-3">
+                {/* 1행: 월 네비게이션 + 근무시간 입력 버튼 */}
+                <div className="flex justify-between items-center">
+                  <div className="flex items-center gap-2 md:gap-4">
+                    <button onClick={prevMonth} className="p-2 hover:bg-gray-100 rounded-full transition"><ChevronLeft className="w-5 h-5 md:w-6 md:h-6" /></button>
+                    <MonthYearSelector
+                      year={year}
+                      month={month}
+                      onChange={(y, m) => setCurrentDate(new Date(y, m - 1, 1))}
                     />
-                    <span className="text-sm text-gray-500 font-medium whitespace-nowrap">원</span>
+                    <button onClick={nextMonth} className="p-2 hover:bg-gray-100 rounded-full transition"><ChevronRight className="w-5 h-5 md:w-6 md:h-6" /></button>
                   </div>
-                  <div className="flex flex-col sm:flex-row gap-2 w-full xl:w-auto shrink-0">
-                    <div className="bg-green-50 text-green-800 px-3 py-2 rounded-lg font-medium border border-green-200 text-center whitespace-nowrap text-sm">
-                      순수 급여: {formatCurrency(totalMonthPay)}
-                    </div>
-                    <div className="bg-blue-50 text-blue-800 px-3 py-2 rounded-lg font-medium border border-blue-200 text-center whitespace-nowrap text-sm">
-                      주휴수당: {formatCurrency(totalMonthHolidayPay)}
-                    </div>
-                    <div className="bg-purple-50 text-purple-800 px-3 py-2 rounded-lg font-bold border border-purple-200 text-center whitespace-nowrap text-sm">
-                      총 급여: {formatCurrency(totalMonthGrandPay)} <span className="text-xs font-normal text-purple-600">({payRatio}%)</span>
-                    </div>
-                  </div>
-                  <button 
+                  <button
                     onClick={() => setIsBulkInputOpen(true)}
-                    className="w-full xl:w-auto bg-gray-800 text-white px-5 py-2.5 rounded-lg hover:bg-gray-900 transition flex items-center justify-center gap-2 shadow-sm whitespace-nowrap shrink-0"
+                    className="bg-gray-800 text-white px-4 py-2 rounded-lg hover:bg-gray-900 transition flex items-center gap-2 shadow-sm text-sm whitespace-nowrap"
                   >
                     <Edit2 className="w-4 h-4" />
                     이번달 근무시간 입력
                   </button>
+                </div>
+                {/* 2행: 총매출 + 급여 요약 배지 (자동 줄바꿈) */}
+                <div className="flex flex-wrap gap-2 items-center">
+                  <div className="flex items-center gap-2 bg-white border border-gray-300 rounded-lg px-3 py-2 shadow-sm text-sm">
+                    <label className="font-medium text-gray-700 whitespace-nowrap">이번달 총매출:</label>
+                    <input
+                      type="number"
+                      value={currentMonthData.totalRevenue ?? ''}
+                      onChange={handleTotalRevenueChange}
+                      placeholder={sumOfDailyRevenue > 0 ? sumOfDailyRevenue.toString() : '0'}
+                      className="w-28 border-none focus:ring-0 text-sm text-right outline-none bg-transparent p-0"
+                    />
+                    <span className="text-gray-500 font-medium whitespace-nowrap">원</span>
+                  </div>
+                  <div className="bg-green-50 text-green-800 px-3 py-2 rounded-lg font-medium border border-green-200 whitespace-nowrap text-sm">
+                    순수 급여: {formatCurrency(totalMonthPay)}
+                  </div>
+                  <div className="bg-blue-50 text-blue-800 px-3 py-2 rounded-lg font-medium border border-blue-200 whitespace-nowrap text-sm">
+                    주휴수당: {formatCurrency(totalMonthHolidayPay)}
+                  </div>
+                  <div className="bg-purple-50 text-purple-800 px-3 py-2 rounded-lg font-bold border border-purple-200 whitespace-nowrap text-sm">
+                    총 급여: {formatCurrency(totalMonthGrandPay)} <span className="text-xs font-normal text-purple-600">({payRatio}%)</span>
+                  </div>
                 </div>
               </div>
 

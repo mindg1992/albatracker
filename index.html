@@ -97,13 +97,22 @@
 
         // --- 주휴수당 계산 유틸리티 ---
         // 반환: { 'YYYY-MM-DD(일요일)': [{ empId, name, weeklyHours, holidayPay }] }
+        // ※ toISOString()은 UTC 기준이라 UTC+9 환경에서 날짜가 밀리므로
+        //    new Date(y, m-1, d) 로컬 생성 + 로컬 문자열 변환 사용
         function calcHolidayPayBySunday(monthlyData, employees) {
+          const toLocalStr = (date) => {
+            const y = date.getFullYear();
+            const m = (date.getMonth() + 1).toString().padStart(2, '0');
+            const d = date.getDate().toString().padStart(2, '0');
+            return `${y}-${m}-${d}`;
+          };
+
           // 1) 전체 날짜별 근무 데이터 수집
           const allDateEntries = {}; // 'YYYY-MM-DD' -> { empId: { hours, wage, name } }
           Object.entries(monthlyData).forEach(([mk, monthData]) => {
             const [y, m] = mk.split('-').map(Number);
             Object.entries(monthData.days || {}).forEach(([day, dayData]) => {
-              const dateStr = `${y}-${m.toString().padStart(2, '0')}-${parseInt(day).toString().padStart(2, '0')}`;
+              const dateStr = toLocalStr(new Date(y, m - 1, parseInt(day)));
               const empData = {};
               Object.entries(dayData.entries || {}).forEach(([empId, entry]) => {
                 if (entry.hours > 0) empData[empId] = { hours: entry.hours, wage: entry.wage, name: entry.name };
@@ -112,29 +121,27 @@
             });
           });
 
-          // 2) 데이터가 있는 날짜들이 속한 주(週)의 일요일 수집
+          // 2) 각 날짜가 속한 주(월~일)의 일요일을 계산하여 수집
+          //    월요일(dow=1)~토요일(dow=6) → 그 주 일요일(+daysToSunday)
+          //    일요일(dow=0) → 해당 날이 주의 마지막날이므로 그대로
           const weekSundays = new Set();
           Object.keys(allDateEntries).forEach(dateStr => {
-            const date = new Date(dateStr + 'T00:00:00');
+            const [y, m, d] = dateStr.split('-').map(Number);
+            const date = new Date(y, m - 1, d); // 로컬 날짜
             const dow = date.getDay(); // 0=일, 1=월 ... 6=토
             const daysToSunday = dow === 0 ? 0 : 7 - dow;
-            const sunday = new Date(date);
-            sunday.setDate(date.getDate() + daysToSunday);
-            weekSundays.add(sunday.toISOString().split('T')[0]);
+            weekSundays.add(toLocalStr(new Date(y, m - 1, d + daysToSunday)));
           });
 
           // 3) 각 주(월~일) 근무시간 합산 → 15시간 이상이면 주휴수당 계산
           const result = {};
           weekSundays.forEach(sundayStr => {
-            const sunday = new Date(sundayStr + 'T00:00:00');
-            const monday = new Date(sunday);
-            monday.setDate(sunday.getDate() - 6);
+            const [sy, sm, sd] = sundayStr.split('-').map(Number);
 
             const empWeekly = {}; // empId -> { hours, wage, name }
             for (let i = 0; i < 7; i++) {
-              const d = new Date(monday);
-              d.setDate(monday.getDate() + i);
-              const dk = d.toISOString().split('T')[0];
+              // i=0: 월(sunday-6) ... i=6: 일(sunday)
+              const dk = toLocalStr(new Date(sy, sm - 1, sd - 6 + i));
               Object.entries(allDateEntries[dk] || {}).forEach(([empId, data]) => {
                 if (!empWeekly[empId]) {
                   const emp = employees.find(e => e.id.toString() === empId);

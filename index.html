@@ -95,6 +95,67 @@
             return defaultVal;
         };
 
+        // --- 주휴수당 계산 유틸리티 ---
+        // 반환: { 'YYYY-MM-DD(일요일)': [{ empId, name, weeklyHours, holidayPay }] }
+        function calcHolidayPayBySunday(monthlyData, employees) {
+          // 1) 전체 날짜별 근무 데이터 수집
+          const allDateEntries = {}; // 'YYYY-MM-DD' -> { empId: { hours, wage, name } }
+          Object.entries(monthlyData).forEach(([mk, monthData]) => {
+            const [y, m] = mk.split('-').map(Number);
+            Object.entries(monthData.days || {}).forEach(([day, dayData]) => {
+              const dateStr = `${y}-${m.toString().padStart(2, '0')}-${parseInt(day).toString().padStart(2, '0')}`;
+              const empData = {};
+              Object.entries(dayData.entries || {}).forEach(([empId, entry]) => {
+                if (entry.hours > 0) empData[empId] = { hours: entry.hours, wage: entry.wage, name: entry.name };
+              });
+              if (Object.keys(empData).length > 0) allDateEntries[dateStr] = empData;
+            });
+          });
+
+          // 2) 데이터가 있는 날짜들이 속한 주(週)의 일요일 수집
+          const weekSundays = new Set();
+          Object.keys(allDateEntries).forEach(dateStr => {
+            const date = new Date(dateStr + 'T00:00:00');
+            const dow = date.getDay(); // 0=일, 1=월 ... 6=토
+            const daysToSunday = dow === 0 ? 0 : 7 - dow;
+            const sunday = new Date(date);
+            sunday.setDate(date.getDate() + daysToSunday);
+            weekSundays.add(sunday.toISOString().split('T')[0]);
+          });
+
+          // 3) 각 주(월~일) 근무시간 합산 → 15시간 이상이면 주휴수당 계산
+          const result = {};
+          weekSundays.forEach(sundayStr => {
+            const sunday = new Date(sundayStr + 'T00:00:00');
+            const monday = new Date(sunday);
+            monday.setDate(sunday.getDate() - 6);
+
+            const empWeekly = {}; // empId -> { hours, wage, name }
+            for (let i = 0; i < 7; i++) {
+              const d = new Date(monday);
+              d.setDate(monday.getDate() + i);
+              const dk = d.toISOString().split('T')[0];
+              Object.entries(allDateEntries[dk] || {}).forEach(([empId, data]) => {
+                if (!empWeekly[empId]) {
+                  const emp = employees.find(e => e.id.toString() === empId);
+                  empWeekly[empId] = { hours: 0, wage: emp?.wage || data.wage || MIN_WAGE, name: data.name };
+                }
+                empWeekly[empId].hours += data.hours;
+              });
+            }
+
+            const weekResults = [];
+            Object.entries(empWeekly).forEach(([empId, { hours, wage, name }]) => {
+              if (hours >= 15) {
+                weekResults.push({ empId, name, weeklyHours: hours, holidayPay: Math.round((hours / 5) * wage) });
+              }
+            });
+            if (weekResults.length > 0) result[sundayStr] = weekResults;
+          });
+
+          return result;
+        }
+
         // --- 공통 연/월 직접입력 컴포넌트 ---
         function MonthYearSelector({ year, month, onChange }) {
           const [y, setY] = useState(year);
@@ -242,21 +303,28 @@
           }
 
           const getEmployeeStats = (empId) => {
-            let totalDays = 0;
-            let totalHours = 0;
-            let totalPay = 0;
+            let totalDays = 0, totalHours = 0, totalPay = 0;
 
             Object.values(monthlyData).forEach(monthData => {
               Object.values(monthData.days || {}).forEach(dayData => {
-                if (dayData.entries && dayData.entries[empId] && dayData.entries[empId].hours > 0) {
+                const entry = dayData.entries?.[empId];
+                if (entry && entry.hours > 0) {
                   totalDays++;
-                  totalHours += dayData.entries[empId].hours;
-                  totalPay += dayData.entries[empId].pay;
+                  totalHours += entry.hours;
+                  totalPay += entry.pay;
                 }
               });
             });
 
-            return { totalDays, totalHours, totalPay };
+            const holidayBySunday = calcHolidayPayBySunday(monthlyData, employees);
+            let totalHolidayPay = 0;
+            Object.values(holidayBySunday).forEach(weekData => {
+              weekData.forEach(item => {
+                if (item.empId === empId.toString()) totalHolidayPay += item.holidayPay;
+              });
+            });
+
+            return { totalDays, totalHours, totalPay, totalHolidayPay };
           };
 
           return (
@@ -354,7 +422,7 @@
                   />
                 )}
                 {activeTab === 'chart' && (
-                  <TabChart monthlyData={monthlyData} />
+                  <TabChart monthlyData={monthlyData} employees={employeesWithDisplayId} />
                 )}
                 {activeTab === 'settings' && (
                   <TabSettings 
@@ -552,6 +620,7 @@
 
                         <div className="space-y-1.5 text-sm text-gray-600 mb-4">
                           <p><span className="font-medium inline-block w-16">입사일:</span> {emp.hireDate || '-'}</p>
+                          {emp.resignDate && <p><span className="font-medium inline-block w-16">퇴사일:</span> <span className="text-red-500">{emp.resignDate}</span></p>}
                           <p><span className="font-medium inline-block w-16">시급:</span> {formatCurrency(emp.wage)}</p>
                           <p>
                             <span className="font-medium text-gray-700">일주일 소정근로일:</span>{' '}
@@ -567,19 +636,33 @@
                           {emp.memo && <p className="truncate text-gray-500 bg-gray-50 p-2 rounded mt-2 text-xs">{emp.memo}</p>}
                         </div>
 
-                        <div className="pt-3 border-t border-gray-100 flex justify-between text-xs text-gray-500 bg-gray-50 -mx-5 -mb-5 p-4 rounded-b-xl">
-                          <div className="text-center">
-                            <div className="font-semibold text-gray-800">{stats.totalDays}일</div>
-                            <div>총 근무일</div>
+                        <div className="pt-3 border-t border-gray-100 bg-gray-50 -mx-5 -mb-5 p-4 rounded-b-xl">
+                          <div className="grid grid-cols-3 gap-2 text-xs text-gray-500 text-center mb-2">
+                            <div>
+                              <div className="font-semibold text-gray-800">{stats.totalDays}일</div>
+                              <div>총 근무일</div>
+                            </div>
+                            <div>
+                              <div className="font-semibold text-gray-800">{stats.totalHours}H</div>
+                              <div>총 근무시간</div>
+                            </div>
+                            <div>
+                              <div className="font-semibold text-green-600">{formatCurrency(stats.totalPay)}</div>
+                              <div>총 급여</div>
+                            </div>
                           </div>
-                          <div className="text-center">
-                            <div className="font-semibold text-gray-800">{stats.totalHours}H</div>
-                            <div>총 근무시간</div>
-                          </div>
-                          <div className="text-center">
-                            <div className="font-semibold text-green-600">{formatCurrency(stats.totalPay)}</div>
-                            <div>총 급여</div>
-                          </div>
+                          {stats.totalHolidayPay > 0 && (
+                            <div className="grid grid-cols-2 gap-2 text-xs text-center border-t border-gray-200 pt-2 mt-1">
+                              <div>
+                                <div className="font-semibold text-blue-600">{formatCurrency(stats.totalHolidayPay)}</div>
+                                <div className="text-gray-500">주휴수당</div>
+                              </div>
+                              <div>
+                                <div className="font-semibold text-purple-600">{formatCurrency(stats.totalPay + stats.totalHolidayPay)}</div>
+                                <div className="text-gray-500">주휴포함 급여</div>
+                              </div>
+                            </div>
+                          )}
                         </div>
                       </div>
                     );
@@ -606,7 +689,7 @@
                 ? (employee.status || (employee.isWorking === false ? 'resigned' : 'working'))
                 : 'working';
             
-            return employee ? { scheduledDays: '', dailyHours: '', ...employee, status: initialStatus } : {
+            return employee ? { scheduledDays: '', dailyHours: '', resignDate: '', ...employee, status: initialStatus } : {
               id: nextId,
               name: '',
               hireDate: new Date().toISOString().split('T')[0],
@@ -616,6 +699,7 @@
               bank: '',
               account: '',
               memo: '',
+              resignDate: '',
               status: initialStatus
             };
           });
@@ -718,6 +802,12 @@
                         <span className="ml-1.5 text-sm font-medium text-gray-700">퇴사</span>
                       </label>
                     </div>
+                    {formData.status === 'resigned' && (
+                      <div className="mt-3">
+                        <label className="block text-sm font-medium text-gray-700 mb-1">퇴사일</label>
+                        <input type="date" name="resignDate" value={formData.resignDate || ''} onChange={handleChange} className="w-full border border-red-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-red-400 outline-none bg-white" />
+                      </div>
+                    )}
                     <p className="text-xs text-gray-500 mt-2">* 휴직 및 퇴사 상태일 경우 월별 현황 입력에서 제외됩니다.</p>
                   </div>
 
@@ -785,6 +875,9 @@
               });
             }
           };
+
+          // 이번달 일요일별 주휴수당 계산
+          const holidayPayBySunday = useMemo(() => calcHolidayPayBySunday(monthlyData, employees), [monthlyData, employees]);
 
           let totalMonthPay = 0;
           let sumOfDailyRevenue = 0;
@@ -859,19 +952,26 @@
                 <div className="grid grid-cols-7 auto-rows-fr">
                   {calendarDays.map((day, idx) => {
                     if (!day) return <div key={`empty-${idx}`} className="min-h-[120px] border-b border-r border-gray-100 bg-gray-50/50"></div>;
-                    
+
                     const dayData = currentMonthData.days[day] || { entries: {}, revenue: 0 };
                     let dailyTotalPay = 0;
                     const activeEntries = [];
-                    
+
                     Object.values(dayData.entries || {}).forEach(entry => {
                       if (entry.hours > 0) {
                         dailyTotalPay += entry.pay;
                         activeEntries.push(entry);
                       }
                     });
-                    
+
                     const dailyRatio = dayData.revenue > 0 ? ((dailyTotalPay / dayData.revenue) * 100).toFixed(0) : 0;
+
+                    // 일요일이면 이 주의 주휴수당 확인
+                    const isSunday = idx % 7 === 0;
+                    const sundayKey = isSunday
+                      ? `${year}-${month.toString().padStart(2, '0')}-${day.toString().padStart(2, '0')}`
+                      : null;
+                    const holidayEntries = sundayKey ? (holidayPayBySunday[sundayKey] || []) : [];
 
                     return (
                       <div key={`day-${day}`} className="min-h-[140px] border-b border-r border-gray-100 p-2 relative group hover:bg-yellow-50/50 transition">
@@ -880,13 +980,13 @@
                             {day}
                           </span>
                           <div className="opacity-0 group-hover:opacity-100 flex gap-1 transition">
-                            <button 
+                            <button
                               onClick={() => setEditDayModal(day)}
                               className="text-xs bg-gray-100 hover:bg-gray-200 text-gray-600 px-2 py-1 rounded"
                             >
                               수정
                             </button>
-                            <button 
+                            <button
                               onClick={() => handleDeleteDay(day)}
                               className="text-xs bg-red-50 hover:bg-red-100 text-red-500 px-1.5 py-1 rounded flex items-center justify-center"
                               title="삭제"
@@ -903,7 +1003,7 @@
                             ))}
                             {activeEntries.length > 3 && <div className="text-gray-400 italic">+{activeEntries.length - 3}명...</div>}
                           </div>
-                          
+
                           {dailyTotalPay > 0 && (
                             <div className="mt-2 pt-1 border-t border-gray-100 border-dashed">
                               <div className="text-[10px] md:text-xs font-semibold text-green-700">인건비: {formatCurrency(dailyTotalPay)}</div>
@@ -911,6 +1011,17 @@
                               {dayData.revenue > 0 && (
                                 <div className="text-[10px] font-medium text-gray-400 mt-0.5">비율: {dailyRatio}%</div>
                               )}
+                            </div>
+                          )}
+
+                          {holidayEntries.length > 0 && (
+                            <div className="mt-1 pt-1 border-t border-blue-100 border-dashed">
+                              <div className="text-[10px] font-bold text-blue-600 mb-0.5">주휴수당 발생</div>
+                              {holidayEntries.map((h, i) => (
+                                <div key={i} className="text-[10px] text-blue-500 truncate">
+                                  {h.name}: {formatCurrency(h.holidayPay)}
+                                </div>
+                              ))}
                             </div>
                           )}
                         </div>
@@ -1277,13 +1388,14 @@
                   const currentEmp = employees.find(e => e.id.toString() === empId);
                   list[empId] = {
                     id: empId,
-                    displayId: currentEmp ? currentEmp.displayId : 99999, // 퇴사자/삭제된 근무자는 리스트 하단으로
+                    displayId: currentEmp ? currentEmp.displayId : 99999,
                     name: data.name,
                     account: currentEmp?.account || '정보 없음',
                     bank: currentEmp?.bank || '-',
-                    wage: currentEmp?.wage || data.wage || MIN_WAGE, // 시급 추가
+                    wage: currentEmp?.wage || data.wage || MIN_WAGE,
                     totalPay: 0,
-                    totalHours: 0
+                    totalHours: 0,
+                    holidayPay: 0
                   };
                 }
                 list[empId].totalPay += data.pay;
@@ -1291,10 +1403,34 @@
               });
             });
 
-            return Object.values(list).sort((a, b) => a.displayId - b.displayId);
-          }, [monthKey, monthlyData, employees]);
+            // 이번달 일요일 기준 주휴수당 합산
+            const holidayBySunday = calcHolidayPayBySunday(monthlyData, employees);
+            Object.entries(holidayBySunday).forEach(([sundayStr, weekData]) => {
+              const [sy, sm] = sundayStr.split('-').map(Number);
+              if (sy !== year || sm !== month) return;
+              weekData.forEach(({ empId, holidayPay, name }) => {
+                if (!list[empId]) {
+                  const currentEmp = employees.find(e => e.id.toString() === empId);
+                  list[empId] = {
+                    id: empId,
+                    displayId: currentEmp ? currentEmp.displayId : 99999,
+                    name: name,
+                    account: currentEmp?.account || '정보 없음',
+                    bank: currentEmp?.bank || '-',
+                    wage: currentEmp?.wage || MIN_WAGE,
+                    totalPay: 0,
+                    totalHours: 0,
+                    holidayPay: 0
+                  };
+                }
+                list[empId].holidayPay += holidayPay;
+              });
+            });
 
-          const grandTotal = payrollList.reduce((sum, item) => sum + item.totalPay, 0);
+            return Object.values(list).sort((a, b) => a.displayId - b.displayId);
+          }, [monthKey, monthlyData, employees, year, month]);
+
+          const grandTotal = payrollList.reduce((sum, item) => sum + item.totalPay + item.holidayPay, 0);
 
           return (
             <div className="space-y-4 max-w-5xl mx-auto">
@@ -1321,7 +1457,9 @@
                         <th className="p-4 font-semibold text-gray-600">계좌번호</th>
                         <th className="p-4 font-semibold text-gray-600 text-right">시급</th>
                         <th className="p-4 font-semibold text-gray-600 text-right">이번달 근무시간</th>
-                        <th className="p-4 font-semibold text-gray-600 text-right">{month}월 총 급여</th>
+                        <th className="p-4 font-semibold text-gray-600 text-right">순수 급여</th>
+                        <th className="p-4 font-semibold text-blue-600 text-right">주휴수당</th>
+                        <th className="p-4 font-semibold text-purple-600 text-right">{month}월 총 지급액</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-100">
@@ -1333,16 +1471,22 @@
                         payrollList.map(item => (
                           <tr key={item.id} className="hover:bg-gray-50 transition">
                             <td className="p-4 text-gray-600">
-                                {item.displayId === 99999 ? '- (삭제됨)' : `No. ${item.displayId}`}
+                              {item.displayId === 99999 ? '- (삭제됨)' : `No. ${item.displayId}`}
                             </td>
                             <td className="p-4 font-medium text-gray-800">{item.name}</td>
                             <td className="p-4 text-gray-600">{item.bank}</td>
                             <td className="p-4 text-gray-600 font-mono text-sm">{item.account}</td>
                             <td className="p-4 text-right text-gray-600">{formatCurrency(item.wage)}</td>
                             <td className="p-4 text-right text-gray-600">{item.totalHours}H</td>
-                            <td className="p-4 text-right font-bold text-green-600 flex flex-col items-end justify-center gap-1">
-                              <span className="text-[11px] text-gray-400 font-normal leading-none">{formatCurrency(item.wage)} × {item.totalHours}H =</span>
-                              <span className="leading-none">{formatCurrency(item.totalPay)}</span>
+                            <td className="p-4 text-right font-bold text-green-600">
+                              <div className="text-[11px] text-gray-400 font-normal">{formatCurrency(item.wage)} × {item.totalHours}H</div>
+                              <div>{formatCurrency(item.totalPay)}</div>
+                            </td>
+                            <td className="p-4 text-right font-bold text-blue-600">
+                              {item.holidayPay > 0 ? formatCurrency(item.holidayPay) : <span className="text-gray-300 font-normal">-</span>}
+                            </td>
+                            <td className="p-4 text-right font-bold text-purple-700">
+                              {formatCurrency(item.totalPay + item.holidayPay)}
                             </td>
                           </tr>
                         ))
@@ -1351,8 +1495,8 @@
                     {payrollList.length > 0 && (
                       <tfoot className="bg-gray-50 border-t-2 border-gray-200">
                         <tr>
-                          <td colSpan="6" className="p-4 text-right font-bold text-gray-700">총 지급 예정액</td>
-                          <td className="p-4 text-right font-bold text-xl text-green-700">{formatCurrency(grandTotal)}</td>
+                          <td colSpan="8" className="p-4 text-right font-bold text-gray-700">총 지급 예정액</td>
+                          <td className="p-4 text-right font-bold text-xl text-purple-700">{formatCurrency(grandTotal)}</td>
                         </tr>
                       </tfoot>
                     )}
@@ -1364,10 +1508,11 @@
         }
 
         // --- 도넛 차트 (원형 차트) 컴포넌트 ---
-        function DonutGauge({ revenue, pay, children }) {
-          const ratio = revenue > 0 ? (pay / revenue) * 100 : 0;
+        function DonutGauge({ revenue, pay, holidayPay = 0, children }) {
+          const totalPay = pay + holidayPay;
+          const ratio = revenue > 0 ? (totalPay / revenue) * 100 : 0;
           const displayRatio = ratio.toFixed(1);
-          const dash = Math.min(ratio, 100); // 100%까지만 채워지도록
+          const dash = Math.min(ratio, 100);
 
           return (
             <div className="flex flex-col items-center bg-gray-50 p-5 rounded-xl border border-gray-200 shadow-sm w-full">
@@ -1376,18 +1521,16 @@
               </div>
               <div className="relative w-32 h-32 flex items-center justify-center mb-4">
                 <svg viewBox="0 0 36 36" className="w-full h-full transform -rotate-90 drop-shadow-sm">
-                  {/* 전체 매출 배경 원 (노란색) */}
                   <circle cx="18" cy="18" r="15.915" fill="transparent" stroke="#fef08a" strokeWidth="3" />
-                  {/* 인건비 부분 원 (초록색) */}
-                  {revenue > 0 && pay > 0 && (
-                    <circle 
-                      cx="18" cy="18" r="15.915" 
-                      fill="transparent" 
-                      stroke="#22c55e" 
-                      strokeWidth="3.5" 
-                      strokeDasharray={`${dash} ${100 - dash}`} 
-                      strokeDashoffset="0" 
-                      strokeLinecap="round" 
+                  {revenue > 0 && totalPay > 0 && (
+                    <circle
+                      cx="18" cy="18" r="15.915"
+                      fill="transparent"
+                      stroke="#22c55e"
+                      strokeWidth="3.5"
+                      strokeDasharray={`${dash} ${100 - dash}`}
+                      strokeDashoffset="0"
+                      strokeLinecap="round"
                       className="transition-all duration-1000 ease-out"
                     />
                   )}
@@ -1406,12 +1549,16 @@
                   <span className="text-gray-500 font-medium text-xs">인건비</span>
                   <span className="font-bold text-green-600">{formatCurrency(pay)}</span>
                 </div>
+                <div className="flex justify-between items-center bg-white px-3 py-1.5 rounded-lg border border-gray-100">
+                  <span className="text-gray-500 font-medium text-xs">주휴수당</span>
+                  <span className="font-bold text-blue-600">{formatCurrency(holidayPay)}</span>
+                </div>
               </div>
             </div>
           );
         }
 
-        function TabChart({ monthlyData }) {
+        function TabChart({ monthlyData, employees }) {
           const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
           
           // 원형 차트를 위한 독립적인 상태
@@ -1429,15 +1576,15 @@
 
           // 막대 차트 데이터 연산
           const chartData = useMemo(() => {
-            const data = Array.from({ length: 12 }, (_, i) => ({ month: i + 1, revenue: 0, pay: 0 }));
-            
+            const data = Array.from({ length: 12 }, (_, i) => ({ month: i + 1, revenue: 0, pay: 0, holidayPay: 0 }));
+
             Object.keys(monthlyData).forEach(key => {
               const [y, m] = key.split('-');
               if (parseInt(y) === selectedYear) {
                 const monthIdx = parseInt(m) - 1;
                 const monthObj = monthlyData[key] || {};
                 const days = monthObj.days || {};
-                
+
                 let dailySumRev = 0;
                 Object.values(days).forEach(day => {
                   dailySumRev += (day.revenue || 0);
@@ -1445,17 +1592,31 @@
                     data[monthIdx].pay += (entry.pay || 0) / 10000;
                   });
                 });
-                
-                // 이번달 총매출이 기입되었으면 우선, 아니면 일별 매출 합산 사용
+
                 const effectiveRev = monthObj.totalRevenue > 0 ? monthObj.totalRevenue : dailySumRev;
                 data[monthIdx].revenue += effectiveRev / 10000;
               }
             });
-            return data;
-          }, [monthlyData, selectedYear]);
 
-          const maxValue = Math.max(...chartData.map(d => Math.max(d.revenue, d.pay)), 100); 
+            // 주휴수당: 일요일 기준으로 해당 연도 월별 합산
+            const holidayBySunday = calcHolidayPayBySunday(monthlyData, employees);
+            Object.entries(holidayBySunday).forEach(([sundayStr, weekData]) => {
+              const [sy, sm] = sundayStr.split('-').map(Number);
+              if (sy !== selectedYear) return;
+              const monthIdx = sm - 1;
+              weekData.forEach(({ holidayPay }) => {
+                data[monthIdx].holidayPay += holidayPay / 10000;
+              });
+            });
+
+            return data;
+          }, [monthlyData, employees, selectedYear]);
+
+          const maxValue = Math.max(...chartData.map(d => Math.max(d.revenue, d.pay, d.holidayPay)), 100);
           const yTicks = [0, maxValue * 0.25, maxValue * 0.5, maxValue * 0.75, maxValue];
+
+          // 주휴수당 전체 (pieMonth/Year/Total 계산에 재사용)
+          const allHolidayBySunday = useMemo(() => calcHolidayPayBySunday(monthlyData, employees), [monthlyData, employees]);
 
           // 원형 차트 연산: 특정 월
           const pieMonthData = useMemo(() => {
@@ -1463,13 +1624,15 @@
             const monthObj = monthlyData[pieMonth] || { days: {} };
             Object.values(monthObj.days).forEach(day => {
               dailyRevSum += (day.revenue || 0);
-              Object.values(day.entries || {}).forEach(entry => {
-                pay += (entry.pay || 0);
-              });
+              Object.values(day.entries || {}).forEach(entry => { pay += (entry.pay || 0); });
             });
             const effectiveRev = monthObj.totalRevenue > 0 ? monthObj.totalRevenue : dailyRevSum;
-            return { revenue: effectiveRev, pay: pay };
-          }, [monthlyData, pieMonth]);
+            let holidayPay = 0;
+            Object.entries(allHolidayBySunday).forEach(([sundayStr, weekData]) => {
+              if (sundayStr.startsWith(pieMonth)) weekData.forEach(h => { holidayPay += h.holidayPay; });
+            });
+            return { revenue: effectiveRev, pay, holidayPay };
+          }, [monthlyData, pieMonth, allHolidayBySunday]);
 
           // 원형 차트 연산: 특정 년도
           const pieYearData = useMemo(() => {
@@ -1480,32 +1643,33 @@
                 let dailyRevSum = 0;
                 Object.values(monthObj.days || {}).forEach(day => {
                   dailyRevSum += (day.revenue || 0);
-                  Object.values(day.entries || {}).forEach(entry => {
-                    totalPay += (entry.pay || 0);
-                  });
+                  Object.values(day.entries || {}).forEach(entry => { totalPay += (entry.pay || 0); });
                 });
                 totalEffectiveRev += monthObj.totalRevenue > 0 ? monthObj.totalRevenue : dailyRevSum;
               }
             });
-            return { revenue: totalEffectiveRev, pay: totalPay };
-          }, [monthlyData, pieYear]);
+            let holidayPay = 0;
+            Object.entries(allHolidayBySunday).forEach(([sundayStr, weekData]) => {
+              if (sundayStr.startsWith(pieYear.toString())) weekData.forEach(h => { holidayPay += h.holidayPay; });
+            });
+            return { revenue: totalEffectiveRev, pay: totalPay, holidayPay };
+          }, [monthlyData, pieYear, allHolidayBySunday]);
 
           // 원형 차트 연산: 전체 누적
           const pieTotalData = useMemo(() => {
             let totalEffectiveRev = 0, totalPay = 0;
             Object.keys(monthlyData).forEach(key => {
-                const monthObj = monthlyData[key];
-                let dailyRevSum = 0;
-                Object.values(monthObj.days || {}).forEach(day => {
-                  dailyRevSum += (day.revenue || 0);
-                  Object.values(day.entries || {}).forEach(entry => {
-                    totalPay += (entry.pay || 0);
-                  });
-                });
-                totalEffectiveRev += monthObj.totalRevenue > 0 ? monthObj.totalRevenue : dailyRevSum;
+              const monthObj = monthlyData[key];
+              let dailyRevSum = 0;
+              Object.values(monthObj.days || {}).forEach(day => {
+                dailyRevSum += (day.revenue || 0);
+                Object.values(day.entries || {}).forEach(entry => { totalPay += (entry.pay || 0); });
+              });
+              totalEffectiveRev += monthObj.totalRevenue > 0 ? monthObj.totalRevenue : dailyRevSum;
             });
-            return { revenue: totalEffectiveRev, pay: totalPay };
-          }, [monthlyData]);
+            const holidayPay = Object.values(allHolidayBySunday).flat().reduce((s, h) => s + h.holidayPay, 0);
+            return { revenue: totalEffectiveRev, pay: totalPay, holidayPay };
+          }, [monthlyData, allHolidayBySunday]);
 
           return (
             <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200 max-w-5xl mx-auto space-y-8">
@@ -1527,6 +1691,7 @@
                 <div className="flex justify-end gap-6 mb-4 text-sm font-medium">
                   <div className="flex items-center gap-2"><div className="w-3 h-3 bg-yellow-400 rounded"></div>매출</div>
                   <div className="flex items-center gap-2"><div className="w-3 h-3 bg-green-500 rounded"></div>인건비</div>
+                  <div className="flex items-center gap-2"><div className="w-3 h-3 bg-blue-400 rounded"></div>주휴수당</div>
                 </div>
 
                 <div className="relative h-72 w-full mt-4">
@@ -1543,24 +1708,33 @@
                     {chartData.map((d) => {
                       const revHeight = `${(d.revenue / maxValue) * 100}%`;
                       const payHeight = `${(d.pay / maxValue) * 100}%`;
-                      
+                      const holidayHeight = `${(d.holidayPay / maxValue) * 100}%`;
+
                       return (
                         <div key={d.month} className="relative flex flex-col items-center h-full justify-end group w-12">
-                          <div className="flex items-end gap-1 w-full justify-center h-full pb-1">
-                            <div 
-                              style={{ height: revHeight }} 
-                              className="w-4 bg-yellow-400 rounded-t-sm transition-all duration-500 hover:bg-yellow-500 relative"
+                          <div className="flex items-end gap-0.5 w-full justify-center h-full pb-1">
+                            <div
+                              style={{ height: revHeight }}
+                              className="w-3 bg-yellow-400 rounded-t-sm transition-all duration-500 hover:bg-yellow-500 relative"
                             >
                               <div className="absolute -top-6 left-1/2 -translate-x-1/2 opacity-0 group-hover:opacity-100 text-[10px] bg-black text-white px-1.5 py-0.5 rounded pointer-events-none whitespace-nowrap z-10">
                                 매출 {Math.round(d.revenue).toLocaleString()}만원
                               </div>
                             </div>
-                            <div 
-                              style={{ height: payHeight }} 
-                              className="w-4 bg-green-500 rounded-t-sm transition-all duration-500 hover:bg-green-600 relative"
+                            <div
+                              style={{ height: payHeight }}
+                              className="w-3 bg-green-500 rounded-t-sm transition-all duration-500 hover:bg-green-600 relative"
                             >
                               <div className="absolute -top-12 left-1/2 -translate-x-1/2 opacity-0 group-hover:opacity-100 text-[10px] bg-green-800 text-white px-1.5 py-0.5 rounded pointer-events-none whitespace-nowrap z-10">
                                 인건비 {Math.round(d.pay).toLocaleString()}만원
+                              </div>
+                            </div>
+                            <div
+                              style={{ height: holidayHeight }}
+                              className="w-3 bg-blue-400 rounded-t-sm transition-all duration-500 hover:bg-blue-500 relative"
+                            >
+                              <div className="absolute -top-12 left-1/2 -translate-x-1/2 opacity-0 group-hover:opacity-100 text-[10px] bg-blue-800 text-white px-1.5 py-0.5 rounded pointer-events-none whitespace-nowrap z-10">
+                                주휴수당 {Math.round(d.holidayPay * 10000).toLocaleString()}원
                               </div>
                             </div>
                           </div>
@@ -1580,7 +1754,7 @@
                 <h3 className="text-lg font-bold text-gray-800 mb-4 px-1">매출 대비 인건비 비율 (도넛 차트)</h3>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   {/* 왼쪽: 월별 선택 */}
-                  <DonutGauge revenue={pieMonthData.revenue} pay={pieMonthData.pay}>
+                  <DonutGauge revenue={pieMonthData.revenue} pay={pieMonthData.pay} holidayPay={pieMonthData.holidayPay}>
                     <input 
                       type="month" 
                       value={pieMonth} 
@@ -1591,7 +1765,7 @@
                   </DonutGauge>
 
                   {/* 가운데: 연도별 선택 */}
-                  <DonutGauge revenue={pieYearData.revenue} pay={pieYearData.pay}>
+                  <DonutGauge revenue={pieYearData.revenue} pay={pieYearData.pay} holidayPay={pieYearData.holidayPay}>
                     <select 
                       value={pieYear} 
                       onChange={e => setPieYear(parseInt(e.target.value))}
@@ -1602,7 +1776,7 @@
                   </DonutGauge>
 
                   {/* 오른쪽: 전체 누적 합산 */}
-                  <DonutGauge revenue={pieTotalData.revenue} pay={pieTotalData.pay}>
+                  <DonutGauge revenue={pieTotalData.revenue} pay={pieTotalData.pay} holidayPay={pieTotalData.holidayPay}>
                     <div className="font-bold text-gray-800 bg-gray-200/50 border border-transparent rounded-lg px-3 py-1 text-center w-full">
                       전체 누적 비율
                     </div>

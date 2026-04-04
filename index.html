@@ -1423,7 +1423,8 @@
                     wage: currentEmp?.wage || data.wage || MIN_WAGE,
                     totalPay: 0,
                     totalHours: 0,
-                    holidayPay: 0
+                    holidayPay: 0,
+                    holidayWeeks: []
                   };
                 }
                 list[empId].totalPay += data.pay;
@@ -1448,10 +1449,12 @@
                     wage: currentEmp?.wage || MIN_WAGE,
                     totalPay: 0,
                     totalHours: 0,
-                    holidayPay: 0
+                    holidayPay: 0,
+                    holidayWeeks: []
                   };
                 }
                 list[empId].holidayPay += holidayPay;
+                list[empId].holidayWeeks.push({ weeklyHours, holidayPay });
               });
             });
 
@@ -1511,7 +1514,24 @@
                               <div>{formatCurrency(item.totalPay)}</div>
                             </td>
                             <td className="p-4 text-right font-bold text-blue-600">
-                              {item.holidayPay > 0 ? formatCurrency(item.holidayPay) : <span className="text-gray-300 font-normal">-</span>}
+                              {item.holidayPay > 0 ? (
+                                <>
+                                  {item.holidayWeeks.length === 1 ? (
+                                    <div className="text-[11px] text-gray-400 font-normal">
+                                      {formatCurrency(item.wage)} × {item.holidayWeeks[0].weeklyHours}H÷5
+                                    </div>
+                                  ) : (
+                                    <div className="text-[11px] text-gray-400 font-normal">
+                                      {item.holidayWeeks.map((w, i) => (
+                                        <div key={i}>{i + 1}주: {formatCurrency(item.wage)} × {w.weeklyHours}H÷5</div>
+                                      ))}
+                                    </div>
+                                  )}
+                                  <div>{formatCurrency(item.holidayPay)}</div>
+                                </>
+                              ) : (
+                                <span className="text-gray-300 font-normal">-</span>
+                              )}
                             </td>
                             <td className="p-4 text-right font-bold text-purple-700">
                               {formatCurrency(item.totalPay + item.holidayPay)}

@@ -1437,7 +1437,7 @@
             Object.entries(holidayBySunday).forEach(([sundayStr, weekData]) => {
               const [sy, sm] = sundayStr.split('-').map(Number);
               if (sy !== year || sm !== month) return;
-              weekData.forEach(({ empId, holidayPay, name }) => {
+              weekData.forEach(({ empId, holidayPay, name, weeklyHours }) => {
                 if (!list[empId]) {
                   const currentEmp = employees.find(e => e.id.toString() === empId);
                   list[empId] = {

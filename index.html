@@ -15,6 +15,9 @@
     <!-- Tailwind CSS (스타일링) -->
     <script src="https://cdn.tailwindcss.com"></script>
 
+    <!-- SheetJS (엑셀 파일 생성) -->
+    <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+
     <style>
         /* 가로 스크롤바 숨김 처리 */
         .no-scrollbar::-webkit-scrollbar {
@@ -69,6 +72,7 @@
         const CheckCircle2 = ({className}) => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></svg>;
         const AlertCircle = ({className}) => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/></svg>;
         const Download = ({className}) => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>;
+        const FileSpreadsheet = ({className}) => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/><line x1="8" x2="16" y1="13" y2="13"/><line x1="8" x2="16" y1="17" y2="17"/><line x1="8" x2="10" y1="9" y2="9"/></svg>;
         const Upload = ({className}) => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/></svg>;
 
         // --- 전역 설정 및 유틸리티 ---
@@ -1479,18 +1483,68 @@
 
           const grandTotal = payrollList.reduce((sum, item) => sum + item.totalPay + item.holidayPay, 0);
 
+          const handleExcelDownload = () => {
+            const rows = [
+              [`${year}년 ${month}월 인건비 지급 내역`],
+              [],
+              ['구분번호', '이름', '은행명', '계좌번호', '시급(원)', '근무시간(H)', '순수급여(원)', '주휴수당(원)', '총지급액(원)']
+            ];
+
+            payrollList.forEach(item => {
+              rows.push([
+                item.displayId === 99999 ? '삭제됨' : `No. ${item.displayId}`,
+                item.name,
+                item.bank,
+                item.account,
+                item.wage,
+                item.totalHours,
+                item.totalPay,
+                item.holidayPay,
+                item.totalPay + item.holidayPay
+              ]);
+            });
+
+            rows.push([]);
+            rows.push(['', '', '', '', '', '', '', '총 지급 예정액', grandTotal]);
+
+            const ws = XLSX.utils.aoa_to_sheet(rows);
+
+            // 열 너비 설정
+            ws['!cols'] = [
+              { wch: 12 }, { wch: 10 }, { wch: 10 }, { wch: 20 },
+              { wch: 12 }, { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 14 }
+            ];
+
+            // 제목 행 병합
+            ws['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 8 } }];
+
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, `${year}-${String(month).padStart(2,'0')}`);
+            XLSX.writeFile(wb, `알바트래커_인건비_${year}${String(month).padStart(2,'0')}.xlsx`);
+          };
+
           return (
             <div className="space-y-4 max-w-5xl mx-auto">
-              <div className="flex justify-center items-center bg-white p-4 rounded-xl shadow-sm border border-gray-200">
+              <div className="flex justify-center items-center bg-white p-4 rounded-xl shadow-sm border border-gray-200 gap-4">
                 <div className="flex items-center gap-2 md:gap-4 shrink-0">
                   <button onClick={prevMonth} className="p-2 hover:bg-gray-100 rounded-full transition"><ChevronLeft className="w-5 h-5 md:w-6 md:h-6" /></button>
-                  <MonthYearSelector 
-                    year={year} 
-                    month={month} 
-                    onChange={(y, m) => setCurrentDate(new Date(y, m - 1, 1))} 
+                  <MonthYearSelector
+                    year={year}
+                    month={month}
+                    onChange={(y, m) => setCurrentDate(new Date(y, m - 1, 1))}
                   />
                   <button onClick={nextMonth} className="p-2 hover:bg-gray-100 rounded-full transition"><ChevronRight className="w-5 h-5 md:w-6 md:h-6" /></button>
                 </div>
+                {payrollList.length > 0 && (
+                  <button
+                    onClick={handleExcelDownload}
+                    className="flex items-center gap-1.5 text-sm bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-2 rounded-lg transition shadow-sm whitespace-nowrap"
+                    title="엑셀로 다운로드"
+                  >
+                    <FileSpreadsheet className="w-4 h-4" />
+                    엑셀 다운로드
+                  </button>
+                )}
               </div>
 
               <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">

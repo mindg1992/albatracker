@@ -1537,33 +1537,37 @@
 
         // --- 도넛 차트 (원형 차트) 컴포넌트 ---
         function DonutGauge({ revenue, pay, holidayPay = 0, children }) {
-          const [hovered, setHovered] = React.useState(false);
+          const [hoveredSegment, setHoveredSegment] = React.useState(null); // null | 'pay' | 'holiday'
           const totalPay = pay + holidayPay;
-          const ratio = revenue > 0 ? (totalPay / revenue) * 100 : 0;
-          const payDash  = revenue > 0 ? Math.min((pay / revenue) * 100, 100) : 0;
-          const holDash  = revenue > 0 ? Math.min((holidayPay / revenue) * 100, Math.max(0, 100 - payDash)) : 0;
+          const ratio      = revenue > 0 ? (totalPay / revenue) * 100 : 0;
+          const payRatio   = revenue > 0 ? (pay / revenue) * 100 : 0;
+          const holRatio   = revenue > 0 ? (holidayPay / revenue) * 100 : 0;
+          const payDash    = revenue > 0 ? Math.min((pay / revenue) * 100, 100) : 0;
+          const holDash    = revenue > 0 ? Math.min((holidayPay / revenue) * 100, Math.max(0, 100 - payDash)) : 0;
 
           return (
             <div className="flex flex-col items-center bg-gray-50 p-5 rounded-xl border border-gray-200 shadow-sm w-full">
               <div className="mb-4 h-8 flex items-center justify-center w-full">
                 {children}
               </div>
-              <div
-                className="relative w-32 h-32 flex items-center justify-center mb-4 cursor-default"
-                onMouseEnter={() => setHovered(true)}
-                onMouseLeave={() => setHovered(false)}
-              >
+              <div className="relative w-32 h-32 flex items-center justify-center mb-4 cursor-default">
                 <svg viewBox="0 0 36 36" className="w-full h-full transform -rotate-90 drop-shadow-sm">
                   {/* 배경 원 (매출, 노란색) */}
                   <circle cx="18" cy="18" r="15.915" fill="transparent" stroke="#fef08a" strokeWidth="3" />
-                  {/* 인건비 호 (초록, 하단부터) */}
+                  {/* 인건비 호 (초록) */}
                   {revenue > 0 && pay > 0 && (
                     <circle
                       cx="18" cy="18" r="15.915"
-                      fill="transparent" stroke="#22c55e" strokeWidth="3.5"
+                      fill="transparent"
+                      stroke={hoveredSegment === 'pay' ? '#16a34a' : '#22c55e'}
+                      strokeWidth={hoveredSegment === 'pay' ? '4.5' : '3.5'}
                       strokeDasharray={`${payDash} ${100 - payDash}`}
                       strokeDashoffset="0"
                       strokeLinecap="butt"
+                      pointerEvents="visibleStroke"
+                      style={{cursor: 'pointer', transition: 'stroke 0.15s, stroke-width 0.15s'}}
+                      onMouseEnter={() => setHoveredSegment('pay')}
+                      onMouseLeave={() => setHoveredSegment(null)}
                       className="transition-all duration-1000 ease-out"
                     />
                   )}
@@ -1571,26 +1575,38 @@
                   {revenue > 0 && holidayPay > 0 && (
                     <circle
                       cx="18" cy="18" r="15.915"
-                      fill="transparent" stroke="#60a5fa" strokeWidth="3.5"
+                      fill="transparent"
+                      stroke={hoveredSegment === 'holiday' ? '#2563eb' : '#60a5fa'}
+                      strokeWidth={hoveredSegment === 'holiday' ? '4.5' : '3.5'}
                       strokeDasharray={`${holDash} ${100 - holDash}`}
                       strokeDashoffset={`${-payDash}`}
                       strokeLinecap="butt"
+                      pointerEvents="visibleStroke"
+                      style={{cursor: 'pointer', transition: 'stroke 0.15s, stroke-width 0.15s'}}
+                      onMouseEnter={() => setHoveredSegment('holiday')}
+                      onMouseLeave={() => setHoveredSegment(null)}
                       className="transition-all duration-1000 ease-out"
                     />
                   )}
                 </svg>
-                {/* 중앙 텍스트: 평소엔 비율, 호버시 상세 */}
-                <div className="absolute inset-0 flex flex-col items-center justify-center text-center px-1">
-                  {hovered && revenue > 0 ? (
+                {/* 중앙 텍스트: 기본 총인건비율, 호버시 해당 세그먼트 비율 */}
+                <div className="absolute inset-0 flex flex-col items-center justify-center text-center px-1 pointer-events-none">
+                  {hoveredSegment === 'pay' && revenue > 0 ? (
                     <>
-                      <span className="text-[10px] font-bold text-gray-700 leading-tight">매출 대비</span>
-                      <span className="text-lg font-bold text-purple-700 leading-tight">{ratio.toFixed(1)}%</span>
-                      <span className="text-[9px] text-gray-400 leading-tight">총 인건비율</span>
+                      <span className="text-[9px] font-bold text-green-700 leading-tight">순수인건비</span>
+                      <span className="text-lg font-bold text-green-600 leading-tight">{payRatio.toFixed(1)}%</span>
+                      <span className="text-[9px] text-gray-400 leading-tight">매출 대비</span>
+                    </>
+                  ) : hoveredSegment === 'holiday' && revenue > 0 ? (
+                    <>
+                      <span className="text-[9px] font-bold text-blue-600 leading-tight">주휴수당</span>
+                      <span className="text-lg font-bold text-blue-500 leading-tight">{holRatio.toFixed(1)}%</span>
+                      <span className="text-[9px] text-gray-400 leading-tight">매출 대비</span>
                     </>
                   ) : (
                     <>
                       <span className="text-xl font-bold text-gray-800">{ratio.toFixed(1)}%</span>
-                      <span className="text-[10px] text-gray-500 font-medium -mt-1">인건비율</span>
+                      <span className="text-[10px] text-gray-500 font-medium -mt-1">총인건비율</span>
                     </>
                   )}
                 </div>
@@ -1613,6 +1629,74 @@
                   <span className="font-bold text-purple-700">{formatCurrency(totalPay)}</span>
                 </div>
               </div>
+            </div>
+          );
+        }
+
+        function BarColumn({ d, maxValue }) {
+          const [hoveredBar, setHoveredBar] = React.useState(null); // null | 'revenue' | 'pay' | 'holiday'
+          const totalPay = d.pay + d.holidayPay;
+          const revH     = maxValue > 0 ? (d.revenue / maxValue) * 100 : 0;
+          const stackH   = maxValue > 0 ? (totalPay / maxValue) * 100 : 0;
+          const totalRatio = d.revenue > 0 ? ((totalPay / d.revenue) * 100).toFixed(1) : null;
+          const payRatio   = d.revenue > 0 ? ((d.pay / d.revenue) * 100).toFixed(1) : null;
+          const holRatio   = d.revenue > 0 ? ((d.holidayPay / d.revenue) * 100).toFixed(1) : null;
+          const fmt = v => Math.round(v * 10000).toLocaleString();
+
+          return (
+            <div
+              className="relative flex flex-col items-center h-full justify-end w-12"
+              onMouseLeave={() => setHoveredBar(null)}
+            >
+              {/* 툴팁 */}
+              {hoveredBar && (
+                <div className="absolute top-0 left-1/2 -translate-x-1/2 text-[10px] bg-gray-800 text-white px-2 py-1.5 rounded pointer-events-none whitespace-nowrap z-20 leading-relaxed shadow-lg">
+                  {hoveredBar === 'revenue' && (
+                    <>
+                      <div className="font-bold text-yellow-300">매출 {fmt(d.revenue)}원</div>
+                      {totalRatio && <div className="text-gray-300">총급여 매출 대비 {totalRatio}%</div>}
+                    </>
+                  )}
+                  {hoveredBar === 'pay' && (
+                    <>
+                      <div className="font-bold text-green-400">순수인건비 {fmt(d.pay)}원</div>
+                      {payRatio && <div className="text-gray-300">매출 대비 {payRatio}%</div>}
+                    </>
+                  )}
+                  {hoveredBar === 'holiday' && (
+                    <>
+                      <div className="font-bold text-blue-300">주휴수당 {fmt(d.holidayPay)}원</div>
+                      {holRatio && <div className="text-gray-300">매출 대비 {holRatio}%</div>}
+                    </>
+                  )}
+                </div>
+              )}
+              <div className="flex items-end gap-1 w-full justify-center h-full pb-1">
+                {/* 매출 바 */}
+                <div
+                  style={{ height: `${revH}%`, backgroundColor: hoveredBar === 'revenue' ? '#ca8a04' : '#facc15' }}
+                  className="w-4 rounded-t-sm cursor-pointer transition-colors duration-150"
+                  onMouseEnter={() => setHoveredBar('revenue')}
+                />
+                {/* 스택 인건비 바 */}
+                <div style={{ height: `${stackH}%` }} className="w-4 rounded-t-sm overflow-hidden flex flex-col-reverse">
+                  {d.pay > 0 && (
+                    <div
+                      style={{ height: `${(d.pay / totalPay) * 100}%`, backgroundColor: hoveredBar === 'pay' ? '#15803d' : '#22c55e' }}
+                      className="w-full flex-none cursor-pointer"
+                      onMouseEnter={() => setHoveredBar('pay')}
+                    />
+                  )}
+                  {d.holidayPay > 0 && (
+                    <div
+                      style={{ height: `${(d.holidayPay / totalPay) * 100}%`, backgroundColor: hoveredBar === 'holiday' ? '#1d4ed8' : '#60a5fa' }}
+                      className="w-full flex-none cursor-pointer"
+                      onMouseEnter={() => setHoveredBar('holiday')}
+                    />
+                  )}
+                </div>
+              </div>
+              <div className="absolute -bottom-6 text-sm text-gray-600 font-medium">{d.month}월</div>
             </div>
           );
         }
@@ -1764,43 +1848,9 @@
                   </div>
 
                   <div className="absolute inset-0 ml-20 md:ml-24 pb-8 flex items-end justify-around">
-                    {chartData.map((d) => {
-                      const totalPay = d.pay + d.holidayPay;
-                      const revHeight = `${(d.revenue / maxValue) * 100}%`;
-                      const stackHeight = `${(totalPay / maxValue) * 100}%`;
-                      const ratio = d.revenue > 0 ? ((totalPay / d.revenue) * 100).toFixed(1) : null;
-
-                      return (
-                        <div key={d.month} className="relative flex flex-col items-center h-full justify-end group w-12">
-                          <div className="flex items-end gap-1 w-full justify-center h-full pb-1">
-                            {/* 매출 바 */}
-                            <div style={{ height: revHeight }} className="w-4 bg-yellow-400 rounded-t-sm transition-all duration-500 hover:bg-yellow-500 relative">
-                              <div className="absolute -top-6 left-1/2 -translate-x-1/2 opacity-0 group-hover:opacity-100 text-[10px] bg-black text-white px-1.5 py-0.5 rounded pointer-events-none whitespace-nowrap z-10">
-                                매출 {Math.round(d.revenue).toLocaleString()}만원
-                              </div>
-                            </div>
-                            {/* 스택 인건비 바 (인건비 + 주휴수당) */}
-                            <div style={{ height: stackHeight }} className="w-4 rounded-t-sm overflow-hidden flex flex-col-reverse relative transition-all duration-500">
-                              {/* 인건비 (하단, 초록) */}
-                              {d.pay > 0 && (
-                                <div style={{ height: `${(d.pay / totalPay) * 100}%` }} className="w-full bg-green-500 flex-none" />
-                              )}
-                              {/* 주휴수당 (상단, 파랑) */}
-                              {d.holidayPay > 0 && (
-                                <div style={{ height: `${(d.holidayPay / totalPay) * 100}%` }} className="w-full bg-blue-400 flex-none" />
-                              )}
-                              {/* 툴팁 */}
-                              <div className="absolute -top-16 left-1/2 -translate-x-1/2 opacity-0 group-hover:opacity-100 text-[10px] bg-gray-800 text-white px-1.5 py-1 rounded pointer-events-none whitespace-nowrap z-10 leading-relaxed">
-                                <div>인건비 {Math.round(d.pay).toLocaleString()}만원</div>
-                                <div>주휴수당 {Math.round(d.holidayPay * 10000).toLocaleString()}원</div>
-                                {ratio && <div className="text-yellow-300">매출 대비 {ratio}%</div>}
-                              </div>
-                            </div>
-                          </div>
-                          <div className="absolute -bottom-6 text-sm text-gray-600 font-medium">{d.month}월</div>
-                        </div>
-                      );
-                    })}
+                    {chartData.map((d) => (
+                      <BarColumn key={d.month} d={d} maxValue={maxValue} />
+                    ))}
                   </div>
                 </div>
               </div>

@@ -36,11 +36,6 @@
         firebase.initializeApp(firebaseConfig);
         const fbAuth = firebase.auth();
         const fbDb = firebase.firestore();
-
-        // 오프라인 캐시 활성화: 재로그인 시 즉시 캐시 데이터 표시, 이후 서버 동기화
-        fbDb.enablePersistence({ synchronizeTabs: false }).catch(err => {
-            if (err.code !== 'unimplemented') console.warn('Firestore 오프라인 캐시 비활성화:', err.code);
-        });
     </script>
 
     <style>
@@ -270,22 +265,23 @@
                 return () => unsubscribeAuth();
             }, []);
 
-            // 인증 완료 후 데이터 로딩 (캐시 우선 → 서버 동기화)
+            // 인증 완료 후 데이터 로딩 (localStorage 캐시 우선 → Firestore 서버 동기화)
             useEffect(() => {
                 if (!firebaseUser) return;
 
                 let cancelled = false;
+                const cacheKey = 'at_cache_' + firebaseUser.uid;
                 const docRef = fbDb.collection('users').doc(firebaseUser.uid);
 
                 const applyData = (d) => {
                     if (cancelled) return;
                     const newData = {
-                        appPin:       d.appPin       !== undefined ? d.appPin       : INITIAL_PIN,
-                        employees:    d.employees    !== undefined ? d.employees    : [],
-                        nextEmpId:    d.nextEmpId    !== undefined ? d.nextEmpId    : 1,
-                        monthlyData:  d.monthlyData  !== undefined ? d.monthlyData  : {},
-                        predictData:  d.predictData  !== undefined ? d.predictData  : {},
-                        globalMinWage:d.globalMinWage!== undefined ? d.globalMinWage: ''
+                        appPin:        d.appPin        !== undefined ? d.appPin        : INITIAL_PIN,
+                        employees:     d.employees     !== undefined ? d.employees     : [],
+                        nextEmpId:     d.nextEmpId     !== undefined ? d.nextEmpId     : 1,
+                        monthlyData:   d.monthlyData   !== undefined ? d.monthlyData   : {},
+                        predictData:   d.predictData   !== undefined ? d.predictData   : {},
+                        globalMinWage: d.globalMinWage !== undefined ? d.globalMinWage : ''
                     };
                     lastSyncedDataRef.current = JSON.stringify(newData);
                     setAppPin(newData.appPin);
@@ -296,60 +292,45 @@
                     setGlobalMinWage(newData.globalMinWage);
                 };
 
-                (async () => {
-                    // ① 캐시에서 즉시 로드 → 화면 바로 표시
-                    let hasCached = false;
+                // ① localStorage 캐시 → 즉시 화면 표시 (사실상 0ms)
+                const cached = localStorage.getItem(cacheKey);
+                if (cached) {
                     try {
-                        const cachedDoc = await docRef.get({ source: 'cache' });
-                        if (!cancelled) {
-                            if (cachedDoc.exists) {
-                                applyData(cachedDoc.data());
-                                hasCached = true;
-                            } else {
-                                lastSyncedDataRef.current = JSON.stringify({
-                                    appPin: INITIAL_PIN, employees: [], nextEmpId: 1,
-                                    monthlyData: {}, predictData: {}, globalMinWage: ''
-                                });
-                            }
-                            setFbLoading(false); // 캐시 데이터로 즉시 화면 표시
-                        }
-                    } catch (_) {
-                        // 캐시 없음 (첫 로그인 등) → 서버에서 로드
-                    }
+                        applyData(JSON.parse(cached));
+                    } catch (_) {}
+                    setFbLoading(false);
+                }
 
-                    // ② 서버 최신 데이터로 백그라운드 동기화
-                    try {
-                        const serverDoc = await docRef.get({ source: 'server' });
-                        if (cancelled) return;
-                        if (serverDoc.exists) {
-                            const d = serverDoc.data();
-                            const serverStr = JSON.stringify({
-                                appPin:       d.appPin       !== undefined ? d.appPin       : INITIAL_PIN,
-                                employees:    d.employees    !== undefined ? d.employees    : [],
-                                nextEmpId:    d.nextEmpId    !== undefined ? d.nextEmpId    : 1,
-                                monthlyData:  d.monthlyData  !== undefined ? d.monthlyData  : {},
-                                predictData:  d.predictData  !== undefined ? d.predictData  : {},
-                                globalMinWage:d.globalMinWage!== undefined ? d.globalMinWage: ''
-                            });
-                            // 캐시와 서버 데이터가 다를 때만 업데이트
-                            if (serverStr !== lastSyncedDataRef.current) {
-                                applyData(d);
-                            }
-                        } else if (!hasCached) {
-                            lastSyncedDataRef.current = JSON.stringify({
-                                appPin: INITIAL_PIN, employees: [], nextEmpId: 1,
-                                monthlyData: {}, predictData: {}, globalMinWage: ''
-                            });
+                // ② Firestore 서버에서 최신 데이터 동기화
+                docRef.get().then(doc => {
+                    if (cancelled) return;
+                    if (doc.exists) {
+                        const d = doc.data();
+                        const serverStr = JSON.stringify({
+                            appPin:        d.appPin        !== undefined ? d.appPin        : INITIAL_PIN,
+                            employees:     d.employees     !== undefined ? d.employees     : [],
+                            nextEmpId:     d.nextEmpId     !== undefined ? d.nextEmpId     : 1,
+                            monthlyData:   d.monthlyData   !== undefined ? d.monthlyData   : {},
+                            predictData:   d.predictData   !== undefined ? d.predictData   : {},
+                            globalMinWage: d.globalMinWage !== undefined ? d.globalMinWage : ''
+                        });
+                        if (serverStr !== lastSyncedDataRef.current) {
+                            applyData(d);
+                            localStorage.setItem(cacheKey, JSON.stringify(d));
                         }
-                    } catch (e) {
-                        if (!hasCached) {
-                            showAlert('데이터 불러오기에 실패했습니다.\n' + e.message, '연결 오류', 'error');
-                        }
-                        // 캐시 데이터가 있으면 서버 오류는 조용히 처리
-                    } finally {
-                        if (!cancelled) setFbLoading(false);
+                    } else {
+                        lastSyncedDataRef.current = JSON.stringify({
+                            appPin: INITIAL_PIN, employees: [], nextEmpId: 1,
+                            monthlyData: {}, predictData: {}, globalMinWage: ''
+                        });
                     }
-                })();
+                }).catch(e => {
+                    if (!cancelled && !cached) {
+                        showAlert('데이터 불러오기에 실패했습니다.\n' + e.message, '연결 오류', 'error');
+                    }
+                }).finally(() => {
+                    if (!cancelled) setFbLoading(false);
+                });
 
                 return () => { cancelled = true; };
             }, [firebaseUser]);
@@ -376,8 +357,9 @@
                     try {
                         await fbDb.collection('users').doc(firebaseUser.uid).set(currentData);
                         lastSyncedDataRef.current = currentDataStr;
+                        // localStorage 캐시도 업데이트
+                        localStorage.setItem('at_cache_' + firebaseUser.uid, JSON.stringify(currentData));
                         setIsSyncing(false);
-                        // 자동 저장 완료 표시 (2초간)
                         setSaveSuccess(true);
                         clearTimeout(saveSuccessTimerRef.current);
                         saveSuccessTimerRef.current = setTimeout(() => setSaveSuccess(false), 2000);
@@ -404,6 +386,7 @@
                 try {
                     await fbDb.collection('users').doc(firebaseUser.uid).set(currentData);
                     lastSyncedDataRef.current = JSON.stringify(currentData);
+                    localStorage.setItem('at_cache_' + firebaseUser.uid, JSON.stringify(currentData));
                     setIsSyncing(false);
                     showAlert('입력하신 데이터가 클라우드에 성공적으로 저장되었습니다.', '저장 완료', 'success');
                 } catch(e) {

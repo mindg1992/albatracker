@@ -18,6 +18,24 @@
     <!-- SheetJS (엑셀 파일 생성) -->
     <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
 
+    <!-- Firebase -->
+    <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+    <script>
+        const firebaseConfig = {
+            apiKey: "AIzaSyCnBN1m-QkG7hTwFAji48yPKDp78OlcXvQ",
+            authDomain: "albatracker-9e90e.firebaseapp.com",
+            projectId: "albatracker-9e90e",
+            storageBucket: "albatracker-9e90e.firebasestorage.app",
+            messagingSenderId: "1042360867233",
+            appId: "1:1042360867233:web:5e37d3bf84492ec70b93e0"
+        };
+        firebase.initializeApp(firebaseConfig);
+        const fbAuth = firebase.auth();
+        const fbDb = firebase.firestore();
+    </script>
+
     <style>
         /* 가로 스크롤바 숨김 처리 */
         .no-scrollbar::-webkit-scrollbar {
@@ -224,38 +242,82 @@
         // --- 메인 애플리케이션 컴포넌트 ---
         function AlbaTracker() {
           const [isAuthenticated, setIsAuthenticated] = useState(false);
-          
-          // 초기 로딩 시 로컬스토리지에서 값 불러오기
-          const [appPin, setAppPin] = useState(() => loadData('albaTracker_appPin', INITIAL_PIN));
+          const [firebaseUser, setFirebaseUser] = useState(null);   // Google 로그인 사용자
+          const [fbLoading, setFbLoading] = useState(true);         // Firebase 초기화 대기
+          const [isSyncing, setIsSyncing] = useState(false);        // 저장 중 표시
+
+          const [appPin, setAppPin] = useState(INITIAL_PIN);
           const [activeTab, setActiveTab] = useState('employees');
-          const [employees, setEmployees] = useState(() => loadData('albaTracker_employees', []));
-          const [nextEmpId, setNextEmpId] = useState(() => loadData('albaTracker_nextEmpId', 1));
-          // monthlyData format: 'YYYY-MM': { totalRevenue?: number, days: { 1: { revenue: 0, entries: { empId: { hours, pay, name, wage } } } } }
-          const [monthlyData, setMonthlyData] = useState(() => loadData('albaTracker_monthlyData', {}));
-          const [predictData, setPredictData] = useState(() => loadData('albaTracker_predictData', {}));
-          const [globalMinWage, setGlobalMinWage] = useState(() => loadData('albaTracker_globalMinWage', MIN_WAGE));
+          const [employees, setEmployees] = useState([]);
+          const [nextEmpId, setNextEmpId] = useState(1);
+          const [monthlyData, setMonthlyData] = useState({});
+          const [predictData, setPredictData] = useState({});
+          const [globalMinWage, setGlobalMinWage] = useState(MIN_WAGE);
 
-          // 값이 변경될 때마다 로컬스토리지에 자동 저장
-          useEffect(() => { localStorage.setItem('albaTracker_appPin', JSON.stringify(appPin)); }, [appPin]);
-          useEffect(() => { localStorage.setItem('albaTracker_employees', JSON.stringify(employees)); }, [employees]);
-          useEffect(() => { localStorage.setItem('albaTracker_nextEmpId', JSON.stringify(nextEmpId)); }, [nextEmpId]);
-          useEffect(() => { localStorage.setItem('albaTracker_monthlyData', JSON.stringify(monthlyData)); }, [monthlyData]);
-          useEffect(() => { localStorage.setItem('albaTracker_predictData', JSON.stringify(predictData)); }, [predictData]);
-          useEffect(() => { localStorage.setItem('albaTracker_globalMinWage', JSON.stringify(globalMinWage)); }, [globalMinWage]);
-
-          // 새로고침/탭 닫기 직전에 최신 상태를 localStorage에 강제 저장
+          // Firebase Auth 상태 감지 + 로그인 시 Firestore 데이터 로드
           useEffect(() => {
-            const handleBeforeUnload = () => {
-              localStorage.setItem('albaTracker_appPin', JSON.stringify(appPin));
-              localStorage.setItem('albaTracker_employees', JSON.stringify(employees));
-              localStorage.setItem('albaTracker_nextEmpId', JSON.stringify(nextEmpId));
-              localStorage.setItem('albaTracker_monthlyData', JSON.stringify(monthlyData));
-              localStorage.setItem('albaTracker_predictData', JSON.stringify(predictData));
-              localStorage.setItem('albaTracker_globalMinWage', JSON.stringify(globalMinWage));
-            };
-            window.addEventListener('beforeunload', handleBeforeUnload);
-            return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+            const unsubscribe = fbAuth.onAuthStateChanged(async (user) => {
+              setFirebaseUser(user);
+              if (user) {
+                try {
+                  const doc = await fbDb.collection('users').doc(user.uid).get();
+                  if (doc.exists) {
+                    const d = doc.data();
+                    if (d.appPin)       setAppPin(d.appPin);
+                    if (d.employees)    setEmployees(d.employees);
+                    if (d.nextEmpId)    setNextEmpId(d.nextEmpId);
+                    if (d.monthlyData)  setMonthlyData(d.monthlyData);
+                    if (d.predictData)  setPredictData(d.predictData);
+                    if (d.globalMinWage) setGlobalMinWage(d.globalMinWage);
+                  }
+                } catch(e) {
+                  console.error('Firestore 로드 실패:', e);
+                }
+              }
+              setFbLoading(false);
+            });
+            return () => unsubscribe();
+          }, []);
+
+          // 데이터 변경 시 Firestore에 저장 (디바운스 2초)
+          const saveTimerRef = useRef(null);
+          useEffect(() => {
+            if (!firebaseUser || fbLoading) return;
+            if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+            saveTimerRef.current = setTimeout(async () => {
+              setIsSyncing(true);
+              try {
+                await fbDb.collection('users').doc(firebaseUser.uid).set({
+                  appPin, employees, nextEmpId, monthlyData, predictData, globalMinWage
+                });
+              } catch(e) {
+                console.error('Firestore 저장 실패:', e);
+              }
+              setIsSyncing(false);
+            }, 2000);
+            return () => clearTimeout(saveTimerRef.current);
           }, [appPin, employees, nextEmpId, monthlyData, predictData, globalMinWage]);
+
+          const handleGoogleLogin = async () => {
+            const provider = new firebase.auth.GoogleAuthProvider();
+            try {
+              await fbAuth.signInWithPopup(provider);
+            } catch(e) {
+              alert('Google 로그인에 실패했습니다.\n' + e.message);
+            }
+          };
+
+          const handleGoogleLogout = async () => {
+            if (!window.confirm('로그아웃 하시겠습니까?')) return;
+            await fbAuth.signOut();
+            setIsAuthenticated(false);
+            setAppPin(INITIAL_PIN);
+            setEmployees([]);
+            setNextEmpId(1);
+            setMonthlyData({});
+            setPredictData({});
+            setGlobalMinWage(MIN_WAGE);
+          };
 
           // 동적 구분번호 매기기: 최초입사일(hireDate) 빠른 순서대로 정렬하여 displayId 부여
           const employeesWithDisplayId = useMemo(() => {
@@ -327,6 +389,46 @@
             e.target.value = null;
           };
 
+          // Firebase 초기화 대기
+          if (fbLoading) {
+            return (
+              <div className="min-h-screen bg-gray-100 flex items-center justify-center">
+                <div className="text-center">
+                  <div className="w-12 h-12 border-4 border-green-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+                  <p className="text-gray-500 text-sm">불러오는 중...</p>
+                </div>
+              </div>
+            );
+          }
+
+          // Google 로그인 안 된 경우
+          if (!firebaseUser) {
+            return (
+              <div className="min-h-screen bg-gray-100 flex flex-col items-center justify-center p-4">
+                <div className="bg-white p-8 rounded-2xl shadow-xl w-full max-w-sm text-center">
+                  <div className="bg-green-100 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
+                    <CalendarIcon className="w-8 h-8 text-green-600" />
+                  </div>
+                  <h2 className="text-2xl font-bold text-gray-800 mb-2">알바트래커</h2>
+                  <p className="text-gray-500 mb-8 text-sm">Google 계정으로 로그인하면<br/>어디서든 데이터를 불러올 수 있습니다.</p>
+                  <button
+                    onClick={handleGoogleLogin}
+                    className="w-full flex items-center justify-center gap-3 border border-gray-300 rounded-xl py-3 px-4 hover:bg-gray-50 transition font-medium text-gray-700"
+                  >
+                    <svg className="w-5 h-5" viewBox="0 0 24 24">
+                      <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+                      <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+                      <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z"/>
+                      <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+                    </svg>
+                    Google로 로그인
+                  </button>
+                </div>
+              </div>
+            );
+          }
+
+          // PIN 인증
           if (!isAuthenticated) {
             return <LoginScreen appPin={appPin} onLogin={() => setIsAuthenticated(true)} />;
           }
@@ -365,14 +467,20 @@
                     알바트래커 v1.0
                   </h1>
                   <div className="flex items-center gap-1 md:gap-2">
-                    <input 
-                      type="file" 
-                      accept=".json" 
-                      ref={fileInputRef} 
-                      style={{ display: 'none' }} 
+                    {isSyncing && (
+                      <span className="text-green-200 text-xs flex items-center gap-1">
+                        <svg className="w-3 h-3 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>
+                        <span className="hidden sm:inline">저장 중</span>
+                      </span>
+                    )}
+                    <input
+                      type="file"
+                      accept=".json"
+                      ref={fileInputRef}
+                      style={{ display: 'none' }}
                       onChange={handleFileImport}
                     />
-                    <button 
+                    <button
                       onClick={handleImportClick}
                       className="flex items-center gap-1 text-sm bg-green-500 hover:bg-green-400 px-2 md:px-3 py-1.5 rounded-md transition"
                       title="데이터 불러오기"
@@ -380,7 +488,7 @@
                       <Upload className="w-4 h-4" />
                       <span className="hidden sm:inline">불러오기</span>
                     </button>
-                    <button 
+                    <button
                       onClick={handleBackup}
                       className="flex items-center gap-1 text-sm bg-green-500 hover:bg-green-400 px-2 md:px-3 py-1.5 rounded-md transition"
                       title="데이터 백업하기"
@@ -389,12 +497,21 @@
                       <span className="hidden sm:inline">백업하기</span>
                     </button>
                     <div className="w-px h-6 bg-green-400 mx-1"></div>
-                    <button 
+                    <button
                       onClick={() => setIsAuthenticated(false)}
                       className="flex items-center gap-1 text-sm bg-green-700 hover:bg-green-800 px-3 py-1.5 rounded-md transition"
+                      title="잠금"
                     >
                       <Lock className="w-4 h-4 hidden md:block" />
                       <span>잠금</span>
+                    </button>
+                    <button
+                      onClick={handleGoogleLogout}
+                      className="flex items-center gap-1 text-sm bg-green-700 hover:bg-green-800 px-3 py-1.5 rounded-md transition"
+                      title={firebaseUser?.email}
+                    >
+                      <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" x2="9" y1="12" y2="12"/></svg>
+                      <span className="hidden sm:inline">로그아웃</span>
                     </button>
                   </div>
                 </div>

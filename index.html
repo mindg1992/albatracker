@@ -225,14 +225,37 @@
             );
         }
 
-        // Firestore set() 타임아웃 래퍼 (hang 방지)
-        function fsSet(docRef, data, ms = 15000) {
-            return Promise.race([
-                docRef.set(data),
-                new Promise((_, reject) =>
-                    setTimeout(() => reject(new Error('저장 연결 시간이 초과되었습니다.\n네트워크 상태를 확인해주세요.')), ms)
-                )
-            ]);
+        // Firestore REST API로 저장 (SDK 스트리밍 연결 문제 우회)
+        async function fsSet(docRef, data) {
+            const uid = docRef.id;
+            const token = await fbAuth.currentUser.getIdToken();
+            const toFV = (v) => {
+                if (v === null || v === undefined) return { nullValue: null };
+                if (typeof v === 'boolean') return { booleanValue: v };
+                if (typeof v === 'number') return Number.isInteger(v) ? { integerValue: String(v) } : { doubleValue: v };
+                if (typeof v === 'string') return { stringValue: v };
+                if (Array.isArray(v)) return { arrayValue: { values: v.map(toFV) } };
+                if (typeof v === 'object') {
+                    const fields = {};
+                    Object.entries(v).forEach(([k, val]) => { fields[k] = toFV(val); });
+                    return { mapValue: { fields } };
+                }
+                return { stringValue: String(v) };
+            };
+            const fields = {};
+            Object.entries(data).forEach(([k, v]) => { fields[k] = toFV(v); });
+            const resp = await fetch(
+                `https://firestore.googleapis.com/v1/projects/albatracker-9e90e/databases/(default)/documents/users/${uid}`,
+                {
+                    method: 'PATCH',
+                    headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ fields })
+                }
+            );
+            if (!resp.ok) {
+                const err = await resp.json().catch(() => ({}));
+                throw new Error(err.error?.message || `HTTP ${resp.status}`);
+            }
         }
 
         // --- 메인 애플리케이션 컴포넌트 ---

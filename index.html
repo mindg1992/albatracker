@@ -23,9 +23,8 @@
     <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
     <script>
-        // Canvas 시스템에서 제공하는 보안 세션 ID 사용 (데이터베이스 접근 권한 허용을 위해 필수)
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-        let firebaseConfig = {
+        // 사용자님의 고유 Firebase 설정 (시스템 오버라이드 제거하여 충돌 방지)
+        const firebaseConfig = {
             apiKey: "AIzaSyCnBN1m-QkG7hTwFAji48yPKDp78OlcXvQ",
             authDomain: "albatracker-9e90e.firebaseapp.com",
             projectId: "albatracker-9e90e",
@@ -34,10 +33,6 @@
             appId: "1:1042360867233:web:5e37d3bf84492ec70b93e0"
         };
         
-        if (typeof __firebase_config !== 'undefined' && __firebase_config) {
-            try { firebaseConfig = JSON.parse(__firebase_config); } catch(e) {}
-        }
-
         firebase.initializeApp(firebaseConfig);
         const fbAuth = firebase.auth();
         const fbDb = firebase.firestore();
@@ -244,7 +239,7 @@
 
             const [modalConfig, setModalConfig] = useState(null);
 
-            // 데이터 루프 방지를 위한 동기화 기준점 레퍼런스
+            // 데이터 루프 및 무의미한 저장을 방지하기 위한 기준점
             const lastSyncedDataRef = useRef("");
 
             const showAlert = (message, title = '알림', type = 'info') => {
@@ -259,20 +254,8 @@
                 });
             };
 
-            // Firebase 실시간 연동 (onSnapshot 활용)
+            // Firebase 로그인 상태 감지
             useEffect(() => {
-                const initAuth = async () => {
-                    try {
-                        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-                            await fbAuth.signInWithCustomToken(__initial_auth_token);
-                        } 
-                    } catch (e) {
-                        console.error("Auth init error", e);
-                        setFbLoading(false);
-                    }
-                };
-                initAuth();
-
                 const unsubscribeAuth = fbAuth.onAuthStateChanged((user) => {
                     setFirebaseUser(user);
                     if (!user) {
@@ -282,13 +265,15 @@
                 return () => unsubscribeAuth();
             }, []);
 
-            // 인증 완료 후 실시간 데이터 수신 (무한 루프 완벽 차단)
+            // 인증 완료 후 실시간 데이터 수신 (사용자 고유 경로: users/{uid})
             useEffect(() => {
                 if (!firebaseUser) return;
                 
-                const docRef = fbDb.collection('artifacts').doc(appId).collection('users').doc(firebaseUser.uid).collection('data').doc('state');
+                // Canvas 시스템 규칙 우회를 위해 사용자 고유의 users/uid 경로로 직접 접근
+                const docRef = fbDb.collection('users').doc(firebaseUser.uid);
+                
                 const unsubscribeDB = docRef.onSnapshot((doc) => {
-                    // 내가 방금 로컬에서 수정한 데이터로 인한 이벤트는 무시 (불필요한 리렌더링 및 덮어쓰기 방지)
+                    // 로컬에서 쓴 기록으로 인해 발생한 스냅샷 이벤트는 무시
                     if (doc.metadata.hasPendingWrites) return;
 
                     if (doc.exists) {
@@ -301,7 +286,6 @@
                         const newPredictData = d.predictData !== undefined ? d.predictData : {};
                         const newGlobalMinWage = d.globalMinWage !== undefined ? d.globalMinWage : '';
 
-                        // 클라우드에서 받은 최신 상태를 기준점으로 저장 (자동저장 루프 방지용)
                         lastSyncedDataRef.current = JSON.stringify({
                             appPin: newAppPin,
                             employees: newEmployees,
@@ -318,7 +302,7 @@
                         setPredictData(newPredictData);
                         setGlobalMinWage(newGlobalMinWage);
                     } else {
-                        // 첫 로그인인 경우 기준점을 빈 데이터로 초기화
+                        // 계정 생성 직후 데이터가 없는 경우
                         lastSyncedDataRef.current = JSON.stringify({
                             appPin: INITIAL_PIN, employees: [], nextEmpId: 1, monthlyData: {}, predictData: {}, globalMinWage: ''
                         });
@@ -327,12 +311,13 @@
                 }, (error) => {
                     console.error("Firestore onSnapshot error:", error);
                     setFbLoading(false);
+                    showAlert('데이터 불러오기에 실패했습니다.\n' + error.message, '연결 오류', 'error');
                 });
 
                 return () => unsubscribeDB();
             }, [firebaseUser]);
 
-            // 데이터 변경 시 저장 (디바운스 시간 단축 및 로컬 수정시에만 저장)
+            // 데이터 변경 시 저장 (0.5초 디바운스, 무한루프 방지)
             const saveTimerRef = useRef(null);
 
             useEffect(() => {
@@ -341,7 +326,7 @@
                 const currentData = { appPin, employees, nextEmpId, monthlyData, predictData, globalMinWage };
                 const currentDataStr = JSON.stringify(currentData);
 
-                // 방금 클라우드에서 받은 데이터와 똑같다면(사용자가 입력한 것이 아니라면) 업로드 건너뜀
+                // 서버에서 막 불러온 데이터와 현재 데이터가 일치한다면(수정한 게 없다면) 저장 건너뜀
                 if (currentDataStr === lastSyncedDataRef.current) {
                     return;
                 }
@@ -350,19 +335,19 @@
                 saveTimerRef.current = setTimeout(async () => {
                     setIsSyncing(true);
                     try {
-                        await fbDb.collection('artifacts').doc(appId).collection('users').doc(firebaseUser.uid).collection('data').doc('state').set(currentData);
-                        // 성공적으로 저장 후, 기준점을 내 최신 데이터로 갱신
+                        // 사용자 고유 경로로 저장
+                        await fbDb.collection('users').doc(firebaseUser.uid).set(currentData);
                         lastSyncedDataRef.current = currentDataStr;
                         setIsSyncing(false);
                     } catch(e) {
-                        console.error('Firestore 저장 실패:', e);
+                        console.error('Firestore 자동 저장 실패:', e);
                         setIsSyncing(false);
                     }
-                }, 500); // 500ms 로 단축하여 빠른 자동 저장
+                }, 500); 
                 return () => clearTimeout(saveTimerRef.current);
             }, [appPin, employees, nextEmpId, monthlyData, predictData, globalMinWage, firebaseUser, fbLoading]);
 
-            // 명시적 즉시 저장 버튼 (디바운스를 무시하고 즉각 저장)
+            // 명시적 즉시 저장 버튼 (타이머 무시하고 강제 저장 후 알림창 표시)
             const handleManualSave = async () => {
                 if (!firebaseUser) {
                     showAlert('클라우드에 연결되어 있지 않습니다.\nGoogle 로그인을 진행해주세요.', '안내', 'alert');
@@ -371,19 +356,18 @@
                 
                 const currentData = { appPin, employees, nextEmpId, monthlyData, predictData, globalMinWage };
                 
-                // 실행 중인 자동저장 타이머 취소
                 if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
                 
                 setIsSyncing(true);
                 try {
-                    await fbDb.collection('artifacts').doc(appId).collection('users').doc(firebaseUser.uid).collection('data').doc('state').set(currentData);
-                    lastSyncedDataRef.current = JSON.stringify(currentData); // 즉시 저장 후 기준점 업데이트
+                    await fbDb.collection('users').doc(firebaseUser.uid).set(currentData);
+                    lastSyncedDataRef.current = JSON.stringify(currentData);
                     setIsSyncing(false);
-                    showAlert('입력하신 데이터가 클라우드에 안전하게 저장되었습니다.', '저장 완료', 'success');
+                    showAlert('입력하신 데이터가 클라우드에 성공적으로 저장되었습니다.', '저장 완료', 'success');
                 } catch(e) {
                     console.error('Firestore 즉시 저장 실패:', e);
                     setIsSyncing(false);
-                    showAlert('클라우드 저장에 실패했습니다.\n네트워크 상태를 확인해주세요.', '오류', 'error');
+                    showAlert('클라우드 저장에 실패했습니다.\n권한 또는 네트워크를 확인해주세요.', '저장 오류', 'error');
                 }
             };
 
@@ -423,7 +407,7 @@
                     setMonthlyData({});
                     setPredictData({});
                     setGlobalMinWage('');
-                    lastSyncedDataRef.current = ""; // 로그아웃 시 동기화 기준점 초기화
+                    lastSyncedDataRef.current = ""; // 로그아웃 시 동기화 기준점 리셋
                 });
             };
 
@@ -2433,7 +2417,7 @@
                 }
 
                 setAppPin(newPin);
-                showAlert('비밀번호가 성공적으로 변경되었습니다.', '성공');
+                showAlert('비밀번호가 성공적으로 변경되었습니다.', '성공', 'success');
                 setMessage('');
                 setCurrentPin('');
                 setNewPin('');

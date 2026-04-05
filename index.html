@@ -1804,28 +1804,69 @@
                     return;
                 }
 
-                const rows = [
-                    [`${year}년 ${month}월 인건비 지급 내역`],
-                    [],
-                    ['이름', '주민등록번호', '은행명', '계좌번호', '시급(원)', '근무시간(H)', '순수급여(원)', '주휴수당(원)', '총지급액(원)']
-                ];
+                const daysInMonth = new Date(year, month, 0).getDate();
+                const monthData = monthlyData[monthKey]?.days || {};
 
-                payrollList.forEach(item => {
-                    rows.push([
-                        item.name, item.residentId || '', item.bank, item.account, item.wage,
-                        item.totalHours, item.totalPay, item.holidayPay, item.totalPay + item.holidayPay
+                // ── 탭1: 일별근무시간 ──────────────────────────────
+                // 헤더행: 빈칸 + 근무자명 목록
+                const sheet1Header = ['날짜', ...payrollList.map(item => item.name)];
+                const sheet1Rows = [sheet1Header];
+
+                for (let d = 1; d <= daysInMonth; d++) {
+                    const dayData = monthData[d]?.entries || {};
+                    const row = [`${d}일`];
+                    payrollList.forEach(item => {
+                        const entry = dayData[item.id];
+                        row.push(entry ? entry.hours : '');
+                    });
+                    sheet1Rows.push(row);
+                }
+
+                const ws1 = XLSX.utils.aoa_to_sheet(sheet1Rows);
+                const colWidth1 = [{ wch: 6 }, ...payrollList.map(() => ({ wch: 12 }))];
+                ws1['!cols'] = colWidth1;
+
+                // ── 탭2: 급여계산 ──────────────────────────────────
+                const sheet2Header = [
+                    '구분번호', '근무자명', '주민번호',
+                    '이번달 총 근무시간', '시급',
+                    '시간급여', '주휴수당', '총 급여',
+                    '실제 지급액', '지급일',
+                    '고용보험 0.8% 제외'
+                ];
+                const sheet2Rows = [sheet2Header];
+
+                payrollList.forEach((item, idx) => {
+                    const timePay = item.totalHours * item.wage;      // 시간급여
+                    const totalPay = timePay + item.holidayPay;       // 총급여
+                    const afterInsurance = Math.round(totalPay * 0.992); // 고용보험 0.8% 제외
+                    sheet2Rows.push([
+                        idx + 1,
+                        item.name,
+                        item.residentId || '',
+                        item.totalHours,
+                        item.wage,
+                        timePay,
+                        item.holidayPay,
+                        totalPay,
+                        '',   // 실제 지급액 공란
+                        '',   // 지급일 공란
+                        afterInsurance
                     ]);
                 });
 
-                rows.push([]);
-                rows.push(['', '', '', '', '', '', '', '총 지급 예정액', grandTotal]);
-
-                const ws = XLSX.utils.aoa_to_sheet(rows);
-                ws['!cols'] = [{ wch: 10 }, { wch: 18 }, { wch: 10 }, { wch: 20 }, { wch: 12 }, { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 14 }];
-                ws['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 8 } }];
+                const ws2 = XLSX.utils.aoa_to_sheet(sheet2Rows);
+                ws2['!cols'] = [
+                    { wch: 8 }, { wch: 14 }, { wch: 16 },
+                    { wch: 18 }, { wch: 10 },
+                    { wch: 14 }, { wch: 12 }, { wch: 14 },
+                    { wch: 14 }, { wch: 12 },
+                    { wch: 18 }
+                ];
 
                 const wb = XLSX.utils.book_new();
-                XLSX.utils.book_append_sheet(wb, ws, `${year}-${String(month).padStart(2,'0')}`);
+                XLSX.utils.book_append_sheet(wb, ws1, '일별근무시간');
+                XLSX.utils.book_append_sheet(wb, ws2, '급여계산');
                 XLSX.writeFile(wb, `${year}.${String(month).padStart(2,'0')}. 급여명세.xlsx`);
             };
 

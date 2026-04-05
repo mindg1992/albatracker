@@ -242,6 +242,9 @@
 
             const [modalConfig, setModalConfig] = useState(null);
 
+            // 데이터 루프 방지를 위한 동기화 기준점 레퍼런스
+            const lastSyncedDataRef = useRef("");
+
             const showAlert = (message, title = '알림', type = 'info') => {
                 setModalConfig({ type: type, title, message, onConfirm: () => setModalConfig(null) });
             };
@@ -277,7 +280,7 @@
                 return () => unsubscribeAuth();
             }, []);
 
-            // 인증 완료 후 실시간 데이터 수신 (최적화)
+            // 인증 완료 후 실시간 데이터 수신 (무한 루프 완벽 차단)
             useEffect(() => {
                 if (!firebaseUser) return;
                 
@@ -288,12 +291,35 @@
 
                     if (doc.exists) {
                         const d = doc.data();
-                        if (d.appPin) setAppPin(d.appPin);
-                        if (d.employees) setEmployees(d.employees);
-                        if (d.nextEmpId) setNextEmpId(d.nextEmpId);
-                        if (d.monthlyData) setMonthlyData(d.monthlyData);
-                        if (d.predictData) setPredictData(d.predictData);
-                        if (d.globalMinWage !== undefined) setGlobalMinWage(d.globalMinWage);
+                        
+                        const newAppPin = d.appPin !== undefined ? d.appPin : INITIAL_PIN;
+                        const newEmployees = d.employees !== undefined ? d.employees : [];
+                        const newNextEmpId = d.nextEmpId !== undefined ? d.nextEmpId : 1;
+                        const newMonthlyData = d.monthlyData !== undefined ? d.monthlyData : {};
+                        const newPredictData = d.predictData !== undefined ? d.predictData : {};
+                        const newGlobalMinWage = d.globalMinWage !== undefined ? d.globalMinWage : '';
+
+                        // 클라우드에서 받은 최신 상태를 기준점으로 저장 (자동저장 루프 방지용)
+                        lastSyncedDataRef.current = JSON.stringify({
+                            appPin: newAppPin,
+                            employees: newEmployees,
+                            nextEmpId: newNextEmpId,
+                            monthlyData: newMonthlyData,
+                            predictData: newPredictData,
+                            globalMinWage: newGlobalMinWage
+                        });
+
+                        setAppPin(newAppPin);
+                        setEmployees(newEmployees);
+                        setNextEmpId(newNextEmpId);
+                        setMonthlyData(newMonthlyData);
+                        setPredictData(newPredictData);
+                        setGlobalMinWage(newGlobalMinWage);
+                    } else {
+                        // 첫 로그인인 경우 기준점을 빈 데이터로 초기화
+                        lastSyncedDataRef.current = JSON.stringify({
+                            appPin: INITIAL_PIN, employees: [], nextEmpId: 1, monthlyData: {}, predictData: {}, globalMinWage: ''
+                        });
                     }
                     setFbLoading(false);
                 }, (error) => {
@@ -304,15 +330,17 @@
                 return () => unsubscribeDB();
             }, [firebaseUser]);
 
-            // 데이터 변경 시 저장 (디바운스 시간 단축 및 인위적 UI 지연 제거)
+            // 데이터 변경 시 저장 (디바운스 시간 단축 및 로컬 수정시에만 저장)
             const saveTimerRef = useRef(null);
-            const isInitialMount = useRef(true);
 
             useEffect(() => {
                 if (!firebaseUser || fbLoading) return;
-                // 초기 마운트 시 텅 빈 데이터 덮어쓰기 방지
-                if (isInitialMount.current) {
-                    isInitialMount.current = false;
+                
+                const currentData = { appPin, employees, nextEmpId, monthlyData, predictData, globalMinWage };
+                const currentDataStr = JSON.stringify(currentData);
+
+                // 방금 클라우드에서 받은 데이터와 똑같다면(사용자가 입력한 것이 아니라면) 업로드 건너뜀
+                if (currentDataStr === lastSyncedDataRef.current) {
                     return;
                 }
 
@@ -320,16 +348,15 @@
                 saveTimerRef.current = setTimeout(async () => {
                     setIsSyncing(true);
                     try {
-                        await fbDb.collection('artifacts').doc(appId).collection('users').doc(firebaseUser.uid).collection('data').doc('state').set({
-                            appPin, employees, nextEmpId, monthlyData, predictData, globalMinWage
-                        });
-                        // 성공적으로 저장 시 즉시 동기화 아이콘 숨김
+                        await fbDb.collection('artifacts').doc(appId).collection('users').doc(firebaseUser.uid).collection('data').doc('state').set(currentData);
+                        // 성공적으로 저장 후, 기준점을 내 최신 데이터로 갱신
+                        lastSyncedDataRef.current = currentDataStr;
                         setIsSyncing(false);
                     } catch(e) {
                         console.error('Firestore 저장 실패:', e);
                         setIsSyncing(false);
                     }
-                }, 300); // 800ms -> 300ms로 단축하여 빠른 자동 저장
+                }, 500); // 500ms 로 단축하여 빠른 자동 저장
                 return () => clearTimeout(saveTimerRef.current);
             }, [appPin, employees, nextEmpId, monthlyData, predictData, globalMinWage, firebaseUser, fbLoading]);
 
@@ -340,13 +367,15 @@
                     return;
                 }
                 
-                // 실행 중인 자동저장 타이머가 있다면 취소 (중복 저장 방지)
+                const currentData = { appPin, employees, nextEmpId, monthlyData, predictData, globalMinWage };
+                
+                // 실행 중인 자동저장 타이머 취소
                 if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+                
                 setIsSyncing(true);
                 try {
-                    await fbDb.collection('artifacts').doc(appId).collection('users').doc(firebaseUser.uid).collection('data').doc('state').set({
-                        appPin, employees, nextEmpId, monthlyData, predictData, globalMinWage
-                    });
+                    await fbDb.collection('artifacts').doc(appId).collection('users').doc(firebaseUser.uid).collection('data').doc('state').set(currentData);
+                    lastSyncedDataRef.current = JSON.stringify(currentData); // 즉시 저장 후 기준점 업데이트
                     setIsSyncing(false);
                     showAlert('입력하신 데이터가 클라우드에 안전하게 저장되었습니다.', '저장 완료', 'success');
                 } catch(e) {
@@ -392,6 +421,7 @@
                     setMonthlyData({});
                     setPredictData({});
                     setGlobalMinWage('');
+                    lastSyncedDataRef.current = ""; // 로그아웃 시 동기화 기준점 초기화
                 });
             };
 

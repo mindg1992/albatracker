@@ -266,6 +266,59 @@
             }
         }
 
+        // --- 직원 시스템 헬퍼 함수 ---
+        function generateInviteCode() {
+            const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+            let code = '';
+            for (let i = 0; i < 6; i++) code += chars[Math.floor(Math.random() * chars.length)];
+            return code;
+        }
+
+        async function setupBossWorkspace(bossUid, shopName) {
+            const inviteCode = generateInviteCode();
+            const batch = fbDb.batch();
+            batch.set(fbDb.collection('workspaces').doc(bossUid), {
+                shopName, inviteCode, bossUid,
+                createdAt: firebase.firestore.FieldValue.serverTimestamp()
+            });
+            batch.set(fbDb.collection('inviteCodes').doc(inviteCode), {
+                bossUid, shopName,
+                createdAt: firebase.firestore.FieldValue.serverTimestamp()
+            });
+            await batch.commit();
+            return inviteCode;
+        }
+
+        async function regenerateInviteCode(bossUid, oldCode, shopName) {
+            const newCode = generateInviteCode();
+            const batch = fbDb.batch();
+            if (oldCode) batch.delete(fbDb.collection('inviteCodes').doc(oldCode));
+            batch.update(fbDb.collection('workspaces').doc(bossUid), { inviteCode: newCode });
+            batch.set(fbDb.collection('inviteCodes').doc(newCode), {
+                bossUid, shopName: shopName || '',
+                createdAt: firebase.firestore.FieldValue.serverTimestamp()
+            });
+            await batch.commit();
+            return newCode;
+        }
+
+        async function submitWorkHours(bossUid, submission) {
+            const docId = `${submission.empUid}_${submission.date}`;
+            await fbDb.collection('workspaces').doc(bossUid)
+                .collection('submissions').doc(docId).set({
+                    ...submission, locked: true,
+                    submittedAt: firebase.firestore.FieldValue.serverTimestamp()
+                });
+        }
+
+        async function sendChangeNotification(empUid, notif) {
+            await fbDb.collection('employeeAccounts').doc(empUid)
+                .collection('notifications').add({
+                    ...notif, read: false,
+                    createdAt: firebase.firestore.FieldValue.serverTimestamp()
+                });
+        }
+
         // --- 메인 애플리케이션 컴포넌트 ---
         function AlbaTracker() {
             const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -282,6 +335,18 @@
             const [globalMinWage, setGlobalMinWage] = useState(''); // 최저시급 기본값 비워둠
 
             const [modalConfig, setModalConfig] = useState(null);
+
+            // === 역할/직원 관련 상태 ===
+            const [userRole, setUserRole] = useState(null); // 'boss' | 'employee' | null
+            const [empAccount, setEmpAccount] = useState(null);
+            const [empPin, setEmpPin] = useState('');
+            const [isEmpAuthenticated, setIsEmpAuthenticated] = useState(false);
+            const [empNotifications, setEmpNotifications] = useState([]);
+            const [mySubmissions, setMySubmissions] = useState({});
+            const [workspaceInfo, setWorkspaceInfo] = useState(null);
+            const [showBossSetup, setShowBossSetup] = useState(false);
+            const [pendingEmployees, setPendingEmployees] = useState([]);
+            const [showPendingModal, setShowPendingModal] = useState(false);
 
             // 데이터 루프 및 무의미한 저장을 방지하기 위한 기준점
             const lastSyncedDataRef = useRef("");
@@ -304,14 +369,57 @@
                     setFirebaseUser(user);
                     if (!user) {
                         setFbLoading(false);
+                        setUserRole(null);
+                        setEmpAccount(null);
+                        setEmpPin('');
+                        setIsEmpAuthenticated(false);
+                        setWorkspaceInfo(null);
+                        setPendingEmployees([]);
                     }
                 });
                 return () => unsubscribeAuth();
             }, []);
 
-            // 인증 완료 후 데이터 로딩 (localStorage 캐시 우선 → Firestore 서버 동기화)
+            // 역할 감지: Google 계정 = 사장님, @emp.albatracker.page 이메일 = 직원
             useEffect(() => {
                 if (!firebaseUser) return;
+                let cancelled = false;
+
+                const isGoogleUser = firebaseUser.providerData?.some(p => p.providerId === 'google.com');
+                if (isGoogleUser || !firebaseUser.email?.includes('@emp.albatracker.page')) {
+                    setUserRole('boss');
+                    return;
+                }
+
+                // 직원 계정 로드 (생성 직후 딜레이 대응: 최대 3회 재시도)
+                let attempts = 0;
+                const tryLoad = () => {
+                    fbDb.collection('employeeAccounts').doc(firebaseUser.uid).get()
+                        .then(doc => {
+                            if (cancelled) return;
+                            if (doc.exists) {
+                                const data = doc.data();
+                                setUserRole('employee');
+                                setEmpAccount(data);
+                                setEmpPin(data.pin || '');
+                                setFbLoading(false);
+                            } else if (attempts < 3) {
+                                attempts++;
+                                setTimeout(tryLoad, 1500);
+                            } else {
+                                setUserRole('boss');
+                                setFbLoading(false);
+                            }
+                        })
+                        .catch(() => { if (!cancelled) { setUserRole('boss'); setFbLoading(false); } });
+                };
+                tryLoad();
+                return () => { cancelled = true; };
+            }, [firebaseUser]);
+
+            // 인증 완료 후 데이터 로딩 (localStorage 캐시 우선 → Firestore 서버 동기화) — 사장님 전용
+            useEffect(() => {
+                if (!firebaseUser || userRole !== 'boss') return;
 
                 let cancelled = false;
                 const cacheKey = 'at_cache_' + firebaseUser.uid;
@@ -391,7 +499,7 @@
                 syncFromServer();
 
                 return () => { cancelled = true; };
-            }, [firebaseUser]);
+            }, [firebaseUser, userRole]);
 
             const saveTimerRef = useRef(null);
             const [saveSuccess, setSaveSuccess] = useState(false);
@@ -399,7 +507,7 @@
             const saveSuccessTimerRef = useRef(null);
 
             useEffect(() => {
-                if (!firebaseUser || fbLoading) return;
+                if (!firebaseUser || fbLoading || userRole !== 'boss') return;
 
                 const currentData = { appPin, employees, nextEmpId, monthlyData, predictData, globalMinWage };
                 const currentDataStr = JSON.stringify(currentData);
@@ -431,7 +539,7 @@
                         });
                 }, 2000);
                 return () => clearTimeout(saveTimerRef.current);
-            }, [appPin, employees, nextEmpId, monthlyData, predictData, globalMinWage, firebaseUser, fbLoading]);
+            }, [appPin, employees, nextEmpId, monthlyData, predictData, globalMinWage, firebaseUser, fbLoading, userRole]);
 
             // 저장 버튼 — localStorage 즉시 저장 후 Firestore 동기화
             const handleManualSave = () => {
@@ -500,8 +608,151 @@
                     setMonthlyData({});
                     setPredictData({});
                     setGlobalMinWage('');
-                    lastSyncedDataRef.current = ""; // 로그아웃 시 동기화 기준점 리셋
+                    lastSyncedDataRef.current = "";
+                    setUserRole(null);
+                    setEmpAccount(null);
+                    setEmpPin('');
+                    setIsEmpAuthenticated(false);
+                    setWorkspaceInfo(null);
+                    setPendingEmployees([]);
+                    setEmpNotifications([]);
+                    setMySubmissions({});
                 });
+            };
+
+            // 사장님 워크스페이스 로드
+            useEffect(() => {
+                if (!firebaseUser || userRole !== 'boss') return;
+                let cancelled = false;
+                fbDb.collection('workspaces').doc(firebaseUser.uid).get()
+                    .then(doc => {
+                        if (cancelled) return;
+                        if (doc.exists) setWorkspaceInfo(doc.data());
+                        else setShowBossSetup(true);
+                    }).catch(() => {});
+                return () => { cancelled = true; };
+            }, [firebaseUser, userRole]);
+
+            // 대기 중인 직원 실시간 감지 (사장님)
+            useEffect(() => {
+                if (!firebaseUser || userRole !== 'boss') return;
+                const unsub = fbDb.collection('employeeAccounts')
+                    .where('bossUid', '==', firebaseUser.uid)
+                    .where('status', '==', 'pending')
+                    .onSnapshot(snap => {
+                        const list = [];
+                        snap.forEach(d => list.push({ uid: d.id, ...d.data() }));
+                        setPendingEmployees(list);
+                    }, () => {});
+                return () => unsub();
+            }, [firebaseUser, userRole]);
+
+            // 직원 제출 근무시간 실시간 수신 → 월별 현황 자동 반영 (사장님)
+            useEffect(() => {
+                if (!firebaseUser || userRole !== 'boss' || !isAuthenticated) return;
+                const unsub = fbDb.collection('workspaces').doc(firebaseUser.uid)
+                    .collection('submissions')
+                    .onSnapshot(snap => {
+                        snap.docChanges().forEach(change => {
+                            if (change.type !== 'added' && change.type !== 'modified') return;
+                            const sub = change.doc.data();
+                            if (!sub.date || sub.employeeId == null || !sub.hours) return;
+                            const parts = sub.date.split('-').map(Number);
+                            const mk = `${parts[0]}-${String(parts[1]).padStart(2,'0')}`;
+                            const day = parts[2];
+                            const wage = sub.wage || Number(globalMinWage) || MIN_WAGE;
+                            setMonthlyData(prev => {
+                                const md = prev[mk] || {};
+                                const dd = md.days || {};
+                                const de = dd[day] || {};
+                                const ee = de.entries || {};
+                                if (ee[sub.employeeId]?.bossModified) return prev; // 사장이 수정한 경우 유지
+                                return {
+                                    ...prev,
+                                    [mk]: { ...md, days: { ...dd, [day]: { ...de, entries: { ...ee,
+                                        [sub.employeeId]: {
+                                            hours: sub.hours,
+                                            pay: Math.round(sub.hours * wage),
+                                            name: sub.empName,
+                                            wage,
+                                            note: sub.note || '',
+                                            submittedByEmp: true,
+                                            empUid: sub.empUid,
+                                            submittedHours: sub.hours
+                                        }
+                                    }}}}
+                                };
+                            });
+                        });
+                    }, () => {});
+                return () => unsub();
+            }, [firebaseUser, userRole, isAuthenticated, globalMinWage]);
+
+            // 직원 본인 알림 실시간 로드
+            useEffect(() => {
+                if (!firebaseUser || userRole !== 'employee' || !isEmpAuthenticated) return;
+                const unsub = fbDb.collection('employeeAccounts').doc(firebaseUser.uid)
+                    .collection('notifications')
+                    .orderBy('createdAt', 'desc').limit(50)
+                    .onSnapshot(snap => {
+                        const list = [];
+                        snap.forEach(d => list.push({ id: d.id, ...d.data() }));
+                        setEmpNotifications(list);
+                    }, () => {});
+                return () => unsub();
+            }, [firebaseUser, userRole, isEmpAuthenticated]);
+
+            // 직원 본인 제출 기록 실시간 로드
+            useEffect(() => {
+                if (!firebaseUser || userRole !== 'employee' || !empAccount?.bossUid || !isEmpAuthenticated) return;
+                const unsub = fbDb.collection('workspaces').doc(empAccount.bossUid)
+                    .collection('submissions')
+                    .where('empUid', '==', firebaseUser.uid)
+                    .onSnapshot(snap => {
+                        const subs = {};
+                        snap.forEach(d => { const data = d.data(); if (data.date) subs[data.date] = { id: d.id, ...data }; });
+                        setMySubmissions(subs);
+                    }, () => {});
+                return () => unsub();
+            }, [firebaseUser, userRole, empAccount, isEmpAuthenticated]);
+
+            // 직원 승인 처리 (사장님)
+            const handleApproveEmployee = async (empUid) => {
+                const empData = pendingEmployees.find(e => e.uid === empUid);
+                if (!empData) return;
+                try {
+                    const newEmpId = nextEmpId;
+                    const newEmp = {
+                        id: newEmpId, name: empData.name,
+                        hireDate: new Date().toISOString().split('T')[0],
+                        wage: '', scheduledDays: '', dailyHours: '',
+                        bank: '', account: '', memo: '', status: 'working'
+                    };
+                    setEmployees(prev => [...prev, newEmp]);
+                    setNextEmpId(prev => prev + 1);
+                    await fbDb.collection('employeeAccounts').doc(empUid).update({
+                        status: 'approved', employeeId: newEmpId,
+                        approvedAt: firebase.firestore.FieldValue.serverTimestamp()
+                    });
+                    showAlert(`${empData.name}님이 승인되었습니다.\n근무자 정보 탭에서 시급 등을 설정해주세요.`, '승인 완료', 'success');
+                } catch(e) {
+                    showAlert('승인 처리 중 오류: ' + e.message, '오류', 'error');
+                }
+            };
+
+            // 직원 거절 처리 (사장님)
+            const handleRejectEmployee = (empUid) => {
+                const empData = pendingEmployees.find(e => e.uid === empUid);
+                showConfirm(`${empData?.name || '직원'}님의 가입을 거절하시겠습니까?`, async () => {
+                    try {
+                        await fbDb.collection('employeeAccounts').doc(empUid).update({
+                            status: 'rejected',
+                            rejectedAt: firebase.firestore.FieldValue.serverTimestamp()
+                        });
+                    } catch(e) {
+                        showAlert('처리 중 오류: ' + e.message, '오류', 'error');
+                    }
+                }, '가입 거절');
             };
 
             const employeesWithDisplayId = useMemo(() => {
@@ -563,44 +814,69 @@
                 e.target.value = null;
             };
 
-            if (fbLoading) {
+            // === 렌더 분기 ===
+
+            // 로딩 중
+            if (fbLoading || (firebaseUser && !userRole)) {
                 return (
                     <div className="min-h-screen bg-gray-50 flex items-center justify-center">
                         <div className="text-center">
                             <div className="w-12 h-12 border-4 border-green-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-                            <p className="text-gray-500 text-sm font-medium">데이터를 동기화하고 있습니다...</p>
+                            <p className="text-gray-500 text-sm font-medium">
+                                {(firebaseUser && !userRole) ? '사용자 정보를 확인 중...' : '데이터를 동기화하고 있습니다...'}
+                            </p>
                         </div>
                     </div>
                 );
             }
 
+            // 로그인 안 된 상태 → 랜딩 화면
             if (!firebaseUser) {
-                return (
-                    <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-4 relative">
-                        <CustomModal config={modalConfig} />
-                        <div className="bg-white p-8 rounded-2xl shadow-xl w-full max-w-sm text-center">
-                            <div className="bg-green-100 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
-                                <CalendarIcon className="w-8 h-8 text-green-600" />
+                return <LandingScreen onBossLogin={handleGoogleLogin} modalConfig={modalConfig} />;
+            }
+
+            // ── 직원 플로우 ──
+            if (userRole === 'employee') {
+                if (!empAccount || empAccount.status === 'pending') {
+                    return <PendingApprovalScreen empAccount={empAccount} onLogout={handleLogout} />;
+                }
+                if (empAccount.status === 'rejected') {
+                    return (
+                        <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+                            <CustomModal config={modalConfig} />
+                            <div className="bg-white p-8 rounded-2xl shadow-xl w-full max-w-sm text-center">
+                                <AlertCircle className="w-16 h-16 text-red-500 mx-auto mb-4" />
+                                <h2 className="text-xl font-bold text-gray-800 mb-2">가입이 거절되었습니다</h2>
+                                <p className="text-gray-500 text-sm mb-6">사장님께 문의해 주세요.</p>
+                                <button onClick={handleLogout} className="w-full bg-gray-600 text-white py-3 rounded-xl font-bold">로그아웃</button>
                             </div>
-                            <h2 className="text-2xl font-bold text-gray-800 mb-2">알바트래커</h2>
-                            <p className="text-gray-500 mb-8 text-sm">Google 계정으로 로그인하면<br/>어디서든 데이터를 불러올 수 있습니다.</p>
-                            <button
-                                onClick={handleGoogleLogin}
-                                className="w-full flex items-center justify-center gap-3 border border-gray-300 rounded-xl py-3 px-4 hover:bg-gray-50 transition font-medium text-gray-700 shadow-sm"
-                            >
-                                <svg className="w-5 h-5" viewBox="0 0 24 24">
-                                    <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
-                                    <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
-                                    <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z"/>
-                                    <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
-                                </svg>
-                                Google로 로그인
-                            </button>
                         </div>
-                    </div>
+                    );
+                }
+                if (!isEmpAuthenticated) {
+                    return (
+                        <>
+                            <CustomModal config={modalConfig} />
+                            <LoginScreen appPin={empPin} onLogin={() => setIsEmpAuthenticated(true)} empName={empAccount?.name} />
+                        </>
+                    );
+                }
+                return (
+                    <EmployeeApp
+                        empAccount={empAccount}
+                        firebaseUser={firebaseUser}
+                        mySubmissions={mySubmissions}
+                        notifications={empNotifications}
+                        onLogout={handleLogout}
+                        onLock={() => setIsEmpAuthenticated(false)}
+                        showAlert={showAlert}
+                        showConfirm={showConfirm}
+                        modalConfig={modalConfig}
+                    />
                 );
             }
 
+            // ── 사장님 플로우 ──
             if (!isAuthenticated) {
                 return (
                     <>
@@ -633,14 +909,35 @@
             return (
                 <div className="min-h-screen bg-gray-50 text-gray-800 font-sans relative pb-28 md:pb-6">
                     <CustomModal config={modalConfig} />
+                    {showBossSetup && (
+                        <BossSetupModal
+                            firebaseUser={firebaseUser}
+                            onSetup={(info) => { setWorkspaceInfo(info); setShowBossSetup(false); }}
+                        />
+                    )}
+                    {showPendingModal && (
+                        <PendingApprovalsModal
+                            pendingEmployees={pendingEmployees}
+                            onApprove={handleApproveEmployee}
+                            onReject={handleRejectEmployee}
+                            onClose={() => setShowPendingModal(false)}
+                        />
+                    )}
                     
                     <header className="bg-green-600 text-white shadow-md relative z-30">
                         <div className="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
                             <h1 className="text-xl font-bold flex items-center gap-2">
                                 <CalendarIcon className="w-6 h-6" />
-                                알바트래커 v1.0
+                                <span>{workspaceInfo?.shopName || '알바트래커'}</span>
                             </h1>
                             <div className="flex items-center gap-1 md:gap-3">
+                                {pendingEmployees.length > 0 && (
+                                    <button onClick={() => setShowPendingModal(true)} className="relative flex items-center gap-1 text-sm bg-yellow-500 hover:bg-yellow-400 text-white px-2 md:px-3 py-1.5 rounded-md transition font-bold">
+                                        <Users className="w-4 h-4" />
+                                        <span className="hidden sm:inline">가입 대기</span>
+                                        <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full w-4 h-4 flex items-center justify-center">{pendingEmployees.length}</span>
+                                    </button>
+                                )}
                                 {isSyncing ? (
                                     <span className="text-green-200 text-xs flex items-center gap-1">
                                         <svg className="w-3 h-3 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>
@@ -707,19 +1004,23 @@
                                 { id: 'payroll', label: '인건비 지급', icon: Wallet },
                                 { id: 'chart', label: '인건비 차트', icon: BarChart3 },
                                 { id: 'predict', label: '주휴수당 예측', icon: Search },
+                                { id: 'invite', label: '직원 초대', icon: Users },
                                 { id: 'settings', label: '비밀번호 설정', icon: Settings },
                             ].map(tab => (
                                 <button
                                     key={tab.id}
                                     onClick={() => setActiveTab(tab.id)}
-                                    className={`flex items-center gap-2 px-5 py-4 text-sm font-medium whitespace-nowrap border-b-2 transition-colors ${
-                                        activeTab === tab.id 
-                                            ? 'border-green-600 text-green-600' 
+                                    className={`relative flex items-center gap-2 px-5 py-4 text-sm font-medium whitespace-nowrap border-b-2 transition-colors ${
+                                        activeTab === tab.id
+                                            ? 'border-green-600 text-green-600'
                                             : 'border-transparent text-gray-500 hover:text-gray-700 hover:bg-gray-50'
                                     }`}
                                 >
                                     <tab.icon className="w-4 h-4" />
                                     {tab.label}
+                                    {tab.id === 'invite' && pendingEmployees.length > 0 && (
+                                        <span className="absolute top-2 right-1 bg-red-500 text-white text-[10px] rounded-full w-4 h-4 flex items-center justify-center font-bold">{pendingEmployees.length}</span>
+                                    )}
                                 </button>
                             ))}
                         </div>
@@ -765,10 +1066,22 @@
                                 showConfirm={showConfirm}
                             />
                         )}
+                        {activeTab === 'invite' && (
+                            <TabInvite
+                                workspaceInfo={workspaceInfo}
+                                setWorkspaceInfo={setWorkspaceInfo}
+                                firebaseUser={firebaseUser}
+                                pendingEmployees={pendingEmployees}
+                                onApprove={handleApproveEmployee}
+                                onReject={handleRejectEmployee}
+                                showAlert={showAlert}
+                                showConfirm={showConfirm}
+                            />
+                        )}
                         {activeTab === 'settings' && (
-                            <TabSettings 
-                                appPin={appPin} 
-                                setAppPin={setAppPin} 
+                            <TabSettings
+                                appPin={appPin}
+                                setAppPin={setAppPin}
                                 showAlert={showAlert}
                             />
                         )}
@@ -782,18 +1095,21 @@
                                 { id: 'calendar', label: '근무현황', icon: CalendarIcon },
                                 { id: 'payroll', label: '인건비', icon: Wallet },
                                 { id: 'chart', label: '차트', icon: BarChart3 },
-                                { id: 'predict', label: '주휴예측', icon: Search },
+                                { id: 'invite', label: '직원초대', icon: Users },
                                 { id: 'settings', label: '설정', icon: Settings },
                             ].map(tab => (
                                 <button
                                     key={tab.id}
                                     onClick={() => setActiveTab(tab.id)}
-                                    className={`flex-1 flex flex-col items-center py-2.5 pt-3 gap-1 text-[10px] font-medium transition-colors ${
+                                    className={`flex-1 relative flex flex-col items-center py-2.5 pt-3 gap-1 text-[10px] font-medium transition-colors ${
                                         activeTab === tab.id ? 'text-green-600' : 'text-gray-400'
                                     }`}
                                 >
                                     <tab.icon className={`w-5 h-5 ${activeTab === tab.id ? 'text-green-600' : 'text-gray-400'}`} />
                                     {tab.label}
+                                    {tab.id === 'invite' && pendingEmployees.length > 0 && (
+                                        <span className="absolute top-1.5 right-2 bg-red-500 text-white text-[9px] rounded-full w-3.5 h-3.5 flex items-center justify-center font-bold">{pendingEmployees.length}</span>
+                                    )}
                                 </button>
                             ))}
                         </div>
@@ -805,7 +1121,7 @@
         // ==========================================
         // 세부 컴포넌트들
         // ==========================================
-        function LoginScreen({ appPin, onLogin }) {
+        function LoginScreen({ appPin, onLogin, empName }) {
             const [input, setInput] = useState('');
             const [error, setError] = useState(false);
 
@@ -841,9 +1157,9 @@
                         <div className="bg-yellow-100 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
                             <Lock className="w-8 h-8 text-yellow-600" />
                         </div>
-                        <h2 className="text-2xl font-bold text-gray-800 mb-2">알바트래커 v1.0</h2>
+                        <h2 className="text-2xl font-bold text-gray-800 mb-1">{empName ? `${empName}님` : '알바트래커 v1.0'}</h2>
                         <p className="text-gray-500 mb-6 text-sm">
-                            {appPin === INITIAL_PIN ? '초기 비밀번호는 "000000"입니다.' : '비밀번호를 입력해주세요.'}
+                            {empName ? 'PIN을 입력해주세요.' : (appPin === INITIAL_PIN ? '초기 비밀번호는 "000000"입니다.' : '비밀번호를 입력해주세요.')}
                         </p>
 
                         <div className="flex justify-center gap-3 mb-8">
@@ -881,6 +1197,637 @@
                                 <X className="w-6 h-6" />
                             </button>
                         </div>
+                    </div>
+                </div>
+            );
+        }
+
+        // ============================================================
+        // 새 컴포넌트: 랜딩/직원가입/직원앱
+        // ============================================================
+
+        function LandingScreen({ onBossLogin, modalConfig }) {
+            const [showEmpEntry, setShowEmpEntry] = useState(false);
+            if (showEmpEntry) return <EmployeeEntryScreen onBack={() => setShowEmpEntry(false)} />;
+            return (
+                <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-4">
+                    <CustomModal config={modalConfig} />
+                    <div className="bg-white p-8 rounded-2xl shadow-xl w-full max-w-sm text-center">
+                        <div className="bg-green-100 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
+                            <CalendarIcon className="w-8 h-8 text-green-600" />
+                        </div>
+                        <h2 className="text-2xl font-bold text-gray-800 mb-2">알바트래커</h2>
+                        <p className="text-gray-500 mb-8 text-sm">근무 관리를 시작해볼까요?</p>
+                        <div className="space-y-3">
+                            <button onClick={onBossLogin} className="w-full flex items-center justify-center gap-3 border border-gray-300 rounded-xl py-3 px-4 hover:bg-gray-50 transition font-medium text-gray-700 shadow-sm">
+                                <svg className="w-5 h-5" viewBox="0 0 24 24">
+                                    <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+                                    <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+                                    <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z"/>
+                                    <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+                                </svg>
+                                사장님으로 로그인 (Google)
+                            </button>
+                            <div className="relative">
+                                <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-gray-200"></div></div>
+                                <div className="relative flex justify-center"><span className="bg-white px-2 text-xs text-gray-400">또는</span></div>
+                            </div>
+                            <button onClick={() => setShowEmpEntry(true)} className="w-full flex items-center justify-center gap-3 bg-blue-600 text-white rounded-xl py-3 px-4 hover:bg-blue-700 transition font-medium shadow-sm">
+                                <Users className="w-5 h-5" />
+                                직원으로 로그인 / 가입
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        function EmployeeEntryScreen({ onBack }) {
+            const [step, setStep] = useState('code'); // code → info → pin(login) | setup(signup) → confirm
+            const [code, setCode] = useState('');
+            const [inviteInfo, setInviteInfo] = useState(null);
+            const [name, setName] = useState('');
+            const [pin, setPin] = useState('');
+            const [confirmPin, setConfirmPin] = useState('');
+            const [isNew, setIsNew] = useState(false);
+            const [loading, setLoading] = useState(false);
+            const [error, setError] = useState('');
+
+            const handleCodeNext = async () => {
+                if (code.trim().length !== 6) { setError('초대코드 6자리를 입력해주세요.'); return; }
+                setLoading(true); setError('');
+                try {
+                    const doc = await fbDb.collection('inviteCodes').doc(code.trim().toUpperCase()).get();
+                    if (!doc.exists) { setError('유효하지 않은 초대코드입니다.'); setLoading(false); return; }
+                    setInviteInfo(doc.data());
+                    setStep('info');
+                } catch(e) { setError('오류: ' + e.message); }
+                setLoading(false);
+            };
+
+            const handleNameNext = async () => {
+                if (!name.trim()) { setError('이름을 입력해주세요.'); return; }
+                setLoading(true); setError('');
+                try {
+                    const nameKey = name.trim().toLowerCase().replace(/\s+/g, '_');
+                    const lookupDoc = await fbDb.collection('inviteCodes').doc(code.trim().toUpperCase())
+                        .collection('employees').doc(nameKey).get();
+                    setIsNew(!lookupDoc.exists);
+                    setStep(lookupDoc.exists ? 'pinLogin' : 'pinSetup');
+                } catch(e) { setError('오류: ' + e.message); }
+                setLoading(false);
+            };
+
+            const handleLogin = async () => {
+                if (pin.length !== 6) { setError('PIN 6자리를 입력해주세요.'); return; }
+                setLoading(true); setError('');
+                try {
+                    const nameKey = name.trim().toLowerCase().replace(/\s+/g, '_');
+                    const lookupDoc = await fbDb.collection('inviteCodes').doc(code.trim().toUpperCase())
+                        .collection('employees').doc(nameKey).get();
+                    if (!lookupDoc.exists) { setError('등록된 직원 정보를 찾을 수 없습니다.'); setLoading(false); return; }
+                    await fbAuth.signInWithEmailAndPassword(lookupDoc.data().email, pin);
+                    // onAuthStateChanged가 자동으로 처리
+                } catch(e) {
+                    setError(e.code === 'auth/wrong-password' || e.code === 'auth/invalid-credential' ? 'PIN이 틀렸습니다.' : '로그인 실패: ' + e.message);
+                }
+                setLoading(false);
+            };
+
+            const handleSignup = async () => {
+                if (pin.length !== 6) { setError('PIN 6자리를 입력해주세요.'); return; }
+                if (pin !== confirmPin) { setError('PIN이 일치하지 않습니다.'); return; }
+                setLoading(true); setError('');
+                try {
+                    const email = `emp${Date.now().toString(36)}@emp.albatracker.page`;
+                    await fbAuth.createUserWithEmailAndPassword(email, pin);
+                    const uid = fbAuth.currentUser.uid;
+                    const nameKey = name.trim().toLowerCase().replace(/\s+/g, '_');
+                    await fbDb.collection('employeeAccounts').doc(uid).set({
+                        name: name.trim(), bossUid: inviteInfo.bossUid,
+                        status: 'pending', pin, email,
+                        inviteCode: code.trim().toUpperCase(),
+                        createdAt: firebase.firestore.FieldValue.serverTimestamp()
+                    });
+                    await fbDb.collection('inviteCodes').doc(code.trim().toUpperCase())
+                        .collection('employees').doc(nameKey).set({ email, uid });
+                    // onAuthStateChanged → 역할 감지 → PendingApprovalScreen
+                } catch(e) {
+                    if (e.code === 'auth/email-already-in-use') {
+                        setError('이미 가입된 계정입니다. 로그인해 주세요.');
+                        setStep('pinLogin');
+                    } else {
+                        setError('가입 실패: ' + e.message);
+                    }
+                }
+                setLoading(false);
+            };
+
+            const PinDots = ({ value }) => (
+                <div className="flex justify-center gap-3 my-6">
+                    {[...Array(6)].map((_, i) => (
+                        <div key={i} className={`w-4 h-4 rounded-full transition-all ${i < value.length ? 'bg-blue-600 scale-110' : 'bg-gray-200'}`} />
+                    ))}
+                </div>
+            );
+
+            const NumPad = ({ onNum, onDel }) => (
+                <div className="grid grid-cols-3 gap-3">
+                    {[1,2,3,4,5,6,7,8,9].map(n => (
+                        <button key={n} onClick={() => onNum(n.toString())} className="h-14 bg-gray-50 hover:bg-gray-100 rounded-xl text-xl font-medium text-gray-700 transition active:scale-95">{n}</button>
+                    ))}
+                    <div/>
+                    <button onClick={() => onNum('0')} className="h-14 bg-gray-50 hover:bg-gray-100 rounded-xl text-xl font-medium text-gray-700 transition active:scale-95">0</button>
+                    <button onClick={onDel} className="h-14 bg-gray-50 hover:bg-gray-100 rounded-xl flex items-center justify-center transition active:scale-95"><X className="w-6 h-6 text-gray-700"/></button>
+                </div>
+            );
+
+            return (
+                <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-4">
+                    <div className="bg-white p-8 rounded-2xl shadow-xl w-full max-w-sm">
+                        <button onClick={onBack} className="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700 mb-6">
+                            <ChevronLeft className="w-4 h-4" /> 뒤로
+                        </button>
+
+                        {step === 'code' && (
+                            <div className="text-center">
+                                <div className="bg-blue-100 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
+                                    <Users className="w-8 h-8 text-blue-600" />
+                                </div>
+                                <h2 className="text-xl font-bold text-gray-800 mb-1">직원 로그인 / 가입</h2>
+                                <p className="text-gray-500 text-sm mb-6">사장님께 받은 초대코드를 입력하세요</p>
+                                <input value={code} onChange={e => setCode(e.target.value.toUpperCase())} onKeyDown={e => e.key==='Enter' && handleCodeNext()}
+                                    className="w-full text-center text-2xl font-bold tracking-widest border-2 border-gray-300 rounded-xl py-3 focus:border-blue-500 outline-none uppercase mb-3" maxLength={6} placeholder="XXXXXX" />
+                                {error && <p className="text-red-500 text-sm mb-3">{error}</p>}
+                                <button onClick={handleCodeNext} disabled={loading} className="w-full bg-blue-600 text-white py-3 rounded-xl font-bold hover:bg-blue-700 transition disabled:opacity-50">
+                                    {loading ? '확인 중...' : '다음'}
+                                </button>
+                            </div>
+                        )}
+
+                        {step === 'info' && (
+                            <div className="text-center">
+                                <div className="bg-green-100 py-2 px-4 rounded-xl mb-6">
+                                    <p className="text-green-700 font-bold text-sm">{inviteInfo?.shopName}</p>
+                                    <p className="text-green-600 text-xs">에 오신 것을 환영합니다!</p>
+                                </div>
+                                <h2 className="text-xl font-bold text-gray-800 mb-1">이름을 입력해주세요</h2>
+                                <p className="text-gray-500 text-sm mb-6">실명을 정확히 입력해야 합니다</p>
+                                <input value={name} onChange={e => setName(e.target.value)} onKeyDown={e => e.key==='Enter' && handleNameNext()}
+                                    className="w-full text-center border-2 border-gray-300 rounded-xl py-3 focus:border-blue-500 outline-none mb-3 text-lg font-medium" placeholder="홍길동" />
+                                {error && <p className="text-red-500 text-sm mb-3">{error}</p>}
+                                <button onClick={handleNameNext} disabled={loading} className="w-full bg-blue-600 text-white py-3 rounded-xl font-bold hover:bg-blue-700 transition disabled:opacity-50">
+                                    {loading ? '확인 중...' : '다음'}
+                                </button>
+                            </div>
+                        )}
+
+                        {step === 'pinLogin' && (
+                            <div className="text-center">
+                                <h2 className="text-xl font-bold text-gray-800 mb-1">{name}님, 반갑습니다</h2>
+                                <p className="text-gray-500 text-sm">PIN 6자리를 입력해주세요</p>
+                                <PinDots value={pin} />
+                                <NumPad onNum={n => { if(pin.length<6) setPin(p=>p+n); }} onDel={() => setPin(p=>p.slice(0,-1))} />
+                                {error && <p className="text-red-500 text-sm mt-3">{error}</p>}
+                                <button onClick={handleLogin} disabled={loading || pin.length!==6} className="w-full mt-4 bg-blue-600 text-white py-3 rounded-xl font-bold hover:bg-blue-700 transition disabled:opacity-50">
+                                    {loading ? '로그인 중...' : '로그인'}
+                                </button>
+                            </div>
+                        )}
+
+                        {step === 'pinSetup' && (
+                            <div className="text-center">
+                                <h2 className="text-xl font-bold text-gray-800 mb-1">PIN을 설정해주세요</h2>
+                                <p className="text-gray-500 text-sm">앱 잠금에 사용할 6자리 숫자</p>
+                                <PinDots value={pin} />
+                                <NumPad onNum={n => { if(pin.length<6) setPin(p=>p+n); }} onDel={() => setPin(p=>p.slice(0,-1))} />
+                                <button onClick={() => { if(pin.length===6) setStep('pinConfirm'); else setError('PIN 6자리를 입력해주세요.'); }} className="w-full mt-4 bg-blue-600 text-white py-3 rounded-xl font-bold hover:bg-blue-700 transition">
+                                    다음
+                                </button>
+                                {error && <p className="text-red-500 text-sm mt-2">{error}</p>}
+                            </div>
+                        )}
+
+                        {step === 'pinConfirm' && (
+                            <div className="text-center">
+                                <h2 className="text-xl font-bold text-gray-800 mb-1">PIN을 다시 입력해주세요</h2>
+                                <p className="text-gray-500 text-sm">확인을 위해 한 번 더 입력</p>
+                                <PinDots value={confirmPin} />
+                                <NumPad onNum={n => { if(confirmPin.length<6) setConfirmPin(p=>p+n); }} onDel={() => setConfirmPin(p=>p.slice(0,-1))} />
+                                <button onClick={handleSignup} disabled={loading || confirmPin.length!==6} className="w-full mt-4 bg-green-600 text-white py-3 rounded-xl font-bold hover:bg-green-700 transition disabled:opacity-50">
+                                    {loading ? '가입 중...' : '가입 완료'}
+                                </button>
+                                {error && <p className="text-red-500 text-sm mt-2">{error}</p>}
+                            </div>
+                        )}
+                    </div>
+                </div>
+            );
+        }
+
+        function PendingApprovalScreen({ empAccount, onLogout }) {
+            return (
+                <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+                    <div className="bg-white p-8 rounded-2xl shadow-xl w-full max-w-sm text-center">
+                        <div className="w-20 h-20 rounded-full bg-yellow-100 flex items-center justify-center mx-auto mb-4">
+                            <svg className="w-10 h-10 text-yellow-500 animate-pulse" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+                        </div>
+                        <h2 className="text-xl font-bold text-gray-800 mb-2">승인 대기 중</h2>
+                        <p className="text-gray-500 text-sm mb-2">
+                            <span className="font-bold text-gray-700">{empAccount?.name || ''}님</span>의 가입 신청이<br/>
+                            사장님 승인을 기다리고 있습니다.
+                        </p>
+                        <p className="text-xs text-gray-400 mb-8">사장님이 승인하면 자동으로 접속됩니다.</p>
+                        <button onClick={onLogout} className="w-full bg-gray-200 text-gray-700 py-3 rounded-xl font-medium hover:bg-gray-300 transition">
+                            로그아웃
+                        </button>
+                    </div>
+                </div>
+            );
+        }
+
+        function BossSetupModal({ firebaseUser, onSetup }) {
+            const [shopName, setShopName] = useState('');
+            const [loading, setLoading] = useState(false);
+            const [error, setError] = useState('');
+
+            const handleSubmit = async () => {
+                if (!shopName.trim()) { setError('가게 이름을 입력해주세요.'); return; }
+                setLoading(true);
+                try {
+                    const inviteCode = await setupBossWorkspace(firebaseUser.uid, shopName.trim());
+                    onSetup({ shopName: shopName.trim(), inviteCode, bossUid: firebaseUser.uid });
+                } catch(e) {
+                    setError('설정 실패: ' + e.message);
+                }
+                setLoading(false);
+            };
+
+            return (
+                <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-[9999] backdrop-blur-sm">
+                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-8">
+                        <div className="text-center mb-6">
+                            <div className="bg-green-100 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
+                                <CalendarIcon className="w-8 h-8 text-green-600" />
+                            </div>
+                            <h2 className="text-xl font-bold text-gray-800">알바트래커 시작하기</h2>
+                            <p className="text-gray-500 text-sm mt-1">처음 사용하시는군요! 가게 이름을 입력해주세요.</p>
+                        </div>
+                        <input value={shopName} onChange={e => setShopName(e.target.value)} onKeyDown={e => e.key==='Enter' && handleSubmit()}
+                            className="w-full border-2 border-gray-300 rounded-xl py-3 px-4 focus:border-green-500 outline-none mb-3 text-lg text-center font-medium"
+                            placeholder="예: 홍길동 카페" />
+                        {error && <p className="text-red-500 text-sm mb-3 text-center">{error}</p>}
+                        <button onClick={handleSubmit} disabled={loading} className="w-full bg-green-600 text-white py-3 rounded-xl font-bold hover:bg-green-700 transition disabled:opacity-50">
+                            {loading ? '설정 중...' : '시작하기'}
+                        </button>
+                    </div>
+                </div>
+            );
+        }
+
+        function PendingApprovalsModal({ pendingEmployees, onApprove, onReject, onClose }) {
+            return (
+                <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-[9999] backdrop-blur-sm">
+                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
+                        <div className="p-5 border-b flex items-center justify-between">
+                            <h2 className="text-lg font-bold text-gray-800">가입 대기 직원 ({pendingEmployees.length}명)</h2>
+                            <button onClick={onClose}><X className="w-5 h-5 text-gray-500" /></button>
+                        </div>
+                        <div className="p-4 max-h-96 overflow-y-auto space-y-3">
+                            {pendingEmployees.length === 0 ? (
+                                <p className="text-center text-gray-400 py-8">대기 중인 직원이 없습니다.</p>
+                            ) : pendingEmployees.map(emp => (
+                                <div key={emp.uid} className="flex items-center justify-between bg-gray-50 rounded-xl p-4">
+                                    <div>
+                                        <p className="font-bold text-gray-800">{emp.name}</p>
+                                        <p className="text-xs text-gray-400">초대코드: {emp.inviteCode}</p>
+                                    </div>
+                                    <div className="flex gap-2">
+                                        <button onClick={() => onApprove(emp.uid)} className="bg-green-600 text-white px-3 py-1.5 rounded-lg text-sm font-bold hover:bg-green-700 transition">승인</button>
+                                        <button onClick={() => onReject(emp.uid)} className="bg-red-100 text-red-600 px-3 py-1.5 rounded-lg text-sm font-bold hover:bg-red-200 transition">거절</button>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        function TabInvite({ workspaceInfo, setWorkspaceInfo, firebaseUser, pendingEmployees, onApprove, onReject, showAlert, showConfirm }) {
+            const [copying, setCopying] = useState(false);
+            const [regenerating, setRegenerating] = useState(false);
+
+            const inviteCode = workspaceInfo?.inviteCode || '';
+            const appUrl = window.location.href.split('?')[0];
+
+            const copyCode = async () => {
+                try {
+                    await navigator.clipboard.writeText(inviteCode);
+                    setCopying(true);
+                    setTimeout(() => setCopying(false), 2000);
+                } catch { showAlert('복사에 실패했습니다.', '오류', 'error'); }
+            };
+
+            const copyLink = async () => {
+                try {
+                    await navigator.clipboard.writeText(appUrl);
+                    showAlert('링크가 복사되었습니다.\n직원에게 공유해주세요.', '복사 완료', 'success');
+                } catch { showAlert('복사에 실패했습니다.', '오류', 'error'); }
+            };
+
+            const handleRegenerate = () => {
+                showConfirm('초대코드를 새로 발급하면\n기존 코드는 더 이상 사용할 수 없습니다.\n계속하시겠습니까?', async () => {
+                    setRegenerating(true);
+                    try {
+                        const newCode = await regenerateInviteCode(firebaseUser.uid, inviteCode, workspaceInfo?.shopName);
+                        setWorkspaceInfo(prev => ({ ...prev, inviteCode: newCode }));
+                        showAlert(`새 초대코드: ${newCode}`, '코드 재발급 완료', 'success');
+                    } catch(e) {
+                        showAlert('재발급 실패: ' + e.message, '오류', 'error');
+                    }
+                    setRegenerating(false);
+                }, '초대코드 재발급');
+            };
+
+            return (
+                <div className="max-w-xl mx-auto space-y-6">
+                    <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6">
+                        <h2 className="text-lg font-bold text-gray-800 mb-1">직원 초대 코드</h2>
+                        <p className="text-sm text-gray-500 mb-5">직원에게 아래 코드와 앱 링크를 전달해주세요.</p>
+
+                        <div className="bg-blue-50 rounded-xl p-5 text-center mb-4">
+                            <p className="text-xs text-blue-500 font-medium mb-2">초대코드</p>
+                            <p className="text-4xl font-bold tracking-[0.3em] text-blue-700 mb-3">{inviteCode || '------'}</p>
+                            <button onClick={copyCode} className={`text-sm px-4 py-2 rounded-lg font-medium transition ${copying ? 'bg-green-600 text-white' : 'bg-blue-600 text-white hover:bg-blue-700'}`}>
+                                {copying ? '복사됨 ✓' : '코드 복사'}
+                            </button>
+                        </div>
+
+                        <div className="flex gap-2">
+                            <button onClick={copyLink} className="flex-1 flex items-center justify-center gap-2 bg-gray-100 text-gray-700 py-2.5 rounded-xl text-sm font-medium hover:bg-gray-200 transition">
+                                <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+                                앱 링크 복사
+                            </button>
+                            <button onClick={handleRegenerate} disabled={regenerating} className="flex-1 flex items-center justify-center gap-2 bg-gray-100 text-gray-700 py-2.5 rounded-xl text-sm font-medium hover:bg-gray-200 transition disabled:opacity-50">
+                                <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg>
+                                {regenerating ? '발급 중...' : '코드 재발급'}
+                            </button>
+                        </div>
+                    </div>
+
+                    <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6">
+                        <div className="flex items-center justify-between mb-4">
+                            <h2 className="text-lg font-bold text-gray-800">가입 대기 직원</h2>
+                            <span className="text-sm text-gray-500">{pendingEmployees.length}명</span>
+                        </div>
+                        {pendingEmployees.length === 0 ? (
+                            <div className="text-center py-8 text-gray-400">
+                                <Users className="w-10 h-10 mx-auto mb-2 opacity-30" />
+                                <p className="text-sm">대기 중인 직원이 없습니다</p>
+                            </div>
+                        ) : (
+                            <div className="space-y-3">
+                                {pendingEmployees.map(emp => (
+                                    <div key={emp.uid} className="flex items-center justify-between bg-yellow-50 border border-yellow-200 rounded-xl p-4">
+                                        <div>
+                                            <p className="font-bold text-gray-800">{emp.name}</p>
+                                            <p className="text-xs text-gray-400">가입 신청</p>
+                                        </div>
+                                        <div className="flex gap-2">
+                                            <button onClick={() => onApprove(emp.uid)} className="bg-green-600 text-white px-3 py-1.5 rounded-lg text-sm font-bold hover:bg-green-700 transition">승인</button>
+                                            <button onClick={() => onReject(emp.uid)} className="bg-red-100 text-red-600 px-3 py-1.5 rounded-lg text-sm font-bold hover:bg-red-200 transition">거절</button>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+
+                    <div className="bg-blue-50 rounded-xl p-4 text-sm text-blue-700 space-y-1">
+                        <p className="font-bold">직원 가입 안내</p>
+                        <p>① 직원이 앱 링크에 접속</p>
+                        <p>② "직원으로 로그인/가입" 클릭</p>
+                        <p>③ 초대코드 입력 → 이름 입력 → PIN 설정</p>
+                        <p>④ 사장님이 이 화면에서 승인</p>
+                    </div>
+                </div>
+            );
+        }
+
+        function EmployeeApp({ empAccount, firebaseUser, mySubmissions, notifications, onLogout, onLock, showAlert, showConfirm, modalConfig }) {
+            const [activeTab, setActiveTab] = useState('calendar');
+            const [today] = useState(new Date());
+            const [year, setYear] = useState(today.getFullYear());
+            const [month, setMonth] = useState(today.getMonth() + 1);
+            const [submitModal, setSubmitModal] = useState(null); // { date, existing }
+            const unreadCount = notifications.filter(n => !n.read).length;
+
+            const monthKey = `${year}-${String(month).padStart(2,'0')}`;
+            const daysInMonth = getDaysInMonth(year, month);
+            const firstDay = getFirstDayOfMonth(year, month);
+
+            const markAllRead = async () => {
+                const unread = notifications.filter(n => !n.read);
+                await Promise.all(unread.map(n =>
+                    fbDb.collection('employeeAccounts').doc(firebaseUser.uid)
+                        .collection('notifications').doc(n.id).update({ read: true })
+                ));
+            };
+
+            useEffect(() => {
+                if (activeTab === 'notifications' && unreadCount > 0) markAllRead();
+            }, [activeTab]);
+
+            return (
+                <div className="min-h-screen bg-gray-50 text-gray-800 font-sans relative pb-24">
+                    <CustomModal config={modalConfig} />
+                    {submitModal && (
+                        <EmpSubmitModal
+                            date={submitModal.date}
+                            existing={submitModal.existing}
+                            empAccount={empAccount}
+                            firebaseUser={firebaseUser}
+                            onClose={() => setSubmitModal(null)}
+                            showAlert={showAlert}
+                        />
+                    )}
+
+                    <header className="bg-blue-600 text-white shadow-md">
+                        <div className="max-w-lg mx-auto px-4 h-16 flex items-center justify-between">
+                            <div>
+                                <p className="text-xs text-blue-200">직원</p>
+                                <h1 className="text-lg font-bold">{empAccount?.name}님</h1>
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <button onClick={onLock} className="p-2 rounded-lg hover:bg-blue-700 transition" title="잠금">
+                                    <Lock className="w-5 h-5" />
+                                </button>
+                                <button onClick={onLogout} className="p-2 rounded-lg hover:bg-blue-700 transition" title="로그아웃">
+                                    <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" x2="9" y1="12" y2="12"/></svg>
+                                </button>
+                            </div>
+                        </div>
+                    </header>
+
+                    <main className="max-w-lg mx-auto px-3 py-4">
+                        {activeTab === 'calendar' && (
+                            <div>
+                                <div className="flex items-center justify-between mb-4">
+                                    <button onClick={() => { let m=month-1,y=year; if(m<1){m=12;y--;} setMonth(m);setYear(y); }} className="p-2 rounded-lg hover:bg-gray-200">
+                                        <ChevronLeft className="w-5 h-5"/>
+                                    </button>
+                                    <h2 className="text-lg font-bold text-gray-800">{year}년 {month}월</h2>
+                                    <button onClick={() => { let m=month+1,y=year; if(m>12){m=1;y++;} setMonth(m);setYear(y); }} className="p-2 rounded-lg hover:bg-gray-200">
+                                        <ChevronRight className="w-5 h-5"/>
+                                    </button>
+                                </div>
+
+                                <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+                                    <div className="grid grid-cols-7 border-b border-gray-100">
+                                        {['일','월','화','수','목','금','토'].map(d => (
+                                            <div key={d} className="py-2 text-center text-xs font-bold text-gray-500">{d}</div>
+                                        ))}
+                                    </div>
+                                    <div className="grid grid-cols-7">
+                                        {[...Array(firstDay)].map((_,i) => <div key={`e${i}`} className="min-h-[60px] border-b border-r border-gray-50"/>)}
+                                        {[...Array(daysInMonth)].map((_,i) => {
+                                            const day = i + 1;
+                                            const dateStr = `${year}-${String(month).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+                                            const sub = mySubmissions[dateStr];
+                                            const isToday = today.getFullYear()===year && today.getMonth()+1===month && today.getDate()===day;
+                                            const isPast = new Date(dateStr) <= today;
+                                            const isSun = (firstDay + i) % 7 === 0;
+                                            const isSat = (firstDay + i) % 7 === 6;
+
+                                            return (
+                                                <div key={day} className={`min-h-[60px] border-b border-r border-gray-100 p-1.5 flex flex-col ${isToday ? 'bg-blue-50' : ''}`}>
+                                                    <span className={`text-xs font-bold mb-1 ${isToday ? 'text-blue-600' : isSun ? 'text-red-500' : isSat ? 'text-blue-500' : 'text-gray-600'}`}>{day}</span>
+                                                    {sub ? (
+                                                        <div className="flex-1 bg-green-100 rounded p-1 text-center">
+                                                            <p className="text-xs font-bold text-green-700">{sub.hours}h</p>
+                                                            <p className="text-[9px] text-green-500">제출완료</p>
+                                                        </div>
+                                                    ) : isPast && (
+                                                        <button onClick={() => setSubmitModal({ date: dateStr, existing: null })}
+                                                            className="flex-1 flex items-center justify-center rounded border border-dashed border-gray-300 hover:border-blue-400 hover:bg-blue-50 transition text-gray-400 hover:text-blue-500">
+                                                            <Plus className="w-3.5 h-3.5"/>
+                                                        </button>
+                                                    )}
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+
+                                <div className="mt-4 bg-white rounded-xl border border-gray-200 p-4">
+                                    <h3 className="text-sm font-bold text-gray-700 mb-2">{month}월 요약</h3>
+                                    {(() => {
+                                        const subs = Object.values(mySubmissions).filter(s => s.date?.startsWith(monthKey));
+                                        const totalH = subs.reduce((a,s) => a+(s.hours||0), 0);
+                                        return (
+                                            <div className="flex gap-4 text-sm">
+                                                <div><p className="text-gray-500">근무일</p><p className="font-bold text-gray-800">{subs.length}일</p></div>
+                                                <div><p className="text-gray-500">총 시간</p><p className="font-bold text-gray-800">{totalH}h</p></div>
+                                            </div>
+                                        );
+                                    })()}
+                                </div>
+                            </div>
+                        )}
+
+                        {activeTab === 'notifications' && (
+                            <div className="space-y-3">
+                                <h2 className="text-lg font-bold text-gray-800 mb-2">변경 알림</h2>
+                                {notifications.length === 0 ? (
+                                    <div className="text-center py-12 bg-white rounded-xl border border-gray-200">
+                                        <CheckCircle2 className="w-10 h-10 text-gray-300 mx-auto mb-2"/>
+                                        <p className="text-gray-400 text-sm">알림이 없습니다</p>
+                                    </div>
+                                ) : notifications.map(n => (
+                                    <div key={n.id} className={`bg-white rounded-xl border p-4 ${n.read ? 'border-gray-200' : 'border-yellow-300 bg-yellow-50'}`}>
+                                        <div className="flex items-start justify-between mb-1">
+                                            <p className="text-sm font-bold text-gray-800">{n.date} 근무시간 변경</p>
+                                            {!n.read && <span className="text-xs bg-yellow-400 text-yellow-900 px-2 py-0.5 rounded-full font-bold">새 알림</span>}
+                                        </div>
+                                        <p className="text-sm text-gray-600">{n.oldHours}h → <span className="font-bold text-blue-600">{n.newHours}h</span> 로 변경되었습니다</p>
+                                        {n.reason && <p className="text-xs text-gray-400 mt-1">사유: {n.reason}</p>}
+                                        <p className="text-xs text-gray-400 mt-1">{n.createdAt?.toDate ? n.createdAt.toDate().toLocaleDateString('ko-KR') : ''}</p>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </main>
+
+                    <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 z-40 mobile-nav-safe">
+                        <div className="flex max-w-lg mx-auto">
+                            <button onClick={() => setActiveTab('calendar')} className={`flex-1 flex flex-col items-center py-3 gap-1 text-xs font-medium ${activeTab==='calendar' ? 'text-blue-600' : 'text-gray-400'}`}>
+                                <CalendarIcon className="w-5 h-5"/>근무 입력
+                            </button>
+                            <button onClick={() => setActiveTab('notifications')} className={`flex-1 relative flex flex-col items-center py-3 gap-1 text-xs font-medium ${activeTab==='notifications' ? 'text-blue-600' : 'text-gray-400'}`}>
+                                <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+                                알림
+                                {unreadCount > 0 && <span className="absolute top-1.5 right-6 bg-red-500 text-white text-[9px] rounded-full w-4 h-4 flex items-center justify-center font-bold">{unreadCount}</span>}
+                            </button>
+                        </div>
+                    </nav>
+                </div>
+            );
+        }
+
+        function EmpSubmitModal({ date, empAccount, firebaseUser, onClose, showAlert }) {
+            const [hours, setHours] = useState('');
+            const [note, setNote] = useState('');
+            const [loading, setLoading] = useState(false);
+
+            const handleSubmit = async () => {
+                const h = parseFloat(hours);
+                if (isNaN(h) || h <= 0 || h > 24) { showAlert('올바른 근무시간을 입력해주세요. (0~24)', '입력 오류', 'error'); return; }
+                setLoading(true);
+                try {
+                    await submitWorkHours(empAccount.bossUid, {
+                        empUid: firebaseUser.uid,
+                        employeeId: empAccount.employeeId,
+                        empName: empAccount.name,
+                        date,
+                        hours: h,
+                        note: note.trim()
+                    });
+                    showAlert(`${date} 근무시간(${h}h)이 제출되었습니다.`, '제출 완료', 'success');
+                    onClose();
+                } catch(e) {
+                    showAlert('제출 실패: ' + e.message, '오류', 'error');
+                }
+                setLoading(false);
+            };
+
+            return (
+                <div className="fixed inset-0 bg-black/60 flex items-end sm:items-center justify-center p-4 z-[9999]">
+                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6">
+                        <div className="flex items-center justify-between mb-4">
+                            <h3 className="text-lg font-bold text-gray-800">근무시간 입력</h3>
+                            <button onClick={onClose}><X className="w-5 h-5 text-gray-500"/></button>
+                        </div>
+                        <p className="text-sm text-gray-500 mb-4">{date}</p>
+                        <div className="mb-4">
+                            <label className="block text-sm font-bold text-gray-700 mb-1">근무시간 (시간)</label>
+                            <input type="number" step="0.5" min="0" max="24" value={hours} onChange={e => setHours(e.target.value)}
+                                className="w-full border-2 border-gray-300 rounded-xl py-3 px-4 text-center text-2xl font-bold focus:border-blue-500 outline-none"
+                                placeholder="8" autoFocus />
+                        </div>
+                        <div className="mb-6">
+                            <label className="block text-sm font-bold text-gray-700 mb-1">메모 (선택)</label>
+                            <input type="text" value={note} onChange={e => setNote(e.target.value)}
+                                className="w-full border-2 border-gray-300 rounded-xl py-2.5 px-4 focus:border-blue-500 outline-none text-sm"
+                                placeholder="특이사항 입력" />
+                        </div>
+                        <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-3 mb-4">
+                            <p className="text-xs text-yellow-700 font-medium">⚠️ 제출 후에는 수정할 수 없습니다. 신중하게 입력해주세요.</p>
+                        </div>
+                        <button onClick={handleSubmit} disabled={loading || !hours}
+                            className="w-full bg-blue-600 text-white py-3 rounded-xl font-bold hover:bg-blue-700 transition disabled:opacity-50">
+                            {loading ? '제출 중...' : '제출하기'}
+                        </button>
                     </div>
                 </div>
             );
@@ -1636,6 +2583,7 @@
             });
 
             const handleSave = () => {
+                const dateStr = `${year}-${String(month).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
                 setMonthlyData(prev => {
                     const newData = { ...prev };
                     if (!newData[monthKey]) newData[monthKey] = { days: {} };
@@ -1645,9 +2593,24 @@
 
                     combinedEmployees.forEach(emp => {
                         const hours = Number(hoursData[emp.id]) || 0;
+                        const existingEntry = prev[monthKey]?.days[day]?.entries[emp.id];
+
                         if (hours > 0) {
+                            // 직원이 제출했고 사장이 시간을 변경한 경우 → 알림 전송
+                            if (existingEntry?.submittedByEmp && existingEntry?.empUid &&
+                                existingEntry.hours !== hours) {
+                                sendChangeNotification(existingEntry.empUid, {
+                                    date: dateStr,
+                                    oldHours: existingEntry.hours,
+                                    newHours: hours
+                                }).catch(() => {});
+                            }
                             newData[monthKey].days[day].entries[emp.id] = {
-                                hours, pay: hours * emp.wage, name: emp.name, wage: emp.wage
+                                hours, pay: Math.round(hours * emp.wage), name: emp.name, wage: emp.wage,
+                                submittedByEmp: existingEntry?.submittedByEmp || false,
+                                empUid: existingEntry?.empUid || null,
+                                submittedHours: existingEntry?.submittedHours || null,
+                                bossModified: existingEntry?.submittedByEmp ? (existingEntry.hours !== hours) : false
                             };
                         } else {
                             delete newData[monthKey].days[day].entries[emp.id];

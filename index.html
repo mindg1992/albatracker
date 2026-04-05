@@ -36,9 +36,9 @@
         firebase.initializeApp(firebaseConfig);
         const fbAuth = firebase.auth();
         const fbDb = firebase.firestore();
-        // WebSocket(gRPC-Web) 대신 Long Polling(HTTP) 자동 감지 사용
-        // → set() hang 문제 해결 (WebSocket이 막혀도 HTTP로 fallback)
-        fbDb.settings({ experimentalAutoDetectLongPolling: true, merge: true });
+        // WebSocket 시도 없이 처음부터 Long Polling(HTTP)만 사용
+        // AutoDetect는 WebSocket이 hang하면 전환을 못 함 → Force로 변경
+        fbDb.settings({ experimentalForceLongPolling: true, merge: true });
     </script>
 
     <style>
@@ -225,6 +225,16 @@
             );
         }
 
+        // Firestore set() 타임아웃 래퍼 (hang 방지)
+        function fsSet(docRef, data, ms = 15000) {
+            return Promise.race([
+                docRef.set(data),
+                new Promise((_, reject) =>
+                    setTimeout(() => reject(new Error('저장 연결 시간이 초과되었습니다.\n네트워크 상태를 확인해주세요.')), ms)
+                )
+            ]);
+        }
+
         // --- 메인 애플리케이션 컴포넌트 ---
         function AlbaTracker() {
             const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -366,7 +376,7 @@
                 saveTimerRef.current = setTimeout(async () => {
                     setIsSyncing(true);
                     try {
-                        await fbDb.collection('users').doc(firebaseUser.uid).set(currentData);
+                        await fsSet(fbDb.collection('users').doc(firebaseUser.uid), currentData);
                         lastSyncedDataRef.current = currentDataStr;
                         localStorage.setItem('at_cache_' + firebaseUser.uid, JSON.stringify(currentData));
                         setIsSyncing(false);
@@ -394,7 +404,7 @@
 
                 setIsSyncing(true);
 
-                fbDb.collection('users').doc(firebaseUser.uid).set(currentData)
+                fsSet(fbDb.collection('users').doc(firebaseUser.uid), currentData)
                     .then(() => {
                         lastSyncedDataRef.current = JSON.stringify(currentData);
                         localStorage.setItem('at_cache_' + firebaseUser.uid, JSON.stringify(currentData));

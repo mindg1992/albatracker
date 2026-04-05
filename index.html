@@ -222,6 +222,40 @@
             );
         }
 
+        // --- Firestore REST API 저장 (SDK WebChannel 불안정 문제 우회) ---
+        // SDK set()은 gRPC-Web 스트리밍 연결에 의존하여 hang 발생 가능
+        // REST API는 일반 HTTP PATCH라 안정적
+        async function saveToFirestoreREST(uid, data) {
+            const token = await fbAuth.currentUser.getIdToken();
+            const toFV = (v) => {
+                if (v === null || v === undefined) return { nullValue: null };
+                if (typeof v === 'boolean')         return { booleanValue: v };
+                if (typeof v === 'number')           return Number.isInteger(v) ? { integerValue: String(v) } : { doubleValue: v };
+                if (typeof v === 'string')           return { stringValue: v };
+                if (Array.isArray(v))                return { arrayValue: { values: v.map(toFV) } };
+                if (typeof v === 'object') {
+                    const fields = {};
+                    Object.entries(v).forEach(([k, val]) => { fields[k] = toFV(val); });
+                    return { mapValue: { fields } };
+                }
+                return { stringValue: String(v) };
+            };
+            const fields = {};
+            Object.entries(data).forEach(([k, v]) => { fields[k] = toFV(v); });
+            const resp = await fetch(
+                `https://firestore.googleapis.com/v1/projects/albatracker-9e90e/databases/(default)/documents/users/${uid}`,
+                {
+                    method: 'PATCH',
+                    headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ fields })
+                }
+            );
+            if (!resp.ok) {
+                const err = await resp.json().catch(() => ({}));
+                throw new Error(err.error?.message || `저장 실패 (HTTP ${resp.status})`);
+            }
+        }
+
         // --- 메인 애플리케이션 컴포넌트 ---
         function AlbaTracker() {
             const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -363,9 +397,8 @@
                 saveTimerRef.current = setTimeout(async () => {
                     setIsSyncing(true);
                     try {
-                        await fbDb.collection('users').doc(firebaseUser.uid).set(currentData);
+                        await saveToFirestoreREST(firebaseUser.uid, currentData);
                         lastSyncedDataRef.current = currentDataStr;
-                        // localStorage 캐시도 업데이트
                         localStorage.setItem('at_cache_' + firebaseUser.uid, JSON.stringify(currentData));
                         setIsSyncing(false);
                         setSaveSuccess(true);
@@ -392,29 +425,21 @@
 
                 setIsSyncing(true);
 
-                // setTimeout으로 React 렌더 사이클 밖에서 실행 (연결 hang 방지)
-                setTimeout(() => {
-                    const savePromise = fbDb.collection('users').doc(firebaseUser.uid).set(currentData);
-                    const timeoutPromise = new Promise((_, reject) =>
-                        setTimeout(() => reject(new Error('저장 시간이 초과되었습니다.\n잠시 후 다시 시도해주세요.')), 15000)
-                    );
-
-                    Promise.race([savePromise, timeoutPromise])
-                        .then(() => {
-                            lastSyncedDataRef.current = JSON.stringify(currentData);
-                            localStorage.setItem('at_cache_' + firebaseUser.uid, JSON.stringify(currentData));
-                            setIsSyncing(false);
-                            setSaveSuccess(true);
-                            clearTimeout(saveSuccessTimerRef.current);
-                            saveSuccessTimerRef.current = setTimeout(() => setSaveSuccess(false), 2000);
-                            showAlert('클라우드에 성공적으로 저장되었습니다.', '저장 완료', 'success');
-                        })
-                        .catch(e => {
-                            console.error('Firestore 저장 실패:', e);
-                            setIsSyncing(false);
-                            showAlert('저장에 실패했습니다.\n' + e.message, '저장 오류', 'error');
-                        });
-                }, 0);
+                saveToFirestoreREST(firebaseUser.uid, currentData)
+                    .then(() => {
+                        lastSyncedDataRef.current = JSON.stringify(currentData);
+                        localStorage.setItem('at_cache_' + firebaseUser.uid, JSON.stringify(currentData));
+                        setIsSyncing(false);
+                        setSaveSuccess(true);
+                        clearTimeout(saveSuccessTimerRef.current);
+                        saveSuccessTimerRef.current = setTimeout(() => setSaveSuccess(false), 2000);
+                        showAlert('클라우드에 성공적으로 저장되었습니다.', '저장 완료', 'success');
+                    })
+                    .catch(e => {
+                        console.error('Firestore REST 저장 실패:', e);
+                        setIsSyncing(false);
+                        showAlert('저장에 실패했습니다.\n' + e.message, '저장 오류', 'error');
+                    });
             };
 
             const handleGoogleLogin = async () => {

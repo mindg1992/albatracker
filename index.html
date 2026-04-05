@@ -302,8 +302,21 @@
           }, [appPin, employees, nextEmpId, monthlyData, predictData, globalMinWage]);
 
           const handleGoogleLogin = async () => {
+            const ua = navigator.userAgent;
+            const isInApp = /KAKAOTALK|Instagram|FBAN|FBAV|Line\/|Twitter|NAVER|DaumApps|Whale/i.test(ua)
+              || (/Android/i.test(ua) && /wv/.test(ua))
+              || (/iPhone|iPad/i.test(ua) && !/Safari/i.test(ua) && /AppleWebKit/i.test(ua));
+            if (isInApp) {
+              const isKakao = /KAKAOTALK/i.test(ua);
+              if (isKakao) {
+                alert('카카오톡 브라우저에서는 Google 로그인이 차단됩니다.\n\n우측 하단 ⋯ 메뉴 → "다른 브라우저로 열기"를 눌러 Chrome 또는 Safari에서 접속해 주세요.');
+              } else {
+                alert('현재 앱 내 브라우저에서는 Google 로그인이 차단됩니다.\n\nChrome 또는 Safari 브라우저로 열어서 로그인해 주세요.');
+              }
+              return;
+            }
             const provider = new firebase.auth.GoogleAuthProvider();
-            const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+            const isMobile = /Android|iPhone|iPad|iPod/i.test(ua);
             try {
               if (isMobile) {
                 await fbAuth.signInWithRedirect(provider);

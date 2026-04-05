@@ -301,36 +301,44 @@
                     setFbLoading(false);
                 }
 
-                // ② Firestore 서버에서 최신 데이터 동기화
-                docRef.get().then(doc => {
-                    if (cancelled) return;
-                    if (doc.exists) {
-                        const d = doc.data();
-                        const serverStr = JSON.stringify({
-                            appPin:        d.appPin        !== undefined ? d.appPin        : INITIAL_PIN,
-                            employees:     d.employees     !== undefined ? d.employees     : [],
-                            nextEmpId:     d.nextEmpId     !== undefined ? d.nextEmpId     : 1,
-                            monthlyData:   d.monthlyData   !== undefined ? d.monthlyData   : {},
-                            predictData:   d.predictData   !== undefined ? d.predictData   : {},
-                            globalMinWage: d.globalMinWage !== undefined ? d.globalMinWage : ''
-                        });
-                        if (serverStr !== lastSyncedDataRef.current) {
-                            applyData(d);
-                            localStorage.setItem(cacheKey, JSON.stringify(d));
+                // ② Firestore 서버에서 최신 데이터 동기화 (실패해도 캐시로 동작)
+                const syncFromServer = () => {
+                    docRef.get().then(doc => {
+                        if (cancelled) return;
+                        if (doc.exists) {
+                            const d = doc.data();
+                            const serverStr = JSON.stringify({
+                                appPin:        d.appPin        !== undefined ? d.appPin        : INITIAL_PIN,
+                                employees:     d.employees     !== undefined ? d.employees     : [],
+                                nextEmpId:     d.nextEmpId     !== undefined ? d.nextEmpId     : 1,
+                                monthlyData:   d.monthlyData   !== undefined ? d.monthlyData   : {},
+                                predictData:   d.predictData   !== undefined ? d.predictData   : {},
+                                globalMinWage: d.globalMinWage !== undefined ? d.globalMinWage : ''
+                            });
+                            if (serverStr !== lastSyncedDataRef.current) {
+                                applyData(d);
+                                localStorage.setItem(cacheKey, JSON.stringify(d));
+                            }
+                        } else if (!cached) {
+                            lastSyncedDataRef.current = JSON.stringify({
+                                appPin: INITIAL_PIN, employees: [], nextEmpId: 1,
+                                monthlyData: {}, predictData: {}, globalMinWage: ''
+                            });
                         }
-                    } else {
-                        lastSyncedDataRef.current = JSON.stringify({
-                            appPin: INITIAL_PIN, employees: [], nextEmpId: 1,
-                            monthlyData: {}, predictData: {}, globalMinWage: ''
-                        });
-                    }
-                }).catch(e => {
-                    if (!cancelled && !cached) {
-                        showAlert('데이터 불러오기에 실패했습니다.\n' + e.message, '연결 오류', 'error');
-                    }
-                }).finally(() => {
-                    if (!cancelled) setFbLoading(false);
-                });
+                    }).catch(e => {
+                        if (cancelled) return;
+                        // offline/unavailable 에러면 3초 후 자동 재시도 (팝업 없음)
+                        if (e.code === 'unavailable' || e.message.includes('offline')) {
+                            setTimeout(() => { if (!cancelled) syncFromServer(); }, 3000);
+                        } else if (!cached) {
+                            // 캐시도 없고 알 수 없는 에러일 때만 알림
+                            showAlert('데이터를 불러오지 못했습니다.\n네트워크를 확인하고 새로고침해 주세요.', '연결 오류', 'error');
+                        }
+                    }).finally(() => {
+                        if (!cancelled) setFbLoading(false);
+                    });
+                };
+                syncFromServer();
 
                 return () => { cancelled = true; };
             }, [firebaseUser]);

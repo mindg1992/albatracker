@@ -256,10 +256,7 @@
 
           // Firebase Auth 상태 감지 + 로그인 시 Firestore 데이터 로드
           useEffect(() => {
-            // 모바일 리다이렉트 로그인 결과 처리
-            fbAuth.getRedirectResult().catch(() => {});
-
-            const unsubscribe = fbAuth.onAuthStateChanged(async (user) => {
+const unsubscribe = fbAuth.onAuthStateChanged(async (user) => {
               setFirebaseUser(user);
               if (user) {
                 try {
@@ -316,13 +313,8 @@
               return;
             }
             const provider = new firebase.auth.GoogleAuthProvider();
-            const isMobile = /Android|iPhone|iPad|iPod/i.test(ua);
             try {
-              if (isMobile) {
-                await fbAuth.signInWithRedirect(provider);
-              } else {
-                await fbAuth.signInWithPopup(provider);
-              }
+              await fbAuth.signInWithPopup(provider);
             } catch(e) {
               alert('Google 로그인에 실패했습니다.\n' + e.message);
             }

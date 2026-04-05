@@ -1,0 +1,20 @@
+{
+  "name": "알바트래커",
+  "short_name": "알바트래커",
+  "description": "아르바이트생 근무 및 급여 관리",
+  "start_url": "/albatracker/",
+  "scope": "/albatracker/",
+  "display": "standalone",
+  "background_color": "#f9fafb",
+  "theme_color": "#3b82f6",
+  "lang": "ko",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

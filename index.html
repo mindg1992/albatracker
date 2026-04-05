@@ -23,7 +23,8 @@
     <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
     <script>
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'albatracker-default';
+        // PC-모바일 간 확실한 동기화를 위해 고정된 App ID 사용
+        const appId = 'albatracker-v1';
         let firebaseConfig = {
             apiKey: "AIzaSyCnBN1m-QkG7hTwFAji48yPKDp78OlcXvQ",
             authDomain: "albatracker-9e90e.firebaseapp.com",
@@ -87,7 +88,6 @@
         const Download = ({className}) => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>;
         const FileSpreadsheet = ({className}) => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/><line x1="8" x2="16" y1="13" y2="13"/><line x1="8" x2="16" y1="17" y2="17"/><line x1="8" x2="10" y1="9" y2="9"/></svg>;
         const Upload = ({className}) => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/></svg>;
-        const Cloud = ({className}) => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/></svg>;
 
         // --- 전역 설정 및 유틸리티 ---
         const MIN_WAGE = 10030; // 2026년 기준 예상 최저시급 (참고용)
@@ -256,9 +256,8 @@
                     try {
                         if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
                             await fbAuth.signInWithCustomToken(__initial_auth_token);
-                        } else {
-                            await fbAuth.signInAnonymously();
-                        }
+                        } 
+                        // 일반 환경에서는 사용자가 직접 Google 로그인을 하도록 대기
                     } catch (e) {
                         console.error("Auth init error", e);
                         setFbLoading(false);
@@ -275,15 +274,17 @@
                 return () => unsubscribeAuth();
             }, []);
 
-            // 인증 완료 후 실시간 데이터 수신
+            // 인증 완료 후 실시간 데이터 수신 (최적화)
             useEffect(() => {
                 if (!firebaseUser) return;
                 
-                const docRef = fbDb.collection('artifacts').doc(appId).collection('users').doc(firebaseUser.uid).collection('albatracker').doc('state');
+                const docRef = fbDb.collection('artifacts').doc(appId).collection('users').doc(firebaseUser.uid).collection('data').doc('state');
                 const unsubscribeDB = docRef.onSnapshot((doc) => {
+                    // 내가 방금 로컬에서 수정한 데이터로 인한 이벤트는 무시 (불필요한 리렌더링 및 덮어쓰기 방지)
+                    if (doc.metadata.hasPendingWrites) return;
+
                     if (doc.exists) {
                         const d = doc.data();
-                        // 로컬 변경사항이 반영되기 전에 덮어쓰는 것을 최소화하기 위해 동기화 표시 확인
                         if (d.appPin) setAppPin(d.appPin);
                         if (d.employees) setEmployees(d.employees);
                         if (d.nextEmpId) setNextEmpId(d.nextEmpId);
@@ -300,13 +301,13 @@
                 return () => unsubscribeDB();
             }, [firebaseUser]);
 
-            // 데이터 변경 시 저장 (디바운스)
+            // 데이터 변경 시 저장 (디바운스 시간 단축)
             const saveTimerRef = useRef(null);
             const isInitialMount = useRef(true);
 
             useEffect(() => {
                 if (!firebaseUser || fbLoading) return;
-                // 초기 마운트 시 저장 방지
+                // 초기 마운트 시 텅 빈 데이터 덮어쓰기 방지
                 if (isInitialMount.current) {
                     isInitialMount.current = false;
                     return;
@@ -316,33 +317,47 @@
                 saveTimerRef.current = setTimeout(async () => {
                     setIsSyncing(true);
                     try {
-                        await fbDb.collection('artifacts').doc(appId).collection('users').doc(firebaseUser.uid).collection('albatracker').doc('state').set({
+                        await fbDb.collection('artifacts').doc(appId).collection('users').doc(firebaseUser.uid).collection('data').doc('state').set({
                             appPin, employees, nextEmpId, monthlyData, predictData, globalMinWage
                         });
+                        // 성공적으로 저장 시, 약간의 시간차를 두고 동기화 아이콘 숨김
+                        setTimeout(() => setIsSyncing(false), 500);
                     } catch(e) {
                         console.error('Firestore 저장 실패:', e);
+                        setIsSyncing(false);
                     }
-                    setIsSyncing(false);
-                }, 800); // 딜레이를 약간 줄여서 빠른 저장 체감
+                }, 500); // 800ms -> 500ms로 단축하여 빠른 저장
                 return () => clearTimeout(saveTimerRef.current);
-            }, [appPin, employees, nextEmpId, monthlyData, predictData, globalMinWage, firebaseUser]);
+            }, [appPin, employees, nextEmpId, monthlyData, predictData, globalMinWage, firebaseUser, fbLoading]);
 
-            const handleConnect = async () => {
-                setFbLoading(true);
-                try {
-                    if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-                        await fbAuth.signInWithCustomToken(__initial_auth_token);
+            const handleGoogleLogin = async () => {
+                const ua = navigator.userAgent;
+                const isInApp = /KAKAOTALK|Instagram|FBAN|FBAV|Line\/|Twitter|NAVER|DaumApps|Whale/i.test(ua)
+                    || (/Android/i.test(ua) && /wv/.test(ua))
+                    || (/iPhone|iPad/i.test(ua) && !/Safari/i.test(ua) && /AppleWebKit/i.test(ua));
+                
+                if (isInApp) {
+                    const isKakao = /KAKAOTALK/i.test(ua);
+                    if (isKakao) {
+                        showAlert('카카오톡 브라우저에서는 Google 로그인이 차단됩니다.\n\n우측 하단 ⋯ 메뉴 → "다른 브라우저로 열기"를 눌러 Chrome 또는 Safari에서 접속해 주세요.', '브라우저 안내');
                     } else {
-                        await fbAuth.signInAnonymously();
+                        showAlert('현재 앱 내 브라우저에서는 Google 로그인이 차단됩니다.\n\nChrome 또는 Safari 브라우저로 열어서 로그인해 주세요.', '브라우저 안내');
                     }
+                    return;
+                }
+
+                setFbLoading(true);
+                const provider = new firebase.auth.GoogleAuthProvider();
+                try {
+                    await fbAuth.signInWithPopup(provider);
                 } catch(e) {
-                    showAlert('연결에 실패했습니다: ' + e.message, '오류');
                     setFbLoading(false);
+                    showAlert('Google 로그인에 실패했습니다.\n' + e.message, '오류');
                 }
             };
 
             const handleLogout = () => {
-                showConfirm('클라우드 연결을 해제하시겠습니까?', async () => {
+                showConfirm('로그아웃 하시겠습니까?', async () => {
                     await fbAuth.signOut();
                     setIsAuthenticated(false);
                     setAppPin(INITIAL_PIN);
@@ -430,13 +445,21 @@
                         <CustomModal config={modalConfig} />
                         <div className="bg-white p-8 rounded-2xl shadow-xl w-full max-w-sm text-center">
                             <div className="bg-green-100 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
-                                <Cloud className="w-8 h-8 text-green-600" />
+                                <CalendarIcon className="w-8 h-8 text-green-600" />
                             </div>
                             <h2 className="text-2xl font-bold text-gray-800 mb-2">알바트래커</h2>
-                            <p className="text-gray-500 mb-8 text-sm">클라우드 동기화를 통해 어디서든<br/>데이터를 안전하게 보관하세요.</p>
-                            <button onClick={handleConnect} className="w-full flex items-center justify-center gap-2 bg-green-600 text-white rounded-xl py-3.5 px-4 hover:bg-green-700 transition font-bold shadow-sm">
-                                <Cloud className="w-5 h-5" />
-                                클라우드 연결하기
+                            <p className="text-gray-500 mb-8 text-sm">Google 계정으로 로그인하면<br/>어디서든 데이터를 불러올 수 있습니다.</p>
+                            <button
+                                onClick={handleGoogleLogin}
+                                className="w-full flex items-center justify-center gap-3 border border-gray-300 rounded-xl py-3 px-4 hover:bg-gray-50 transition font-medium text-gray-700 shadow-sm"
+                            >
+                                <svg className="w-5 h-5" viewBox="0 0 24 24">
+                                    <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+                                    <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+                                    <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z"/>
+                                    <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+                                </svg>
+                                Google로 로그인
                             </button>
                         </div>
                     </div>
@@ -516,9 +539,9 @@
                                     <Lock className="w-4 h-4" />
                                     <span className="hidden md:inline">잠금</span>
                                 </button>
-                                <button onClick={handleLogout} className="flex items-center gap-1 text-sm bg-green-700 hover:bg-green-800 px-2 md:px-3 py-1.5 rounded-md transition" title="연결 해제">
-                                    <Cloud className="w-4 h-4" />
-                                    <span className="hidden md:inline">해제</span>
+                                <button onClick={handleLogout} className="flex items-center gap-1 text-sm bg-green-700 hover:bg-green-800 px-2 md:px-3 py-1.5 rounded-md transition" title="로그아웃">
+                                    <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" x2="9" y1="12" y2="12"/></svg>
+                                    <span className="hidden md:inline">로그아웃</span>
                                 </button>
                             </div>
                         </div>

@@ -23,8 +23,8 @@
     <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
     <script>
-        // PC-모바일 간 확실한 동기화를 위해 고정된 App ID 사용
-        const appId = 'albatracker-v1';
+        // Canvas 시스템에서 제공하는 보안 세션 ID 사용 (데이터베이스 접근 권한 허용을 위해 필수)
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
         let firebaseConfig = {
             apiKey: "AIzaSyCnBN1m-QkG7hTwFAji48yPKDp78OlcXvQ",
             authDomain: "albatracker-9e90e.firebaseapp.com",
@@ -200,10 +200,12 @@
                 <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-[9999] backdrop-blur-sm">
                     <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden flex flex-col transform transition-all scale-100 opacity-100">
                         <div className="p-6 text-center flex-1">
-                            {config.type === 'alert' || config.type === 'success' ? (
+                            {config.type === 'success' ? (
                                 <CheckCircle2 className="w-12 h-12 text-green-500 mx-auto mb-4" />
                             ) : config.type === 'error' ? (
                                 <AlertCircle className="w-12 h-12 text-red-500 mx-auto mb-4" />
+                            ) : config.type === 'alert' ? (
+                                <AlertCircle className="w-12 h-12 text-yellow-500 mx-auto mb-4" />
                             ) : (
                                 <AlertCircle className="w-12 h-12 text-blue-500 mx-auto mb-4" />
                             )}
@@ -394,9 +396,9 @@
                 if (isInApp) {
                     const isKakao = /KAKAOTALK/i.test(ua);
                     if (isKakao) {
-                        showAlert('카카오톡 브라우저에서는 Google 로그인이 차단됩니다.\n\n우측 하단 ⋯ 메뉴 → "다른 브라우저로 열기"를 눌러 Chrome 또는 Safari에서 접속해 주세요.', '브라우저 안내');
+                        showAlert('카카오톡 브라우저에서는 Google 로그인이 차단됩니다.\n\n우측 하단 ⋯ 메뉴 → "다른 브라우저로 열기"를 눌러 Chrome 또는 Safari에서 접속해 주세요.', '브라우저 안내', 'alert');
                     } else {
-                        showAlert('현재 앱 내 브라우저에서는 Google 로그인이 차단됩니다.\n\nChrome 또는 Safari 브라우저로 열어서 로그인해 주세요.', '브라우저 안내');
+                        showAlert('현재 앱 내 브라우저에서는 Google 로그인이 차단됩니다.\n\nChrome 또는 Safari 브라우저로 열어서 로그인해 주세요.', '브라우저 안내', 'alert');
                     }
                     return;
                 }

@@ -1149,8 +1149,8 @@
                         ? empGoogleWorkplaces.find(w => w.bossUid === selectedEmpBossUid)
                         : null;
 
-                    // 새 업체 등록 화면
-                    if (showEmpJoinScreen || (empGoogleWorkplaces.filter(w => w.status !== 'disconnected').length === 0 && pendingWorkplaces.length === 0)) {
+                    // 근무업체 등록 화면 (업체 선택 화면에서 버튼으로 진입)
+                    if (showEmpJoinScreen) {
                         return (
                             <>
                                 <CustomModal config={modalConfig} />
@@ -1172,7 +1172,7 @@
                         );
                     }
 
-                    // 업체 선택 화면 (승인된 업체 여러 개 OR 선택 안 됨)
+                    // 업체 선택 화면 — 항상 먼저 보여줌 (업체 없어도 여기서 등록 버튼 제공)
                     if (!selectedEmpBossUid || !selectedWorkplace || selectedWorkplace.status !== 'approved') {
                         return (
                             <>
@@ -1695,50 +1695,68 @@
             );
         }
 
-        // ─── Google 직원: 업체 선택 화면 ───
+        // ─── Google 직원: 업체 목록 화면 ───
         function WorkplaceSelectScreen({ workplaces, firebaseUser, onSelect, onAddWorkplace, onLogout }) {
             const active = workplaces.filter(w => w.status !== 'disconnected');
             const approved = active.filter(w => w.status === 'approved');
             const pending = active.filter(w => w.status === 'pending');
             const rejected = active.filter(w => w.status === 'rejected');
+            const hasAny = active.length > 0;
 
             return (
                 <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-4">
                     <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm overflow-hidden">
+                        {/* 헤더 */}
                         <div className="bg-blue-600 text-white p-6 text-center">
                             <div className="bg-white/20 w-14 h-14 rounded-full flex items-center justify-center mx-auto mb-3">
                                 <Users className="w-7 h-7" />
                             </div>
-                            <h2 className="text-lg font-bold">업체 선택</h2>
+                            <h2 className="text-lg font-bold">근무 중인 업체</h2>
                             <p className="text-blue-100 text-xs mt-1">{firebaseUser?.email}</p>
                         </div>
+
                         <div className="p-5 space-y-3">
+                            {/* 업체 없음 안내 */}
+                            {!hasAny && (
+                                <div className="text-center py-6 text-gray-400">
+                                    <svg className="w-12 h-12 mx-auto mb-3 text-gray-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+                                    <p className="text-sm font-medium">근무 중인 업체가 없습니다.</p>
+                                    <p className="text-xs mt-1 text-gray-300">초대코드를 입력해 업체를 등록하세요.</p>
+                                </div>
+                            )}
+
+                            {/* 승인된 업체 목록 */}
                             {approved.length > 0 && (
                                 <div>
-                                    <p className="text-xs font-bold text-gray-500 mb-2">근무 중인 업체</p>
+                                    <p className="text-xs font-bold text-gray-400 mb-2">근무 중</p>
                                     {approved.map(wp => (
                                         <button key={wp.bossUid} onClick={() => onSelect(wp.bossUid)}
-                                            className="w-full text-left p-4 rounded-xl border-2 border-blue-200 bg-blue-50 hover:bg-blue-100 transition mb-2">
+                                            className="w-full text-left p-4 rounded-xl border-2 border-blue-200 bg-blue-50 hover:bg-blue-100 active:bg-blue-200 transition mb-2">
                                             <p className="font-bold text-gray-800">{wp.shopName || '업체명 없음'}</p>
                                             <p className="text-xs text-gray-500 mt-0.5">{wp.name} · 승인완료</p>
                                         </button>
                                     ))}
                                 </div>
                             )}
+
+                            {/* 승인 대기 */}
                             {pending.length > 0 && (
                                 <div>
-                                    <p className="text-xs font-bold text-gray-500 mb-2">승인 대기 중</p>
+                                    <p className="text-xs font-bold text-gray-400 mb-2">승인 대기 중</p>
                                     {pending.map(wp => (
-                                        <div key={wp.bossUid} className="p-4 rounded-xl border border-yellow-200 bg-yellow-50 mb-2">
+                                        <button key={wp.bossUid} onClick={() => onSelect(wp.bossUid)}
+                                            className="w-full text-left p-4 rounded-xl border border-yellow-200 bg-yellow-50 hover:bg-yellow-100 transition mb-2">
                                             <p className="font-bold text-gray-700">{wp.shopName || '업체명 없음'}</p>
                                             <p className="text-xs text-yellow-600 mt-0.5">관리자 승인을 기다리고 있습니다</p>
-                                        </div>
+                                        </button>
                                     ))}
                                 </div>
                             )}
+
+                            {/* 거절됨 */}
                             {rejected.length > 0 && (
                                 <div>
-                                    <p className="text-xs font-bold text-gray-500 mb-2">거절됨</p>
+                                    <p className="text-xs font-bold text-gray-400 mb-2">거절됨</p>
                                     {rejected.map(wp => (
                                         <div key={wp.bossUid} className="p-3 rounded-xl border border-red-200 bg-red-50 mb-2">
                                             <p className="font-bold text-gray-700 text-sm">{wp.shopName || '업체명 없음'}</p>
@@ -1747,10 +1765,14 @@
                                     ))}
                                 </div>
                             )}
+
+                            {/* 근무업체 등록 버튼 — 항상 표시 */}
                             <button onClick={onAddWorkplace}
-                                className="w-full py-3 border-2 border-dashed border-gray-300 rounded-xl text-gray-500 hover:border-blue-400 hover:text-blue-600 transition text-sm font-medium">
-                                + 새 업체 초대코드 입력
+                                className="w-full py-3.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold transition text-sm flex items-center justify-center gap-2">
+                                <Plus className="w-4 h-4" />
+                                근무업체 등록
                             </button>
+
                             <div className="border-t border-gray-100 pt-2 space-y-1">
                                 <button onClick={() => { localStorage.setItem('albaLoginRole','boss'); window.location.reload(); }}
                                     className="w-full py-2.5 text-xs text-green-600 hover:text-green-700 transition font-medium">

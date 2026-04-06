@@ -73,12 +73,14 @@
             body * { visibility: hidden; }
             #contract-print-area, #contract-print-area * { visibility: visible; }
             #contract-print-area {
-                position: fixed;
+                position: absolute;
                 top: 0; left: 0;
                 width: 100%;
                 padding: 32px;
-                background: white;
                 box-sizing: border-box;
+                overflow: visible !important;
+                max-height: none !important;
+                height: auto !important;
             }
         }
     </style>

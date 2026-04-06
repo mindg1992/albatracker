@@ -496,6 +496,8 @@
 
             // 데이터 루프 및 무의미한 저장을 방지하기 위한 기준점
             const lastSyncedDataRef = useRef("");
+            // 직원 자체 퇴사 시 applyData 덮어쓰기 방지용
+            const resignedEmpUidsRef = useRef(new Set());
 
             const showAlert = (message, title = '알림', type = 'info') => {
                 setModalConfig({ type: type, title, message, onConfirm: () => setModalConfig(null) });
@@ -566,9 +568,14 @@
 
                 const applyData = (d) => {
                     if (cancelled) return;
+                    const resignedSet = resignedEmpUidsRef.current;
+                    const rawEmployees = d.employees !== undefined ? d.employees : [];
+                    const resolvedEmployees = resignedSet.size > 0
+                        ? rawEmployees.map(e => resignedSet.has(e.empUid) ? { ...e, status: 'resigned' } : e)
+                        : rawEmployees;
                     const newData = {
                         appPin:        d.appPin        !== undefined ? d.appPin        : INITIAL_PIN,
-                        employees:     d.employees     !== undefined ? d.employees     : [],
+                        employees:     resolvedEmployees,
                         nextEmpId:     d.nextEmpId     !== undefined ? d.nextEmpId     : 1,
                         monthlyData:   d.monthlyData   !== undefined ? d.monthlyData   : {},
                         predictData:   d.predictData   !== undefined ? d.predictData   : {},
@@ -976,6 +983,7 @@
                             const data = d.data();
                             // 직원이 직접 퇴사한 경우 자동 처리
                             if (data.type === 'resigned_by_emp') {
+                                resignedEmpUidsRef.current.add(data.empUid);
                                 setEmployees(prev => prev.map(e =>
                                     e.empUid === data.empUid ? { ...e, status: 'resigned' } : e
                                 ));
@@ -2448,7 +2456,7 @@
                                                     {sub ? (
                                                         <button onClick={() => setViewModal({ date: dateStr, sub })}
                                                             className="flex-1 bg-green-100 hover:bg-green-200 rounded p-1 text-center transition cursor-pointer">
-                                                            <p className="text-xs font-bold text-green-700">{sub.hours}h</p>
+                                                            <p className="text-xs font-bold text-green-700">{fmtHours(sub.hours)}</p>
                                                             <p className="text-[9px] text-green-500">{sub.note ? '메모있음' : '제출완료'}</p>
                                                         </button>
                                                     ) : isPast && !isBlocked && (
@@ -2471,7 +2479,7 @@
                                         return (
                                             <div className="flex gap-4 text-sm">
                                                 <div><p className="text-gray-500">근무일</p><p className="font-bold text-gray-800">{subs.length}일</p></div>
-                                                <div><p className="text-gray-500">총 시간</p><p className="font-bold text-gray-800">{totalH}h</p></div>
+                                                <div><p className="text-gray-500">총 시간</p><p className="font-bold text-gray-800">{fmtHours(totalH) || '0시간'}</p></div>
                                             </div>
                                         );
                                     })()}
@@ -2501,7 +2509,7 @@
                                             </p>
                                         ) : (
                                             <>
-                                                <p className="text-sm text-gray-600">{n.oldHours}h → <span className="font-bold text-blue-600">{n.newHours}h</span> 로 변경되었습니다</p>
+                                                <p className="text-sm text-gray-600">{fmtHours(n.oldHours)} → <span className="font-bold text-blue-600">{fmtHours(n.newHours)}</span> 로 변경되었습니다</p>
                                                 {n.reason && <p className="text-xs text-gray-400 mt-1">사유: {n.reason}</p>}
                                             </>
                                         )}
@@ -2554,7 +2562,7 @@
                         </div>
                         <div className="bg-green-50 border border-green-200 rounded-xl p-4 mb-3">
                             <p className="text-sm text-gray-500 mb-1">근무시간</p>
-                            <p className="text-3xl font-bold text-green-700">{sub.hours}<span className="text-base font-normal text-green-600">시간</span></p>
+                            <p className="text-3xl font-bold text-green-700">{fmtHours(sub.hours)}</p>
                         </div>
                         {sub.note ? (
                             <div className="bg-gray-50 border border-gray-200 rounded-xl p-4 mb-3">

@@ -535,10 +535,39 @@
         }
 
         // 관리자: 직원 근로계약서 삭제 → needs_resign 상태
-        async function deleteEmpContractByBoss(empUid, bossUid) {
-            await fbDb.collection('employeeAccounts').doc(empUid)
-                .collection('workplaces').doc(bossUid)
-                .update({ contractStatus: 'needs_resign', contract: firebase.firestore.FieldValue.delete() });
+        // 상호 동의 삭제: 한쪽이 먼저 누르면 contractDeleteRequest 설정, 양쪽 모두 누르면 계약서 완전 삭제
+        async function requestContractDelete(empUid, bossUid, requester) {
+            const ref = fbDb.collection('employeeAccounts').doc(empUid).collection('workplaces').doc(bossUid);
+            const doc = await ref.get();
+            const existing = doc.data()?.contractDeleteRequest;
+            const otherSide = requester === 'boss' ? 'employee' : 'boss';
+            if (existing === otherSide) {
+                // 양쪽 동의 → 완전 삭제
+                await ref.update({
+                    contractStatus: null,
+                    contract: firebase.firestore.FieldValue.delete(),
+                    contractDeleteRequest: firebase.firestore.FieldValue.delete()
+                });
+                try { await fbDb.collection('empPending').doc(`${empUid}_${bossUid}`).delete(); } catch(e) {}
+                return 'deleted';
+            } else {
+                await ref.update({ contractDeleteRequest: requester });
+                if (requester === 'employee') {
+                    await fbDb.collection('empPending').doc(`${empUid}_${bossUid}`).set({
+                        type: 'contract_delete_request', empUid, bossUid,
+                        createdAt: firebase.firestore.FieldValue.serverTimestamp()
+                    });
+                }
+                return 'requested';
+            }
+        }
+
+        async function cancelContractDeleteRequest(empUid, bossUid, requester) {
+            await fbDb.collection('employeeAccounts').doc(empUid).collection('workplaces').doc(bossUid)
+                .update({ contractDeleteRequest: firebase.firestore.FieldValue.delete() });
+            if (requester === 'employee') {
+                try { await fbDb.collection('empPending').doc(`${empUid}_${bossUid}`).delete(); } catch(e) {}
+            }
         }
 
         // 직원: 근로계약서 재제출 (boss 알림 포함)
@@ -556,12 +585,6 @@
             await batch.commit();
         }
 
-        // 직원: 본인 근로계약서 삭제 → needs_resign 상태
-        async function deleteEmpContractBySelf(empUid, bossUid) {
-            await fbDb.collection('employeeAccounts').doc(empUid)
-                .collection('workplaces').doc(bossUid)
-                .update({ contractStatus: 'needs_resign', contract: firebase.firestore.FieldValue.delete() });
-        }
 
         // 관리자: 근로계약서 서명 완료 → completed 상태
         async function bossCompleteContract(bossUid, empUid) {
@@ -1132,6 +1155,14 @@
                                 fbDb.collection('empPending').doc(d.id).delete().catch(() => {});
                                 return;
                             }
+                            // 직원이 근로계약서 삭제를 요청한 경우
+                            if (data.type === 'contract_delete_request') {
+                                setEmployees(prev => prev.map(e =>
+                                    e.empUid === data.empUid ? { ...e, contractDeleteRequest: 'employee' } : e
+                                ));
+                                // empPending은 관리자가 처리할 때까지 유지
+                                return;
+                            }
                             list.push({ uid: data.empUid, isGoogleEmployee: true, ...data });
                         });
                         setPendingGoogleEmployees(list);
@@ -1207,6 +1238,7 @@
                             ...prev,
                             contractStatus: data.contractStatus || null,
                             contract: data.contract || null,
+                            contractDeleteRequest: data.contractDeleteRequest || null,
                             workStatus: data.workStatus || prev.workStatus
                         }));
                     }, () => {});
@@ -3029,14 +3061,22 @@
                 } catch(e) { showAlert('불러오기 실패: ' + e.message, '오류', 'error'); }
             };
 
-            const handleDeleteContract = () => {
-                if (!showConfirm) return;
-                showConfirm('근로계약서를 삭제하시겠습니까?\n삭제 후 재작성 및 관리자 서명까지 앱 기능이 제한됩니다.', async () => {
-                    try {
-                        await deleteEmpContractBySelf(firebaseUser.uid, empAccount.bossUid);
-                        showAlert('근로계약서가 삭제되었습니다.\n근로계약서를 재작성해주세요.', '삭제 완료', 'success');
-                    } catch(e) { showAlert('삭제 실패: ' + e.message, '오류', 'error'); }
-                }, '근로계약서 삭제');
+            const handleRequestDeleteContract = async () => {
+                try {
+                    const result = await requestContractDelete(firebaseUser.uid, empAccount.bossUid, 'employee');
+                    if (result === 'deleted') {
+                        showAlert('근로계약서가 삭제되었습니다.', '삭제 완료', 'success');
+                    } else {
+                        showAlert('삭제 요청을 보냈습니다.\n관리자가 동의하면 삭제됩니다.', '요청 완료', 'success');
+                    }
+                } catch(e) { showAlert('처리 실패: ' + e.message, '오류', 'error'); }
+            };
+
+            const handleCancelDeleteContract = async () => {
+                try {
+                    await cancelContractDeleteRequest(firebaseUser.uid, empAccount.bossUid, 'employee');
+                    showAlert('삭제 요청이 취소되었습니다.', '취소 완료', 'success');
+                } catch(e) { showAlert('처리 실패: ' + e.message, '오류', 'error'); }
             };
 
             const handleStartRewrite = async () => {
@@ -3136,21 +3176,54 @@
                     </div>
 
                     {/* 근로계약서 보기/삭제 */}
-                    {empAccount?.isGoogleEmployee && empAccount?.bossUid && contractStatus === 'completed' && (
-                        <div className="bg-white rounded-xl border border-purple-200 shadow-sm p-6">
-                            <h3 className="text-base font-bold text-purple-700 mb-3">근로계약서</h3>
-                            <div className="flex gap-2">
-                                <button onClick={handleViewContract}
-                                    className="flex-1 bg-purple-50 text-purple-700 border border-purple-200 py-2.5 rounded-xl font-bold hover:bg-purple-100 transition text-sm">
-                                    근로계약서 보기
-                                </button>
-                                <button onClick={handleDeleteContract}
-                                    className="bg-red-50 text-red-600 border border-red-200 px-4 py-2.5 rounded-xl font-bold hover:bg-red-100 transition text-sm">
-                                    삭제
-                                </button>
+                    {empAccount?.isGoogleEmployee && empAccount?.bossUid && contractStatus === 'completed' && (() => {
+                        const deleteReq = empAccount?.contractDeleteRequest || null;
+                        return (
+                            <div className="bg-white rounded-xl border border-purple-200 shadow-sm p-6">
+                                <h3 className="text-base font-bold text-purple-700 mb-3">근로계약서</h3>
+                                <div className="flex gap-2 mb-3">
+                                    <button onClick={handleViewContract}
+                                        className="flex-1 bg-purple-50 text-purple-700 border border-purple-200 py-2.5 rounded-xl font-bold hover:bg-purple-100 transition text-sm">
+                                        근로계약서 보기
+                                    </button>
+                                </div>
+                                {deleteReq === null && (
+                                    <button onClick={handleRequestDeleteContract}
+                                        className="w-full bg-red-50 text-red-600 border border-red-200 py-2.5 rounded-xl font-bold hover:bg-red-100 transition text-sm">
+                                        삭제 요청
+                                    </button>
+                                )}
+                                {deleteReq === 'employee' && (
+                                    <div className="space-y-2">
+                                        <div className="bg-yellow-50 border border-yellow-200 rounded-xl px-4 py-2.5 text-sm text-yellow-700 font-medium text-center">
+                                            삭제 요청 대기 중 — 관리자 동의 후 삭제됩니다
+                                        </div>
+                                        <button onClick={handleCancelDeleteContract}
+                                            className="w-full bg-gray-100 text-gray-600 py-2 rounded-xl text-sm font-medium hover:bg-gray-200 transition">
+                                            요청 취소
+                                        </button>
+                                    </div>
+                                )}
+                                {deleteReq === 'boss' && (
+                                    <div className="space-y-2">
+                                        <div className="bg-orange-50 border border-orange-200 rounded-xl px-4 py-2.5 text-sm text-orange-700 font-medium text-center">
+                                            관리자가 계약서 삭제를 요청했습니다
+                                        </div>
+                                        <div className="flex gap-2">
+                                            <button onClick={handleRequestDeleteContract}
+                                                className="flex-1 bg-red-500 text-white py-2 rounded-xl text-sm font-bold hover:bg-red-600 transition">
+                                                삭제 동의
+                                            </button>
+                                            <button onClick={handleCancelDeleteContract}
+                                                className="flex-1 bg-gray-100 text-gray-600 py-2 rounded-xl text-sm font-medium hover:bg-gray-200 transition">
+                                                거부
+                                            </button>
+                                        </div>
+                                    </div>
+                                )}
                             </div>
-                        </div>
-                    )}
+                        );
+                    })()}
 
                     {viewingContract && (
                         <ContractViewModal contract={viewingContract} onClose={() => setViewingContract(null)} />
@@ -3388,15 +3461,29 @@
                 } catch(e) { showAlert('불러오기 실패: ' + e.message, '오류', 'error'); }
             };
 
-            const handleDeleteContract = (emp) => {
+            const handleDeleteContract = async (emp) => {
                 if (!emp.empUid) return;
-                showConfirm(`${emp.name}님의 근로계약서를 삭제하시겠습니까?\n삭제 후 근무자가 재작성할 때까지 기능이 제한됩니다.`, async () => {
-                    try {
-                        await deleteEmpContractByBoss(emp.empUid, currentWorkspaceId || firebaseUser.uid);
-                        setEmployees(prev => prev.map(e => e.id === emp.id ? { ...e, contractStatus: 'needs_resign' } : e));
+                try {
+                    const bossUid = currentWorkspaceId || firebaseUser.uid;
+                    const result = await requestContractDelete(emp.empUid, bossUid, 'boss');
+                    if (result === 'deleted') {
+                        setEmployees(prev => prev.map(e => e.id === emp.id ? { ...e, contractStatus: null, contractDeleteRequest: null } : e));
                         showAlert('근로계약서가 삭제되었습니다.', '삭제 완료', 'success');
-                    } catch(e) { showAlert('삭제 실패: ' + e.message, '오류', 'error'); }
-                }, '근로계약서 삭제');
+                    } else {
+                        setEmployees(prev => prev.map(e => e.id === emp.id ? { ...e, contractDeleteRequest: 'boss' } : e));
+                        showAlert('삭제 요청을 보냈습니다.\n근무자가 동의하면 삭제됩니다.', '요청 완료', 'success');
+                    }
+                } catch(e) { showAlert('처리 실패: ' + e.message, '오류', 'error'); }
+            };
+
+            const handleCancelDeleteContract = async (emp) => {
+                if (!emp.empUid) return;
+                try {
+                    const bossUid = currentWorkspaceId || firebaseUser.uid;
+                    await cancelContractDeleteRequest(emp.empUid, bossUid, 'boss');
+                    setEmployees(prev => prev.map(e => e.id === emp.id ? { ...e, contractDeleteRequest: null } : e));
+                    showAlert('삭제 요청이 취소되었습니다.', '취소 완료', 'success');
+                } catch(e) { showAlert('처리 실패: ' + e.message, '오류', 'error'); }
             };
 
             const handleBossSign = async (emp) => {
@@ -3505,25 +3592,59 @@
 
                                         {/* 근로계약서 버튼 (Google 직원만) */}
                                         {emp.empUid && (
-                                            <div className="flex gap-2 flex-wrap mb-3">
-                                                {contractStatus === 'completed' && (
-                                                    <button onClick={() => handleViewContract(emp)}
-                                                        className="flex-1 text-xs bg-purple-50 text-purple-700 border border-purple-200 py-1.5 rounded-lg font-bold hover:bg-purple-100 transition">
-                                                        근로계약서 보기
-                                                    </button>
-                                                )}
-                                                {contractStatus === 'pending_boss' && (
-                                                    <button onClick={() => handleBossSign(emp)}
-                                                        className="flex-1 text-xs bg-green-600 text-white py-1.5 rounded-lg font-bold hover:bg-green-700 transition">
-                                                        서명하기
-                                                    </button>
-                                                )}
-                                                {contractStatus === 'completed' && (
-                                                    <button onClick={() => handleDeleteContract(emp)}
-                                                        className="text-xs bg-red-50 text-red-600 border border-red-200 px-2.5 py-1.5 rounded-lg font-bold hover:bg-red-100 transition">
-                                                        삭제
-                                                    </button>
-                                                )}
+                                            <div className="flex flex-col gap-1.5 mb-3">
+                                                <div className="flex gap-2">
+                                                    {contractStatus === 'completed' && (
+                                                        <button onClick={() => handleViewContract(emp)}
+                                                            className="flex-1 text-xs bg-purple-50 text-purple-700 border border-purple-200 py-1.5 rounded-lg font-bold hover:bg-purple-100 transition">
+                                                            근로계약서 보기
+                                                        </button>
+                                                    )}
+                                                    {contractStatus === 'pending_boss' && (
+                                                        <button onClick={() => handleBossSign(emp)}
+                                                            className="flex-1 text-xs bg-green-600 text-white py-1.5 rounded-lg font-bold hover:bg-green-700 transition">
+                                                            서명하기
+                                                        </button>
+                                                    )}
+                                                </div>
+                                                {contractStatus === 'completed' && (() => {
+                                                    const deleteReq = emp.contractDeleteRequest || null;
+                                                    if (deleteReq === null) return (
+                                                        <button onClick={() => handleDeleteContract(emp)}
+                                                            className="w-full text-xs bg-red-50 text-red-600 border border-red-200 py-1.5 rounded-lg font-bold hover:bg-red-100 transition">
+                                                            삭제 요청
+                                                        </button>
+                                                    );
+                                                    if (deleteReq === 'boss') return (
+                                                        <div className="space-y-1">
+                                                            <div className="text-xs text-yellow-700 bg-yellow-50 border border-yellow-200 rounded-lg px-2 py-1.5 text-center font-medium">
+                                                                삭제 요청 대기 중 — 근무자 동의 후 삭제
+                                                            </div>
+                                                            <button onClick={() => handleCancelDeleteContract(emp)}
+                                                                className="w-full text-xs bg-gray-100 text-gray-600 py-1.5 rounded-lg font-medium hover:bg-gray-200 transition">
+                                                                요청 취소
+                                                            </button>
+                                                        </div>
+                                                    );
+                                                    if (deleteReq === 'employee') return (
+                                                        <div className="space-y-1">
+                                                            <div className="text-xs text-orange-700 bg-orange-50 border border-orange-200 rounded-lg px-2 py-1.5 text-center font-medium">
+                                                                근무자가 삭제를 요청했습니다
+                                                            </div>
+                                                            <div className="flex gap-1.5">
+                                                                <button onClick={() => handleDeleteContract(emp)}
+                                                                    className="flex-1 text-xs bg-red-500 text-white py-1.5 rounded-lg font-bold hover:bg-red-600 transition">
+                                                                    삭제 동의
+                                                                </button>
+                                                                <button onClick={() => handleCancelDeleteContract(emp)}
+                                                                    className="flex-1 text-xs bg-gray-100 text-gray-600 py-1.5 rounded-lg font-medium hover:bg-gray-200 transition">
+                                                                    거부
+                                                                </button>
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                    return null;
+                                                })()}
                                             </div>
                                         )}
 

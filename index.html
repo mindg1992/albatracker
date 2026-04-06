@@ -2809,44 +2809,46 @@
                             <div className="pt-3 border-t border-gray-100">
                                 <label className="block text-sm font-bold text-gray-700 mb-3">근무 시간 수정</label>
                                 {combinedEmployees.map((emp, idx) => (
-                                    <div key={emp.id} className="flex justify-between items-center mb-3 bg-gray-50 p-2 rounded-lg">
-                                        <span className="text-sm text-gray-700 truncate flex items-center gap-1 font-medium">
-                                            {emp.isInactive ? (
-                                                <span className="text-xs text-red-500 bg-red-50 border border-red-200 px-1.5 py-0.5 rounded font-bold">제외/퇴사</span>
-                                            ) : (
-                                                <span>{emp.displayId}.</span>
-                                            )}
-                                            {emp.name}
-                                        </span>
-                                        <div className="flex items-center gap-2">
-                                            <input
-                                                type="number" step="0.5" min="0"
-                                                value={hoursData[emp.id] ?? ''}
-                                                onChange={e => setHoursData(prev => ({...prev, [emp.id]: e.target.value}))}
-                                                className="w-20 border border-gray-300 rounded-lg px-2 py-1.5 text-right text-sm focus:ring-2 focus:ring-green-500 outline-none"
-                                                placeholder="0"
-                                            />
-                                            <span className="text-sm text-gray-500 font-medium">시간</span>
-                                        </div>
-                                    </div>
-                                    {/* 직원이 입력한 메모 표시 (읽기전용, 사장은 삭제만 가능) */}
-                                    {currentDayData.entries[emp.id]?.submittedByEmp &&
-                                     currentDayData.entries[emp.id]?.note &&
-                                     !deletedNotes[emp.id] && (
-                                        <div className="mt-1.5 flex items-start gap-2 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2">
-                                            <div className="flex-1">
-                                                <p className="text-[10px] text-blue-500 font-bold mb-0.5">직원 메모</p>
-                                                <p className="text-xs text-gray-700 whitespace-pre-wrap">{currentDayData.entries[emp.id].note}</p>
+                                    <React.Fragment key={emp.id}>
+                                        <div className="flex justify-between items-center mb-1 bg-gray-50 p-2 rounded-lg">
+                                            <span className="text-sm text-gray-700 truncate flex items-center gap-1 font-medium">
+                                                {emp.isInactive ? (
+                                                    <span className="text-xs text-red-500 bg-red-50 border border-red-200 px-1.5 py-0.5 rounded font-bold">제외/퇴사</span>
+                                                ) : (
+                                                    <span>{emp.displayId}.</span>
+                                                )}
+                                                {emp.name}
+                                            </span>
+                                            <div className="flex items-center gap-2">
+                                                <input
+                                                    type="number" step="0.5" min="0"
+                                                    value={hoursData[emp.id] ?? ''}
+                                                    onChange={e => setHoursData(prev => ({...prev, [emp.id]: e.target.value}))}
+                                                    className="w-20 border border-gray-300 rounded-lg px-2 py-1.5 text-right text-sm focus:ring-2 focus:ring-green-500 outline-none"
+                                                    placeholder="0"
+                                                />
+                                                <span className="text-sm text-gray-500 font-medium">시간</span>
                                             </div>
-                                            <button type="button" onClick={() => setDeletedNotes(p => ({...p, [emp.id]: true}))}
-                                                className="text-red-400 hover:text-red-600 transition shrink-0 mt-0.5" title="메모 삭제">
-                                                <Trash2 className="w-3.5 h-3.5"/>
-                                            </button>
                                         </div>
-                                    )}
-                                    {deletedNotes[emp.id] && (
-                                        <p className="text-[10px] text-red-400 mt-1 ml-1">메모가 삭제됩니다 (저장 후 적용)</p>
-                                    )}
+                                        {/* 직원이 입력한 메모 표시 (읽기전용, 사장은 삭제만 가능) */}
+                                        {currentDayData.entries[emp.id]?.submittedByEmp &&
+                                         currentDayData.entries[emp.id]?.note &&
+                                         !deletedNotes[emp.id] && (
+                                            <div className="mb-2 flex items-start gap-2 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2">
+                                                <div className="flex-1">
+                                                    <p className="text-[10px] text-blue-500 font-bold mb-0.5">직원 메모</p>
+                                                    <p className="text-xs text-gray-700 whitespace-pre-wrap">{currentDayData.entries[emp.id].note}</p>
+                                                </div>
+                                                <button type="button" onClick={() => setDeletedNotes(p => ({...p, [emp.id]: true}))}
+                                                    className="text-red-400 hover:text-red-600 transition shrink-0 mt-0.5" title="메모 삭제">
+                                                    <Trash2 className="w-3.5 h-3.5"/>
+                                                </button>
+                                            </div>
+                                        )}
+                                        {deletedNotes[emp.id] && (
+                                            <p className="text-[10px] text-red-400 mb-2 ml-1">메모가 삭제됩니다 (저장 후 적용)</p>
+                                        )}
+                                    </React.Fragment>
                                 ))}
                             </div>
                             

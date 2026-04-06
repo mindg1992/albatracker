@@ -3190,7 +3190,7 @@
                                 {deleteReq === null && (
                                     <button onClick={handleRequestDeleteContract}
                                         className="w-full bg-red-50 text-red-600 border border-red-200 py-2.5 rounded-xl font-bold hover:bg-red-100 transition text-sm">
-                                        삭제 요청
+                                        재작성
                                     </button>
                                 )}
                                 {deleteReq === 'employee' && (
@@ -3612,7 +3612,7 @@
                                                     if (deleteReq === null) return (
                                                         <button onClick={() => handleDeleteContract(emp)}
                                                             className="w-full text-xs bg-red-50 text-red-600 border border-red-200 py-1.5 rounded-lg font-bold hover:bg-red-100 transition">
-                                                            삭제 요청
+                                                            재작성
                                                         </button>
                                                     );
                                                     if (deleteReq === 'boss') return (

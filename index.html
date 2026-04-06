@@ -294,13 +294,14 @@
             return inviteCode;
         }
 
-        async function regenerateInviteCode(workspaceId, oldCode, shopName) {
+        async function regenerateInviteCode(workspaceId, oldCode, shopName, ownerUid) {
             const newCode = generateInviteCode();
             const batch = fbDb.batch();
             if (oldCode) batch.delete(fbDb.collection('inviteCodes').doc(oldCode));
             batch.update(fbDb.collection('workspaces').doc(workspaceId), { inviteCode: newCode });
             batch.set(fbDb.collection('inviteCodes').doc(newCode), {
                 bossUid: workspaceId, shopName: shopName || '',
+                ownerUid: ownerUid || workspaceId,
                 createdAt: firebase.firestore.FieldValue.serverTimestamp()
             });
             await batch.commit();
@@ -2179,7 +2180,7 @@
                 showConfirm('초대코드를 새로 발급하면\n기존 코드는 더 이상 사용할 수 없습니다.\n계속하시겠습니까?', async () => {
                     setRegenerating(true);
                     try {
-                        const newCode = await regenerateInviteCode(workspaceId || firebaseUser.uid, inviteCode, workspaceInfo?.shopName);
+                        const newCode = await regenerateInviteCode(workspaceId || firebaseUser.uid, inviteCode, workspaceInfo?.shopName, firebaseUser?.uid);
                         setWorkspaceInfo(prev => ({ ...prev, inviteCode: newCode }));
                         showAlert(`새 초대코드: ${newCode}`, '코드 재발급 완료', 'success');
                     } catch(e) {

@@ -380,7 +380,7 @@
                 return () => unsubscribeAuth();
             }, []);
 
-            // 역할 감지: Google 계정 = 사장님, @emp.albatracker.page 이메일 = 직원
+            // 역할 감지: Google 계정 = 관리자, @emp.albatracker.page 이메일 = 직원
             useEffect(() => {
                 if (!firebaseUser) return;
                 let cancelled = false;
@@ -417,7 +417,7 @@
                 return () => { cancelled = true; };
             }, [firebaseUser]);
 
-            // 인증 완료 후 데이터 로딩 (localStorage 캐시 우선 → Firestore 서버 동기화) — 사장님 전용
+            // 인증 완료 후 데이터 로딩 (localStorage 캐시 우선 → Firestore 서버 동기화) — 관리자 전용
             useEffect(() => {
                 if (!firebaseUser || userRole !== 'boss') return;
 
@@ -620,7 +620,7 @@
                 });
             };
 
-            // 사장님 워크스페이스 로드
+            // 관리자 워크스페이스 로드
             useEffect(() => {
                 if (!firebaseUser || userRole !== 'boss') return;
                 let cancelled = false;
@@ -633,7 +633,7 @@
                 return () => { cancelled = true; };
             }, [firebaseUser, userRole]);
 
-            // 대기 중인 직원 실시간 감지 (사장님)
+            // 대기 중인 직원 실시간 감지 (관리자)
             useEffect(() => {
                 if (!firebaseUser || userRole !== 'boss') return;
                 const unsub = fbDb.collection('employeeAccounts')
@@ -647,7 +647,7 @@
                 return () => unsub();
             }, [firebaseUser, userRole]);
 
-            // 직원 제출 근무시간 실시간 수신 → 월별 현황 자동 반영 (사장님)
+            // 직원 제출 근무시간 실시간 수신 → 월별 현황 자동 반영 (관리자)
             useEffect(() => {
                 if (!firebaseUser || userRole !== 'boss' || !isAuthenticated) return;
                 const unsub = fbDb.collection('workspaces').doc(firebaseUser.uid)
@@ -666,7 +666,7 @@
                                 const dd = md.days || {};
                                 const de = dd[day] || {};
                                 const ee = de.entries || {};
-                                if (ee[sub.employeeId]?.bossModified) return prev; // 사장이 수정한 경우 유지
+                                if (ee[sub.employeeId]?.bossModified) return prev; // 관리자가 수정한 경우 유지
                                 return {
                                     ...prev,
                                     [mk]: { ...md, days: { ...dd, [day]: { ...de, entries: { ...ee,
@@ -716,7 +716,7 @@
                 return () => unsub();
             }, [firebaseUser, userRole, empAccount, isEmpAuthenticated]);
 
-            // 직원 승인 처리 (사장님)
+            // 직원 승인 처리 (관리자)
             const handleApproveEmployee = async (empUid) => {
                 const empData = pendingEmployees.find(e => e.uid === empUid);
                 if (!empData) return;
@@ -743,7 +743,7 @@
                 }
             };
 
-            // 직원 거절 처리 (사장님)
+            // 직원 거절 처리 (관리자)
             const handleRejectEmployee = (empUid) => {
                 const empData = pendingEmployees.find(e => e.uid === empUid);
                 showConfirm(`${empData?.name || '직원'}님의 가입을 거절하시겠습니까?`, async () => {
@@ -850,7 +850,7 @@
                             <div className="bg-white p-8 rounded-2xl shadow-xl w-full max-w-sm text-center">
                                 <AlertCircle className="w-16 h-16 text-red-500 mx-auto mb-4" />
                                 <h2 className="text-xl font-bold text-gray-800 mb-2">가입이 거절되었습니다</h2>
-                                <p className="text-gray-500 text-sm mb-6">사장님께 문의해 주세요.</p>
+                                <p className="text-gray-500 text-sm mb-6">관리자께 문의해 주세요.</p>
                                 <button onClick={handleLogout} className="w-full bg-gray-600 text-white py-3 rounded-xl font-bold">로그아웃</button>
                             </div>
                         </div>
@@ -879,7 +879,7 @@
                 );
             }
 
-            // ── 사장님 플로우 ──
+            // ── 관리자 플로우 ──
             if (!isAuthenticated) {
                 return (
                     <>
@@ -1368,7 +1368,7 @@
                                     <Users className="w-8 h-8 text-blue-600" />
                                 </div>
                                 <h2 className="text-xl font-bold text-gray-800 mb-1">직원 로그인 / 가입</h2>
-                                <p className="text-gray-500 text-sm mb-6">사장님께 받은 초대코드를 입력하세요</p>
+                                <p className="text-gray-500 text-sm mb-6">관리자께 받은 초대코드를 입력하세요</p>
                                 <input value={code} onChange={e => setCode(e.target.value.toUpperCase())} onKeyDown={e => e.key==='Enter' && handleCodeNext()}
                                     className="w-full text-center text-2xl font-bold tracking-widest border-2 border-gray-300 rounded-xl py-3 focus:border-blue-500 outline-none uppercase mb-3" maxLength={6} placeholder="XXXXXX" />
                                 {error && <p className="text-red-500 text-sm mb-3">{error}</p>}
@@ -1489,9 +1489,9 @@
                         <h2 className="text-xl font-bold text-gray-800 mb-2">승인 대기 중</h2>
                         <p className="text-gray-500 text-sm mb-2">
                             <span className="font-bold text-gray-700">{empAccount?.name || ''}님</span>의 가입 신청이<br/>
-                            사장님 승인을 기다리고 있습니다.
+                            관리자 승인을 기다리고 있습니다.
                         </p>
-                        <p className="text-xs text-gray-400 mb-8">사장님이 승인하면 자동으로 접속됩니다.</p>
+                        <p className="text-xs text-gray-400 mb-8">관리자가 승인하면 자동으로 접속됩니다.</p>
                         <button onClick={onLogout} className="w-full bg-gray-200 text-gray-700 py-3 rounded-xl font-medium hover:bg-gray-300 transition">
                             로그아웃
                         </button>
@@ -1663,7 +1663,7 @@
                         <p>① 직원이 앱 링크에 접속</p>
                         <p>② "직원으로 로그인/가입" 클릭</p>
                         <p>③ 초대코드 입력 → 이름 입력 → PIN 설정</p>
-                        <p>④ 사장님이 이 화면에서 승인</p>
+                        <p>④ 관리자가 이 화면에서 승인</p>
                     </div>
                 </div>
             );
@@ -1872,7 +1872,7 @@
                             <div className="bg-gray-50 rounded-xl p-4 mb-3 text-center text-gray-400 text-sm">메모 없음</div>
                         )}
                         <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-3 text-xs text-yellow-700 mb-4">
-                            제출된 근무기록은 수정할 수 없습니다.<br/>변경이 필요하면 사장님께 문의하세요.
+                            제출된 근무기록은 수정할 수 없습니다.<br/>변경이 필요하면 관리자께 문의하세요.
                         </div>
                         <button onClick={onClose} className="w-full bg-gray-100 text-gray-700 py-3 rounded-xl font-medium hover:bg-gray-200 transition">닫기</button>
                     </div>
@@ -1913,7 +1913,7 @@
                 <div className="max-w-lg mx-auto space-y-4">
                     <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6">
                         <h2 className="text-lg font-bold text-gray-800 mb-1">내 정보</h2>
-                        <p className="text-sm text-gray-500 mb-5">입력한 정보는 사장님에게만 공유됩니다.</p>
+                        <p className="text-sm text-gray-500 mb-5">입력한 정보는 관리자에게만 공유됩니다.</p>
                         <div className="space-y-4">
                             <div>
                                 <label className="block text-sm font-bold text-gray-700 mb-1">이름</label>
@@ -2117,7 +2117,17 @@
                 const { displayId, ...dataToSave } = empData;
 
                 if (editingEmp) {
+                    const oldStatus = editingEmp.status || (editingEmp.isWorking === false ? 'resigned' : 'working');
+                    const newStatus = dataToSave.status;
                     setEmployees(prev => prev.map(e => e.id === dataToSave.id ? dataToSave : e));
+
+                    if (oldStatus === 'working' && newStatus === 'leave') {
+                        showAlert(`${dataToSave.name}님이 휴직 처리되었습니다.\n이제 월별 근무시간 입력에서 제외됩니다.`, '변경 완료', 'alert');
+                    } else if (oldStatus !== 'resigned' && newStatus === 'resigned') {
+                        showAlert(`${dataToSave.name}님이 퇴사 처리되었습니다.\n이제 월별 근무시간 입력에서 제외됩니다.`, '변경 완료', 'alert');
+                    } else if ((oldStatus === 'leave' || oldStatus === 'resigned') && newStatus === 'working') {
+                        showAlert(`${dataToSave.name}님이 근무 중 상태로 변경되었습니다.\n월별 근무시간 입력에 포함됩니다.`, '변경 완료', 'success');
+                    }
                 } else {
                     setEmployees(prev => [...prev, dataToSave]);
                     setNextEmpId(prev => prev + 1);
@@ -2674,28 +2684,47 @@
         }
 
         function BulkInputModal({ year, month, monthKey, daysInMonth, activeEmployees, monthlyData, setMonthlyData, onClose }) {
-            const inputRefs = useRef({});
-            const [localData, setLocalData] = useState({});
+            const hourRefs = useRef({});
+            const minRefs = useRef({});
+            const [localData, setLocalData] = useState({});   // 시간 (정수)
+            const [minuteData, setMinuteData] = useState({}); // 분 (0-59)
 
             useEffect(() => {
                 const initData = {};
+                const initMinData = {};
                 const currentMonthData = monthlyData[monthKey] || { days: {} };
-                
+
                 for (let d = 1; d <= daysInMonth; d++) {
                     initData[d] = {};
+                    initMinData[d] = {};
                     const dayData = currentMonthData.days[d] || { entries: {} };
                     activeEmployees.forEach(emp => {
-                        initData[d][emp.id] = dayData.entries[emp.id]?.hours ?? '';
+                        const existing = dayData.entries[emp.id]?.hours;
+                        if (existing != null && existing > 0) {
+                            const h = Math.floor(existing);
+                            const m = Math.round((existing - h) * 60);
+                            initData[d][emp.id] = h > 0 ? String(h) : '';
+                            initMinData[d][emp.id] = m > 0 ? String(m) : '';
+                        } else {
+                            initData[d][emp.id] = '';
+                            initMinData[d][emp.id] = '';
+                        }
                     });
                 }
                 setLocalData(initData);
+                setMinuteData(initMinData);
             }, [monthKey, daysInMonth, activeEmployees, monthlyData]);
 
             const handleInputChange = (day, empId, val) => {
                 setLocalData(prev => ({ ...prev, [day]: { ...prev[day], [empId]: val } }));
             };
 
-            const handleKeyDown = (e, day, empIdx) => {
+            const handleMinuteChange = (day, empId, val) => {
+                setMinuteData(prev => ({ ...prev, [day]: { ...prev[day], [empId]: val } }));
+            };
+
+            // 시간 입력칸 키 핸들러: Enter/ArrowDown → 다음 날 시간칸, Tab → 다음 직원 시간칸
+            const handleHourKeyDown = (e, day, empIdx) => {
                 if (['e', 'E', '+', '-'].includes(e.key)) { e.preventDefault(); return; }
 
                 let nextDay = day;
@@ -2705,17 +2734,16 @@
                     e.preventDefault();
                     if (day === daysInMonth) {
                         if (empIdx < activeEmployees.length - 1) { nextDay = 1; nextEmpIdx = empIdx + 1; }
-                    } else { nextDay = Math.min(day + 1, daysInMonth); }
+                    } else { nextDay = day + 1; }
                 } else if (e.key === 'ArrowUp') {
                     e.preventDefault();
                     nextDay = Math.max(day - 1, 1);
                 } else if (e.key === 'ArrowRight' || (e.key === 'Tab' && !e.shiftKey)) {
                     e.preventDefault();
-                    nextEmpIdx = Math.min(empIdx + 1, activeEmployees.length - 1);
-                    if (e.key === 'Tab' && empIdx === activeEmployees.length - 1) {
-                        nextDay = Math.min(day + 1, daysInMonth);
-                        nextEmpIdx = 0;
-                    }
+                    // 오른쪽 → 분 입력칸으로
+                    const minRef = minRefs.current[`${day}-${activeEmployees[empIdx].id}`];
+                    if (minRef) { minRef.focus(); minRef.select(); }
+                    return;
                 } else if (e.key === 'ArrowLeft' || (e.key === 'Tab' && e.shiftKey)) {
                     e.preventDefault();
                     nextEmpIdx = Math.max(empIdx - 1, 0);
@@ -2726,8 +2754,43 @@
                 }
 
                 if (nextDay !== day || nextEmpIdx !== empIdx) {
-                    const nextRef = inputRefs.current[`${nextDay}-${activeEmployees[nextEmpIdx].id}`];
+                    const nextRef = hourRefs.current[`${nextDay}-${activeEmployees[nextEmpIdx].id}`];
                     if (nextRef) { nextRef.focus(); nextRef.select(); }
+                }
+            };
+
+            // 분 입력칸 키 핸들러: Enter/ArrowDown → 다음 날 시간칸, ArrowLeft → 같은 날 시간칸
+            const handleMinKeyDown = (e, day, empIdx) => {
+                if (['e', 'E', '+', '-'].includes(e.key)) { e.preventDefault(); return; }
+
+                if (e.key === 'Enter' || e.key === 'ArrowDown') {
+                    e.preventDefault();
+                    let nextDay = day;
+                    let nextEmpIdx = empIdx;
+                    if (day === daysInMonth) {
+                        if (empIdx < activeEmployees.length - 1) { nextDay = 1; nextEmpIdx = empIdx + 1; }
+                    } else { nextDay = day + 1; }
+                    const nextRef = hourRefs.current[`${nextDay}-${activeEmployees[nextEmpIdx].id}`];
+                    if (nextRef) { nextRef.focus(); nextRef.select(); }
+                } else if (e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    const prevRef = hourRefs.current[`${Math.max(day - 1, 1)}-${activeEmployees[empIdx].id}`];
+                    if (prevRef) { prevRef.focus(); prevRef.select(); }
+                } else if (e.key === 'ArrowLeft' || (e.key === 'Tab' && e.shiftKey)) {
+                    e.preventDefault();
+                    const hRef = hourRefs.current[`${day}-${activeEmployees[empIdx].id}`];
+                    if (hRef) { hRef.focus(); hRef.select(); }
+                } else if (e.key === 'Tab' && !e.shiftKey) {
+                    e.preventDefault();
+                    const nextEmpIdx2 = empIdx + 1;
+                    if (nextEmpIdx2 < activeEmployees.length) {
+                        const nextRef = hourRefs.current[`${day}-${activeEmployees[nextEmpIdx2].id}`];
+                        if (nextRef) { nextRef.focus(); nextRef.select(); }
+                    } else {
+                        const nextDay = Math.min(day + 1, daysInMonth);
+                        const nextRef = hourRefs.current[`${nextDay}-${activeEmployees[0].id}`];
+                        if (nextRef) { nextRef.focus(); nextRef.select(); }
+                    }
                 }
             };
 
@@ -2738,14 +2801,17 @@
 
                     for (let d = 1; d <= daysInMonth; d++) {
                         if (!newData[monthKey].days[d]) newData[monthKey].days[d] = { revenue: 0, entries: {} };
-                        
+
                         activeEmployees.forEach(emp => {
-                            const hoursStr = localData[d][emp.id];
-                            const hours = hoursStr === '' ? 0 : parseFloat(hoursStr);
-                            
+                            const hStr = localData[d]?.[emp.id];
+                            const mStr = minuteData[d]?.[emp.id];
+                            const h = hStr === '' || hStr == null ? 0 : parseInt(hStr, 10);
+                            const m = mStr === '' || mStr == null ? 0 : parseInt(mStr, 10);
+                            const hours = h + m / 60;
+
                             if (hours > 0 || (newData[monthKey].days[d].entries[emp.id] && hours === 0)) {
                                 newData[monthKey].days[d].entries[emp.id] = {
-                                    hours: hours, pay: hours * emp.wage, name: emp.name, wage: emp.wage
+                                    hours: hours, pay: Math.round(hours * emp.wage), name: emp.name, wage: emp.wage
                                 };
                             }
                         });
@@ -2761,7 +2827,7 @@
                         <div className="p-5 border-b flex justify-between items-center bg-gray-50 rounded-t-2xl shrink-0">
                             <div>
                                 <h3 className="text-lg font-bold text-gray-800">{year}년 {month}월 근무시간 일괄 입력</h3>
-                                <p className="hidden md:block text-xs text-gray-500 mt-1">방향키, Tab, Enter를 이용해 셀을 이동하세요. 맨 아래칸에서 엔터를 누르면 다음 사람으로 넘어갑니다.</p>
+                                <p className="hidden md:block text-xs text-gray-500 mt-1">시간/분 입력 후 Enter → 다음 날짜 이동. 방향키·Tab으로 셀 이동.</p>
                             </div>
                             <button onClick={onClose} className="p-2 hover:bg-gray-200 rounded-full transition"><X className="w-5 h-5"/></button>
                         </div>
@@ -2776,7 +2842,9 @@
                                             <th className="border p-2 bg-gray-100 text-center w-16 whitespace-nowrap">날짜</th>
                                             {activeEmployees.map(emp => (
                                                 <th key={emp.id} className="border p-2 bg-gray-100 text-center whitespace-nowrap text-sm">
-                                                    {emp.displayId}. {emp.name} <span className="text-xs font-normal text-gray-500 block">{formatCurrency(emp.wage)}/h</span>
+                                                    {emp.displayId}. {emp.name}
+                                                    <span className="text-xs font-normal text-gray-500 block">{formatCurrency(emp.wage)}/h</span>
+                                                    <span className="text-[10px] font-normal text-gray-400 block">시간&nbsp;&nbsp;&nbsp;분</span>
                                                 </th>
                                             ))}
                                         </tr>
@@ -2785,24 +2853,31 @@
                                         {Array.from({ length: daysInMonth }, (_, i) => i + 1).map(day => (
                                             <tr key={day} className="hover:bg-yellow-50/50">
                                                 <td className="border p-2 text-center font-medium bg-gray-50 whitespace-nowrap">{day}일</td>
-                                                {activeEmployees.map((emp, empIdx) => {
-                                                    // 세로 이동을 위한 tabIndex 계산 (세로줄 -> 다음 세로줄)
-                                                    const tabIdx = (empIdx * daysInMonth) + day;
-                                                    return (
-                                                        <td key={emp.id} className="border p-1">
+                                                {activeEmployees.map((emp, empIdx) => (
+                                                    <td key={emp.id} className="border p-0.5">
+                                                        <div className="flex items-center gap-0.5">
                                                             <input
-                                                                ref={el => inputRefs.current[`${day}-${emp.id}`] = el}
-                                                                type="number" step="0.5" min="0"
+                                                                ref={el => hourRefs.current[`${day}-${emp.id}`] = el}
+                                                                type="number" min="0"
                                                                 value={localData[day]?.[emp.id] ?? ''}
-                                                                onChange={(e) => handleInputChange(day, emp.id, e.target.value)}
-                                                                onKeyDown={(e) => handleKeyDown(e, day, empIdx)}
-                                                                className="w-full h-10 text-center border-none focus:ring-2 focus:ring-green-500 bg-transparent outline-none transition"
+                                                                onChange={e => handleInputChange(day, emp.id, e.target.value)}
+                                                                onKeyDown={e => handleHourKeyDown(e, day, empIdx)}
+                                                                className="w-12 h-9 text-center border-none focus:ring-2 focus:ring-green-500 bg-transparent outline-none transition text-sm"
                                                                 placeholder="0"
-                                                                tabIndex={tabIdx}
                                                             />
-                                                        </td>
-                                                    );
-                                                })}
+                                                            <span className="text-gray-300 text-xs">:</span>
+                                                            <input
+                                                                ref={el => minRefs.current[`${day}-${emp.id}`] = el}
+                                                                type="number" min="0" max="59"
+                                                                value={minuteData[day]?.[emp.id] ?? ''}
+                                                                onChange={e => handleMinuteChange(day, emp.id, e.target.value)}
+                                                                onKeyDown={e => handleMinKeyDown(e, day, empIdx)}
+                                                                className="w-10 h-9 text-center border-none focus:ring-2 focus:ring-blue-400 bg-transparent outline-none transition text-sm text-blue-600"
+                                                                placeholder="분"
+                                                            />
+                                                        </div>
+                                                    </td>
+                                                ))}
                                             </tr>
                                         ))}
                                     </tbody>
@@ -2821,7 +2896,7 @@
 
         function DailyEditModal({ year, month, day, monthKey, activeEmployees, monthlyData, setMonthlyData, onClose, onDelete }) {
             const currentDayData = monthlyData[monthKey]?.days[day] || { revenue: 0, entries: {} };
-            
+
             const combinedEmployees = useMemo(() => {
                 const list = [...activeEmployees];
                 const activeIds = new Set(activeEmployees.map(e => e.id.toString()));
@@ -2836,14 +2911,51 @@
                 return list;
             }, [activeEmployees, currentDayData.entries]);
 
+            const hourRefs = useRef({});
+            const minRefs = useRef({});
+
             const [revenue, setRevenue] = useState(currentDayData.revenue || '');
             const [hoursData, setHoursData] = useState(() => {
                 const init = {};
-                combinedEmployees.forEach(emp => { init[emp.id] = currentDayData.entries[emp.id]?.hours || ''; });
+                combinedEmployees.forEach(emp => {
+                    const existing = currentDayData.entries[emp.id]?.hours || 0;
+                    init[emp.id] = existing > 0 ? Math.floor(existing) : '';
+                });
                 return init;
             });
-            // 메모 삭제 상태 (직원이 입력한 메모를 사장이 삭제할 수 있음)
+            const [minsData, setMinsData] = useState(() => {
+                const init = {};
+                combinedEmployees.forEach(emp => {
+                    const existing = currentDayData.entries[emp.id]?.hours || 0;
+                    const m = Math.round((existing - Math.floor(existing)) * 60);
+                    init[emp.id] = m > 0 ? m : '';
+                });
+                return init;
+            });
+            // 메모 삭제 상태 (직원이 입력한 메모를 관리자가 삭제할 수 있음)
             const [deletedNotes, setDeletedNotes] = useState({});
+
+            const handleHourKeyDown = (e, empIdx) => {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    const nextEmp = combinedEmployees[empIdx + 1];
+                    if (nextEmp) {
+                        const ref = hourRefs.current[nextEmp.id];
+                        if (ref) { ref.focus(); ref.select(); }
+                    }
+                }
+            };
+
+            const handleMinKeyDown = (e, empIdx) => {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    const nextEmp = combinedEmployees[empIdx + 1];
+                    if (nextEmp) {
+                        const ref = hourRefs.current[nextEmp.id];
+                        if (ref) { ref.focus(); ref.select(); }
+                    }
+                }
+            };
 
             const handleSave = () => {
                 const dateStr = `${year}-${String(month).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
@@ -2855,11 +2967,13 @@
                     newData[monthKey].days[day].revenue = Number(revenue) || 0;
 
                     combinedEmployees.forEach(emp => {
-                        const hours = Number(hoursData[emp.id]) || 0;
+                        const h = Number(hoursData[emp.id]) || 0;
+                        const m = Number(minsData[emp.id]) || 0;
+                        const hours = h + m / 60;
                         const existingEntry = prev[monthKey]?.days[day]?.entries[emp.id];
 
                         if (hours > 0) {
-                            // 직원이 제출했고 사장이 시간을 변경한 경우 → 알림 전송
+                            // 직원이 제출했고 관리자가 시간을 변경한 경우 → 알림 전송
                             if (existingEntry?.submittedByEmp && existingEntry?.empUid &&
                                 existingEntry.hours !== hours) {
                                 sendChangeNotification(existingEntry.empUid, {
@@ -2906,10 +3020,11 @@
                             </div>
 
                             <div className="pt-3 border-t border-gray-100">
-                                <label className="block text-sm font-bold text-gray-700 mb-3">근무 시간 수정</label>
+                                <label className="block text-sm font-bold text-gray-700 mb-1">근무 시간 수정</label>
+                                <p className="text-xs text-gray-400 mb-3">시간/분 입력 후 Enter → 다음 근무자로 이동</p>
                                 {combinedEmployees.map((emp, idx) => (
                                     <React.Fragment key={emp.id}>
-                                        <div className="flex justify-between items-center mb-1 bg-gray-50 p-2 rounded-lg">
+                                        <div className={`flex justify-between items-center mb-1 p-2 rounded-lg ${emp.isInactive ? 'bg-red-50/50' : 'bg-gray-50'}`}>
                                             <span className="text-sm text-gray-700 truncate flex items-center gap-1 font-medium">
                                                 {emp.isInactive ? (
                                                     <span className="text-xs text-red-500 bg-red-50 border border-red-200 px-1.5 py-0.5 rounded font-bold">제외/퇴사</span>
@@ -2918,18 +3033,32 @@
                                                 )}
                                                 {emp.name}
                                             </span>
-                                            <div className="flex items-center gap-2">
+                                            <div className="flex items-center gap-1">
                                                 <input
-                                                    type="number" step="0.5" min="0"
+                                                    ref={el => hourRefs.current[emp.id] = el}
+                                                    type="number" min="0"
                                                     value={hoursData[emp.id] ?? ''}
                                                     onChange={e => setHoursData(prev => ({...prev, [emp.id]: e.target.value}))}
-                                                    className="w-20 border border-gray-300 rounded-lg px-2 py-1.5 text-right text-sm focus:ring-2 focus:ring-green-500 outline-none"
+                                                    onKeyDown={e => handleHourKeyDown(e, idx)}
+                                                    disabled={emp.isInactive}
+                                                    className={`w-14 border border-gray-300 rounded-lg px-2 py-1.5 text-right text-sm focus:ring-2 focus:ring-green-500 outline-none ${emp.isInactive ? 'bg-gray-100 text-gray-400 cursor-not-allowed' : ''}`}
                                                     placeholder="0"
                                                 />
-                                                <span className="text-sm text-gray-500 font-medium">시간</span>
+                                                <span className="text-xs text-gray-500">시간</span>
+                                                <input
+                                                    ref={el => minRefs.current[emp.id] = el}
+                                                    type="number" min="0" max="59"
+                                                    value={minsData[emp.id] ?? ''}
+                                                    onChange={e => setMinsData(prev => ({...prev, [emp.id]: e.target.value}))}
+                                                    onKeyDown={e => handleMinKeyDown(e, idx)}
+                                                    disabled={emp.isInactive}
+                                                    className={`w-14 border border-gray-300 rounded-lg px-2 py-1.5 text-right text-sm focus:ring-2 focus:ring-blue-400 outline-none ${emp.isInactive ? 'bg-gray-100 text-gray-400 cursor-not-allowed' : ''}`}
+                                                    placeholder="0"
+                                                />
+                                                <span className="text-xs text-gray-500">분</span>
                                             </div>
                                         </div>
-                                        {/* 직원이 입력한 메모 표시 (읽기전용, 사장은 삭제만 가능) */}
+                                        {/* 직원이 입력한 메모 표시 (읽기전용, 관리자는 삭제만 가능) */}
                                         {currentDayData.entries[emp.id]?.submittedByEmp &&
                                          currentDayData.entries[emp.id]?.note &&
                                          !deletedNotes[emp.id] && (
@@ -3888,7 +4017,7 @@
                         </div>
                         <div>
                             <h2 className="text-xl font-bold text-gray-800">근무시간 입력 단위</h2>
-                            <p className="text-xs text-gray-500">직원이 시간 입력 시 적용되는 단위</p>
+                            <p className="text-xs text-gray-500">직원용 화면에서 시간 입력 시 적용되는 단위</p>
                         </div>
                     </div>
                     <div className="space-y-2 mb-5">

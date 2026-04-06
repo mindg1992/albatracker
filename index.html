@@ -3061,15 +3061,18 @@
                 } catch(e) { showAlert('불러오기 실패: ' + e.message, '오류', 'error'); }
             };
 
-            const handleRequestDeleteContract = async () => {
-                try {
-                    const result = await requestContractDelete(firebaseUser.uid, empAccount.bossUid, 'employee');
-                    if (result === 'deleted') {
-                        showAlert('근로계약서가 삭제되었습니다.', '삭제 완료', 'success');
-                    } else {
-                        showAlert('삭제 요청을 보냈습니다.\n관리자가 동의하면 삭제됩니다.', '요청 완료', 'success');
-                    }
-                } catch(e) { showAlert('처리 실패: ' + e.message, '오류', 'error'); }
+            const handleRequestDeleteContract = () => {
+                if (!showConfirm) return;
+                showConfirm('재작성을 요청하시겠습니까?', async () => {
+                    try {
+                        const result = await requestContractDelete(firebaseUser.uid, empAccount.bossUid, 'employee');
+                        if (result === 'deleted') {
+                            showAlert('근로계약서가 삭제되었습니다.', '삭제 완료', 'success');
+                        } else {
+                            showAlert('재작성 요청을 보냈습니다.\n관리자가 동의하면 삭제됩니다.', '요청 완료', 'success');
+                        }
+                    } catch(e) { showAlert('처리 실패: ' + e.message, '오류', 'error'); }
+                }, '근로계약서 재작성');
             };
 
             const handleCancelDeleteContract = async () => {
@@ -3461,19 +3464,21 @@
                 } catch(e) { showAlert('불러오기 실패: ' + e.message, '오류', 'error'); }
             };
 
-            const handleDeleteContract = async (emp) => {
+            const handleDeleteContract = (emp) => {
                 if (!emp.empUid) return;
-                try {
-                    const bossUid = currentWorkspaceId || firebaseUser.uid;
-                    const result = await requestContractDelete(emp.empUid, bossUid, 'boss');
-                    if (result === 'deleted') {
-                        setEmployees(prev => prev.map(e => e.id === emp.id ? { ...e, contractStatus: null, contractDeleteRequest: null } : e));
-                        showAlert('근로계약서가 삭제되었습니다.', '삭제 완료', 'success');
-                    } else {
-                        setEmployees(prev => prev.map(e => e.id === emp.id ? { ...e, contractDeleteRequest: 'boss' } : e));
-                        showAlert('삭제 요청을 보냈습니다.\n근무자가 동의하면 삭제됩니다.', '요청 완료', 'success');
-                    }
-                } catch(e) { showAlert('처리 실패: ' + e.message, '오류', 'error'); }
+                showConfirm('재작성을 요청하시겠습니까?', async () => {
+                    try {
+                        const bossUid = currentWorkspaceId || firebaseUser.uid;
+                        const result = await requestContractDelete(emp.empUid, bossUid, 'boss');
+                        if (result === 'deleted') {
+                            setEmployees(prev => prev.map(e => e.id === emp.id ? { ...e, contractStatus: null, contractDeleteRequest: null } : e));
+                            showAlert('근로계약서가 삭제되었습니다.', '삭제 완료', 'success');
+                        } else {
+                            setEmployees(prev => prev.map(e => e.id === emp.id ? { ...e, contractDeleteRequest: 'boss' } : e));
+                            showAlert('재작성 요청을 보냈습니다.\n근무자가 동의하면 삭제됩니다.', '요청 완료', 'success');
+                        }
+                    } catch(e) { showAlert('처리 실패: ' + e.message, '오류', 'error'); }
+                }, '근로계약서 재작성');
             };
 
             const handleCancelDeleteContract = async (emp) => {

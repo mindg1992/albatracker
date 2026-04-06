@@ -1908,11 +1908,7 @@
                                 근무업체 등록
                             </button>
 
-                            <div className="border-t border-gray-100 pt-2 space-y-1">
-                                <button onClick={() => { localStorage.setItem('albaLoginRole','boss'); window.location.reload(); }}
-                                    className="w-full py-2.5 text-xs text-green-600 hover:text-green-700 transition font-medium">
-                                    관리자 모드로 전환
-                                </button>
+                            <div className="border-t border-gray-100 pt-2">
                                 <button onClick={onLogout} className="w-full py-2 text-xs text-gray-400 hover:text-gray-600 transition">
                                     로그아웃
                                 </button>
@@ -1985,13 +1981,9 @@
             return (
                 <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-4">
                     <div className="bg-white p-8 rounded-2xl shadow-xl w-full max-w-sm">
-                        <div className="flex items-center justify-between mb-6">
+                        <div className="flex items-center mb-6">
                             <button onClick={onBack} className="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700">
                                 <ChevronLeft className="w-4 h-4" /> 뒤로
-                            </button>
-                            <button onClick={() => { localStorage.setItem('albaLoginRole','boss'); window.location.reload(); }}
-                                className="text-xs text-green-600 hover:text-green-700 font-medium">
-                                관리자 모드로 전환
                             </button>
                         </div>
 

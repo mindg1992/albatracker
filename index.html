@@ -422,11 +422,24 @@
             await batch.commit();
         }
 
-        // 직원이 업체 연결 끊기
-        async function disconnectGoogleEmpWorkplace(empUid, bossUid) {
-            await fbDb.collection('employeeAccounts').doc(empUid)
-                .collection('workplaces').doc(bossUid)
-                .update({ status: 'disconnected', disconnectedAt: firebase.firestore.FieldValue.serverTimestamp() });
+        // 직원이 퇴사 처리
+        async function disconnectGoogleEmpWorkplace(empUid, bossUid, empName, shopName) {
+            const batch = fbDb.batch();
+            // 직원 workplaces 상태를 'resigned_by_emp'로 변경
+            batch.update(
+                fbDb.collection('employeeAccounts').doc(empUid).collection('workplaces').doc(bossUid),
+                { status: 'resigned_by_emp', disconnectedAt: firebase.firestore.FieldValue.serverTimestamp() }
+            );
+            // 관리자가 감지할 수 있도록 empPending에 퇴사 신호 기록
+            const pendingDocId = `${empUid}_${bossUid}`;
+            batch.set(fbDb.collection('empPending').doc(pendingDocId), {
+                type: 'resigned_by_emp',
+                empUid, bossUid,
+                name: empName || '',
+                shopName: shopName || '',
+                createdAt: firebase.firestore.FieldValue.serverTimestamp()
+            });
+            await batch.commit();
         }
 
         // --- 메인 애플리케이션 컴포넌트 ---
@@ -767,15 +780,20 @@
                 });
             };
 
-            // Google 직원이 업체 연결 끊기
+            // Google 직원이 퇴사 처리
             const handleEmpDisconnectWorkplace = (bossUid) => {
+                const wp = empGoogleWorkplaces.find(w => w.bossUid === bossUid);
+                const shopName = wp?.shopName || '이 업체';
                 showConfirm(
-                    '이 업체와의 연결을 끊으시겠습니까?\n관리자의 근무자 카드는 유지되며,\n근무 기록은 삭제되지 않습니다.',
+                    `${shopName}에서 퇴사하시겠습니까?`,
                     async () => {
                         try {
-                            await disconnectGoogleEmpWorkplace(firebaseUser.uid, bossUid);
+                            await disconnectGoogleEmpWorkplace(
+                                firebaseUser.uid, bossUid,
+                                empAccount?.name || '', shopName
+                            );
                             setEmpGoogleWorkplaces(prev => prev.map(w =>
-                                w.bossUid === bossUid ? { ...w, status: 'disconnected' } : w
+                                w.bossUid === bossUid ? { ...w, status: 'resigned_by_emp' } : w
                             ));
                             setSelectedEmpBossUid(null);
                             localStorage.removeItem('selectedEmpBossUid');
@@ -784,7 +802,7 @@
                             showAlert('처리 오류: ' + e.message, '오류', 'error');
                         }
                     },
-                    '업체 연결 끊기'
+                    '퇴사하기'
                 );
             };
 
@@ -931,7 +949,18 @@
                     .where('bossUid', '==', currentWorkspaceId)
                     .onSnapshot(snap => {
                         const list = [];
-                        snap.forEach(d => list.push({ uid: d.data().empUid, isGoogleEmployee: true, ...d.data() }));
+                        snap.forEach(d => {
+                            const data = d.data();
+                            // 직원이 직접 퇴사한 경우 자동 처리
+                            if (data.type === 'resigned_by_emp') {
+                                setEmployees(prev => prev.map(e =>
+                                    e.empUid === data.empUid ? { ...e, status: 'resigned' } : e
+                                ));
+                                fbDb.collection('empPending').doc(d.id).delete().catch(() => {});
+                                return;
+                            }
+                            list.push({ uid: data.empUid, isGoogleEmployee: true, ...data });
+                        });
                         setPendingGoogleEmployees(list);
                     }, () => {});
                 return () => unsub();
@@ -1011,21 +1040,41 @@
                 const empData = pendingGoogleEmployees.find(e => e.uid === empUid);
                 if (!empData) return;
                 try {
-                    const newEmpId = nextEmpId;
-                    const newEmp = {
-                        id: newEmpId, name: empData.name,
-                        hireDate: new Date().toISOString().split('T')[0],
-                        wage: '', scheduledDays: '', dailyHours: '',
-                        residentId: empData.residentId || '',
-                        bank: empData.bank || '',
-                        account: empData.account || '',
-                        memo: '', status: 'working',
-                        empUid
-                    };
-                    setEmployees(prev => [...prev, newEmp]);
-                    setNextEmpId(prev => prev + 1);
-                    await approveGoogleEmpJoinRequest(currentWorkspaceId || firebaseUser.uid, empUid, newEmpId);
-                    showAlert(`${empData.name}님이 승인되었습니다.\n근무자 정보 탭에서 시급 등을 설정해주세요.`, '승인 완료', 'success');
+                    // 재입사 여부 확인 — empUid가 같은 기존 카드가 있으면 재사용
+                    const existingEmp = employees.find(e => e.empUid === empUid);
+                    let approvedId;
+                    if (existingEmp) {
+                        approvedId = existingEmp.id;
+                        setEmployees(prev => prev.map(e =>
+                            e.empUid === empUid ? {
+                                ...e,
+                                name: empData.name,
+                                status: 'working',
+                                hireDate: new Date().toISOString().split('T')[0],
+                                residentId: empData.residentId || e.residentId || '',
+                                bank: empData.bank || e.bank || '',
+                                account: empData.account || e.account || '',
+                            } : e
+                        ));
+                        await approveGoogleEmpJoinRequest(currentWorkspaceId || firebaseUser.uid, empUid, approvedId);
+                        showAlert(`${empData.name}님이 재입사 승인되었습니다.\n기존 근무 기록이 이어집니다.`, '재입사 승인', 'success');
+                    } else {
+                        approvedId = nextEmpId;
+                        const newEmp = {
+                            id: approvedId, name: empData.name,
+                            hireDate: new Date().toISOString().split('T')[0],
+                            wage: '', scheduledDays: '', dailyHours: '',
+                            residentId: empData.residentId || '',
+                            bank: empData.bank || '',
+                            account: empData.account || '',
+                            memo: '', status: 'working',
+                            empUid
+                        };
+                        setEmployees(prev => [...prev, newEmp]);
+                        setNextEmpId(prev => prev + 1);
+                        await approveGoogleEmpJoinRequest(currentWorkspaceId || firebaseUser.uid, empUid, approvedId);
+                        showAlert(`${empData.name}님이 승인되었습니다.\n근무자 정보 탭에서 시급 등을 설정해주세요.`, '승인 완료', 'success');
+                    }
                 } catch(e) {
                     showAlert('승인 처리 중 오류: ' + e.message, '오류', 'error');
                 }
@@ -1849,7 +1898,7 @@
 
         // ─── Google 직원: 업체 목록 화면 ───
         function WorkplaceSelectScreen({ workplaces, firebaseUser, onSelect, onAddWorkplace, onLogout }) {
-            const active = workplaces.filter(w => w.status !== 'disconnected');
+            const active = workplaces.filter(w => w.status !== 'disconnected' && w.status !== 'resigned_by_emp');
             const approved = active.filter(w => w.status === 'approved');
             const pending = active.filter(w => w.status === 'pending');
             const rejected = active.filter(w => w.status === 'rejected');
@@ -1960,7 +2009,7 @@
                     if (!doc.exists) { setError('유효하지 않은 초대코드입니다.'); setLoading(false); return; }
                     // 퇴사 후 재입사: 이미 해당 업체(bossUid)의 workspace가 있으면 재활성화
                     const bossUid = doc.data().bossUid;
-                    const existingBossWp = empGoogleWorkplaces.find(w => w.bossUid === bossUid && w.status !== 'disconnected');
+                    const existingBossWp = empGoogleWorkplaces.find(w => w.bossUid === bossUid && w.status !== 'disconnected' && w.status !== 'resigned_by_emp');
                     if (existingBossWp && existingBossWp.status === 'approved') {
                         showAlert('이미 이 업체에 승인된 계정이 있습니다.\n업체 선택 화면에서 선택해 주세요.', '안내', 'info');
                         setLoading(false); onBack(); return;
@@ -2592,14 +2641,13 @@
                         </button>
                     </div>
 
-                    {/* Google 직원: 업체 연결 해제 */}
+                    {/* Google 직원: 퇴사하기 */}
                     {empAccount?.isGoogleEmployee && onDisconnectWorkplace && (
                         <div className="bg-white rounded-xl border border-red-200 shadow-sm p-6">
-                            <h3 className="text-base font-bold text-red-700 mb-1">업체 연결 해제</h3>
-                            <p className="text-sm text-gray-500 mb-4">이 업체와의 연결을 끊습니다. 관리자의 근무자 카드는 삭제되지 않으며, 기록은 관리자에게 유지됩니다.</p>
+                            <h3 className="text-base font-bold text-red-700 mb-2">퇴사하기</h3>
                             <button onClick={onDisconnectWorkplace}
                                 className="w-full border-2 border-red-400 text-red-600 py-3 rounded-xl font-bold hover:bg-red-50 transition">
-                                {empAccount.shopName || '이 업체'} 연결 해제
+                                {empAccount.shopName || '이 업체'}에서 퇴사
                             </button>
                         </div>
                     )}

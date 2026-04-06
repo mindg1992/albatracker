@@ -652,7 +652,15 @@
                 setNavCanScrollLeft(el.scrollLeft > 2);
                 setNavCanScrollRight(el.scrollLeft < el.scrollWidth - el.clientWidth - 2);
             };
-            useEffect(() => { setTimeout(updateNavScroll, 100); }, []);
+            useEffect(() => {
+                const el = navScrollRef.current;
+                if (!el) { setTimeout(updateNavScroll, 200); return; }
+                updateNavScroll();
+                const ro = new ResizeObserver(updateNavScroll);
+                ro.observe(el);
+                window.addEventListener('resize', updateNavScroll);
+                return () => { ro.disconnect(); window.removeEventListener('resize', updateNavScroll); };
+            }, [currentWorkspaceId]);
 
             const showAlert = (message, title = '알림', type = 'info') => {
                 setModalConfig({ type: type, title, message, onConfirm: () => setModalConfig(null) });
@@ -1922,13 +1930,18 @@
                             {navCanScrollLeft && (
                                 <button
                                     onClick={() => { navScrollRef.current.scrollBy({ left: -200, behavior: 'smooth' }); }}
-                                    className="absolute left-0 z-10 flex items-center justify-center w-8 h-full bg-gradient-to-r from-white via-white/90 to-transparent text-gray-500 hover:text-gray-700"
-                                    style={{ minHeight: '48px' }}
+                                    className="absolute left-4 z-10 flex items-center justify-center rounded-full bg-white border border-gray-200 shadow hover:bg-gray-50 transition"
+                                    style={{ width: 28, height: 28, top: '50%', transform: 'translateY(-50%)' }}
                                 >
-                                    <ChevronLeft className="w-5 h-5" />
+                                    <ChevronLeft className="w-4 h-4 text-gray-600" />
                                 </button>
                             )}
-                            <div ref={navScrollRef} onScroll={updateNavScroll} className="flex overflow-x-auto no-scrollbar w-full">
+                            <div
+                                ref={navScrollRef}
+                                onScroll={updateNavScroll}
+                                className="flex overflow-x-auto no-scrollbar w-full"
+                                style={{ paddingLeft: navCanScrollLeft ? 32 : 0, paddingRight: navCanScrollRight ? 32 : 0 }}
+                            >
                                 {[
                                     { id: 'employees', label: '현재 근무자 정보', icon: Users },
                                     { id: 'calendar', label: '월별 근무현황', icon: CalendarIcon },
@@ -1965,10 +1978,10 @@
                             {navCanScrollRight && (
                                 <button
                                     onClick={() => { navScrollRef.current.scrollBy({ left: 200, behavior: 'smooth' }); }}
-                                    className="absolute right-0 z-10 flex items-center justify-center w-8 h-full bg-gradient-to-l from-white via-white/90 to-transparent text-gray-500 hover:text-gray-700"
-                                    style={{ minHeight: '48px' }}
+                                    className="absolute right-4 z-10 flex items-center justify-center rounded-full bg-white border border-gray-200 shadow hover:bg-gray-50 transition"
+                                    style={{ width: 28, height: 28, top: '50%', transform: 'translateY(-50%)' }}
                                 >
-                                    <ChevronRight className="w-5 h-5" />
+                                    <ChevronRight className="w-4 h-4 text-gray-600" />
                                 </button>
                             )}
                         </div>

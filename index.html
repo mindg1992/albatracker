@@ -1772,7 +1772,7 @@
                                 { id: 'predict', label: '주휴수당 예측', icon: Search },
                                 { id: 'invite', label: '직원 초대', icon: Users },
                                 { id: 'notices', label: '전체 공지', icon: Megaphone },
-                                { id: 'settings', label: '비밀번호 설정', icon: Settings },
+                                { id: 'settings', label: '설정', icon: Settings },
                             ].map(tab => {
                                 const isLocked = WAGE_REQUIRED_TABS.includes(tab.id) && (globalMinWage === '' || Number(globalMinWage) <= 0);
                                 return (
@@ -5699,6 +5699,8 @@
             const [message, setMessage] = useState('');
             const [localTimeUnit, setLocalTimeUnit] = useState(workspaceInfo?.timeUnit || 'hour');
             const [savingUnit, setSavingUnit] = useState(false);
+            const [openPin, setOpenPin] = useState(false);
+            const [openTimeUnit, setOpenTimeUnit] = useState(false);
 
             const currentRef = useRef(null);
             const newRef = useRef(null);
@@ -5753,84 +5755,100 @@
 
             return (
                 <>
-                <div className="max-w-md mx-auto mt-8 bg-white p-8 rounded-2xl shadow-sm border border-gray-200">
-                    <div className="flex items-center gap-3 mb-6">
-                        <div className="bg-gray-100 p-2.5 rounded-xl"><Lock className="w-6 h-6 text-gray-700" /></div>
-                        <h2 className="text-xl font-bold text-gray-800">앱 잠금 비밀번호 변경</h2>
-                    </div>
+                {/* 앱 잠금 비밀번호 변경 */}
+                <div className="max-w-md mx-auto mt-8 bg-white rounded-2xl shadow-sm border border-gray-200">
+                    <button onClick={() => setOpenPin(p => !p)} className="w-full p-6 flex items-center justify-between text-left">
+                        <div className="flex items-center gap-3">
+                            <div className="bg-gray-100 p-2.5 rounded-xl"><Lock className="w-6 h-6 text-gray-700" /></div>
+                            <h2 className="text-xl font-bold text-gray-800">앱 잠금 비밀번호 변경</h2>
+                        </div>
+                        <svg className={`w-5 h-5 text-gray-400 transition-transform ${openPin ? 'rotate-180' : ''}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="6 9 12 15 18 9"/></svg>
+                    </button>
 
-                    {message && (
-                        <div className={`p-4 rounded-xl mb-6 flex items-center gap-2 text-sm font-medium ${message.type === 'error' ? 'bg-red-50 text-red-600 border border-red-100' : 'bg-green-50 text-green-700 border border-green-100'}`}>
-                            {message.type === 'error' ? <AlertCircle className="w-5 h-5" /> : <CheckCircle2 className="w-5 h-5" />}
-                            {message.text}
+                    {openPin && (
+                        <div className="px-6 pb-6 border-t border-gray-100 pt-4">
+                            {message && (
+                                <div className={`p-4 rounded-xl mb-6 flex items-center gap-2 text-sm font-medium ${message.type === 'error' ? 'bg-red-50 text-red-600 border border-red-100' : 'bg-green-50 text-green-700 border border-green-100'}`}>
+                                    {message.type === 'error' ? <AlertCircle className="w-5 h-5" /> : <CheckCircle2 className="w-5 h-5" />}
+                                    {message.text}
+                                </div>
+                            )}
+
+                            <div className="space-y-5" onKeyDown={handleKeyDown}>
+                                <div>
+                                    <label className="block text-sm font-bold text-gray-700 mb-2">현재 비밀번호 (6자리 숫자)</label>
+                                    <input
+                                        type="password" ref={currentRef} value={currentPin} onChange={e => handleInput(e, setCurrentPin, newRef)}
+                                        className="w-full tracking-[0.5em] font-mono text-center border border-gray-300 rounded-xl px-4 py-3.5 focus:ring-2 focus:ring-green-500 outline-none transition"
+                                        placeholder="••••••"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-bold text-gray-700 mb-2">새 비밀번호</label>
+                                    <input
+                                        type="password" ref={newRef} value={newPin} onChange={e => handleInput(e, setNewPin, confirmRef)}
+                                        className="w-full tracking-[0.5em] font-mono text-center border border-gray-300 rounded-xl px-4 py-3.5 focus:ring-2 focus:ring-green-500 outline-none transition"
+                                        placeholder="••••••"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-bold text-gray-700 mb-2">새 비밀번호 확인</label>
+                                    <input
+                                        type="password" ref={confirmRef} value={confirmPin} onChange={e => handleInput(e, setConfirmPin, null)}
+                                        className="w-full tracking-[0.5em] font-mono text-center border border-gray-300 rounded-xl px-4 py-3.5 focus:ring-2 focus:ring-green-500 outline-none transition"
+                                        placeholder="••••••"
+                                    />
+                                </div>
+
+                                <button
+                                    onClick={handleSave}
+                                    className="w-full mt-6 bg-green-600 text-white font-bold py-4 rounded-xl hover:bg-green-700 transition shadow-sm"
+                                >
+                                    저장하기 (Enter)
+                                </button>
+                            </div>
                         </div>
                     )}
-
-                    <div className="space-y-5" onKeyDown={handleKeyDown}>
-                        <div>
-                            <label className="block text-sm font-bold text-gray-700 mb-2">현재 비밀번호 (6자리 숫자)</label>
-                            <input 
-                                type="password" ref={currentRef} value={currentPin} onChange={e => handleInput(e, setCurrentPin, newRef)}
-                                className="w-full tracking-[0.5em] font-mono text-center border border-gray-300 rounded-xl px-4 py-3.5 focus:ring-2 focus:ring-green-500 outline-none transition"
-                                placeholder="••••••"
-                            />
-                        </div>
-                        <div>
-                            <label className="block text-sm font-bold text-gray-700 mb-2">새 비밀번호</label>
-                            <input 
-                                type="password" ref={newRef} value={newPin} onChange={e => handleInput(e, setNewPin, confirmRef)}
-                                className="w-full tracking-[0.5em] font-mono text-center border border-gray-300 rounded-xl px-4 py-3.5 focus:ring-2 focus:ring-green-500 outline-none transition"
-                                placeholder="••••••"
-                            />
-                        </div>
-                        <div>
-                            <label className="block text-sm font-bold text-gray-700 mb-2">새 비밀번호 확인</label>
-                            <input 
-                                type="password" ref={confirmRef} value={confirmPin} onChange={e => handleInput(e, setConfirmPin, null)}
-                                className="w-full tracking-[0.5em] font-mono text-center border border-gray-300 rounded-xl px-4 py-3.5 focus:ring-2 focus:ring-green-500 outline-none transition"
-                                placeholder="••••••"
-                            />
-                        </div>
-
-                        <button
-                            onClick={handleSave}
-                            className="w-full mt-6 bg-green-600 text-white font-bold py-4 rounded-xl hover:bg-green-700 transition shadow-sm"
-                        >
-                            저장하기 (Enter)
-                        </button>
-                    </div>
                 </div>
 
                 {/* 근무시간 입력 단위 설정 */}
-                <div className="max-w-md mx-auto mt-6 bg-white p-8 rounded-2xl shadow-sm border border-gray-200">
-                    <div className="flex items-center gap-3 mb-4">
-                        <div className="bg-blue-100 p-2.5 rounded-xl">
-                            <svg className="w-6 h-6 text-blue-700" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+                <div className="max-w-md mx-auto mt-6 bg-white rounded-2xl shadow-sm border border-gray-200">
+                    <button onClick={() => setOpenTimeUnit(p => !p)} className="w-full p-6 flex items-center justify-between text-left">
+                        <div className="flex items-center gap-3">
+                            <div className="bg-blue-100 p-2.5 rounded-xl">
+                                <svg className="w-6 h-6 text-blue-700" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+                            </div>
+                            <div>
+                                <h2 className="text-xl font-bold text-gray-800">근무시간 입력 단위</h2>
+                                <p className="text-xs text-gray-500">직원용 화면에서 시간 입력 시 적용되는 단위</p>
+                            </div>
                         </div>
-                        <div>
-                            <h2 className="text-xl font-bold text-gray-800">근무시간 입력 단위</h2>
-                            <p className="text-xs text-gray-500">직원용 화면에서 시간 입력 시 적용되는 단위</p>
-                        </div>
-                    </div>
-                    <div className="space-y-2 mb-5">
-                        {[
-                            { value: 'hour',   label: '1시간 단위', desc: '예: 8시간' },
-                            { value: 'half',   label: '30분 단위',  desc: '예: 8시간 / 8시간 30분' },
-                            { value: 'ten',    label: '10분 단위',  desc: '예: 8시간 20분 (슬라이드 선택)' },
-                            { value: 'minute', label: '1분 단위',   desc: '예: 8시간 45분 (직접 입력)' },
-                        ].map(opt => (
-                            <label key={opt.value} className={`flex items-center gap-3 p-3 border-2 rounded-xl cursor-pointer transition ${localTimeUnit === opt.value ? 'border-blue-500 bg-blue-50' : 'border-gray-200 hover:bg-gray-50'}`}>
-                                <input type="radio" name="timeUnit" value={opt.value} checked={localTimeUnit === opt.value} onChange={() => setLocalTimeUnit(opt.value)} className="accent-blue-600" />
-                                <div>
-                                    <p className="font-bold text-gray-800 text-sm">{opt.label}</p>
-                                    <p className="text-xs text-gray-400">{opt.desc}</p>
-                                </div>
-                            </label>
-                        ))}
-                    </div>
-                    <button onClick={handleSaveTimeUnit} disabled={savingUnit} className="w-full bg-blue-600 text-white font-bold py-3.5 rounded-xl hover:bg-blue-700 transition disabled:opacity-50">
-                        {savingUnit ? '저장 중...' : '저장하기'}
+                        <svg className={`w-5 h-5 text-gray-400 transition-transform ${openTimeUnit ? 'rotate-180' : ''}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="6 9 12 15 18 9"/></svg>
                     </button>
+
+                    {openTimeUnit && (
+                        <div className="px-6 pb-6 border-t border-gray-100 pt-4">
+                            <div className="space-y-2 mb-5">
+                                {[
+                                    { value: 'hour',   label: '1시간 단위', desc: '예: 8시간' },
+                                    { value: 'half',   label: '30분 단위',  desc: '예: 8시간 / 8시간 30분' },
+                                    { value: 'ten',    label: '10분 단위',  desc: '예: 8시간 20분 (슬라이드 선택)' },
+                                    { value: 'minute', label: '1분 단위',   desc: '예: 8시간 45분 (직접 입력)' },
+                                ].map(opt => (
+                                    <label key={opt.value} className={`flex items-center gap-3 p-3 border-2 rounded-xl cursor-pointer transition ${localTimeUnit === opt.value ? 'border-blue-500 bg-blue-50' : 'border-gray-200 hover:bg-gray-50'}`}>
+                                        <input type="radio" name="timeUnit" value={opt.value} checked={localTimeUnit === opt.value} onChange={() => setLocalTimeUnit(opt.value)} className="accent-blue-600" />
+                                        <div>
+                                            <p className="font-bold text-gray-800 text-sm">{opt.label}</p>
+                                            <p className="text-xs text-gray-400">{opt.desc}</p>
+                                        </div>
+                                    </label>
+                                ))}
+                            </div>
+                            <button onClick={handleSaveTimeUnit} disabled={savingUnit} className="w-full bg-blue-600 text-white font-bold py-3.5 rounded-xl hover:bg-blue-700 transition disabled:opacity-50">
+                                {savingUnit ? '저장 중...' : '저장하기'}
+                            </button>
+                        </div>
+                    )}
                 </div>
 
                 {/* 근로계약서 설정 */}

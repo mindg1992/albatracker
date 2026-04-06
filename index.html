@@ -435,13 +435,10 @@
             // === 역할/직원 관련 상태 ===
             const [userRole, setUserRole] = useState(null); // 'boss' | 'employee' | null
             const [empAccount, setEmpAccount] = useState(null);
-            const [empPin, setEmpPin] = useState('');
-            const [isEmpAuthenticated, setIsEmpAuthenticated] = useState(false);
             const [empNotifications, setEmpNotifications] = useState([]);
             const [mySubmissions, setMySubmissions] = useState({});
             const [workspaceInfo, setWorkspaceInfo] = useState(null);
             const [showBossSetup, setShowBossSetup] = useState(false);
-            const [pendingEmployees, setPendingEmployees] = useState([]);
             const [pendingGoogleEmployees, setPendingGoogleEmployees] = useState([]);
             const [showPendingModal, setShowPendingModal] = useState(false);
 
@@ -482,10 +479,7 @@
                         setFbLoading(false);
                         setUserRole(null);
                         setEmpAccount(null);
-                        setEmpPin('');
-                        setIsEmpAuthenticated(false);
                         setWorkspaceInfo(null);
-                        setPendingEmployees([]);
                     }
                 });
                 return () => unsubscribeAuth();
@@ -495,35 +489,6 @@
             useEffect(() => {
                 if (!firebaseUser) return;
                 let cancelled = false;
-
-                const isGoogleUser = firebaseUser.providerData?.some(p => p.providerId === 'google.com');
-
-                // 기존 직원 (이메일+PIN 방식) — loginRole 무관하게 이메일로 판단
-                if (!isGoogleUser && firebaseUser.email?.includes('@emp.albatracker.page')) {
-                    let attempts = 0;
-                    const tryLoad = () => {
-                        fbDb.collection('employeeAccounts').doc(firebaseUser.uid).get()
-                            .then(doc => {
-                                if (cancelled) return;
-                                if (doc.exists) {
-                                    const data = doc.data();
-                                    setUserRole('employee');
-                                    setEmpAccount(data);
-                                    setEmpPin(data.pin || '');
-                                    setFbLoading(false);
-                                } else if (attempts < 3) {
-                                    attempts++;
-                                    setTimeout(tryLoad, 1500);
-                                } else {
-                                    setUserRole('boss');
-                                    setFbLoading(false);
-                                }
-                            })
-                            .catch(() => { if (!cancelled) { setUserRole('boss'); setFbLoading(false); } });
-                    };
-                    tryLoad();
-                    return () => { cancelled = true; };
-                }
 
                 // Google 계정: loginRole로 역할 결정 (같은 계정으로 관리자/직원 모두 사용 가능)
                 const loginRole = localStorage.getItem('albaLoginRole');
@@ -770,10 +735,7 @@
                     lastSyncedDataRef.current = "";
                     setUserRole(null);
                     setEmpAccount(null);
-                    setEmpPin('');
-                    setIsEmpAuthenticated(false);
                     setWorkspaceInfo(null);
-                    setPendingEmployees([]);
                     setPendingGoogleEmployees([]);
                     setEmpNotifications([]);
                     setMySubmissions({});
@@ -939,20 +901,6 @@
                 return () => { cancelled = true; };
             }, [firebaseUser, userRole, currentWorkspaceId]);
 
-            // 대기 중인 직원 실시간 감지 (관리자) — 기존 PIN 방식
-            useEffect(() => {
-                if (!firebaseUser || userRole !== 'boss' || !currentWorkspaceId) return;
-                const unsub = fbDb.collection('employeeAccounts')
-                    .where('bossUid', '==', currentWorkspaceId)
-                    .where('status', '==', 'pending')
-                    .onSnapshot(snap => {
-                        const list = [];
-                        snap.forEach(d => list.push({ uid: d.id, ...d.data() }));
-                        setPendingEmployees(list);
-                    }, () => {});
-                return () => unsub();
-            }, [firebaseUser, userRole, currentWorkspaceId]);
-
             // Google 직원 대기 감지 (관리자) — empPending 컬렉션
             useEffect(() => {
                 if (!firebaseUser || userRole !== 'boss' || !currentWorkspaceId) return;
@@ -1008,10 +956,8 @@
             }, [firebaseUser, userRole, isAuthenticated, currentWorkspaceId, globalMinWage]);
 
             // 직원 본인 알림 실시간 로드
-            // Google 직원은 isEmpAuthenticated 없이 firebaseUser로 인증됨
             useEffect(() => {
-                const isAuthed = empAccount?.isGoogleEmployee ? true : isEmpAuthenticated;
-                if (!firebaseUser || userRole !== 'employee' || !isAuthed) return;
+                if (!firebaseUser || userRole !== 'employee') return;
                 const unsub = fbDb.collection('employeeAccounts').doc(firebaseUser.uid)
                     .collection('notifications')
                     .orderBy('createdAt', 'desc').limit(50)
@@ -1021,12 +967,11 @@
                         setEmpNotifications(list);
                     }, () => {});
                 return () => unsub();
-            }, [firebaseUser, userRole, isEmpAuthenticated, empAccount?.isGoogleEmployee]);
+            }, [firebaseUser, userRole]);
 
             // 직원 본인 제출 기록 실시간 로드
             useEffect(() => {
-                const isAuthed = empAccount?.isGoogleEmployee ? true : isEmpAuthenticated;
-                if (!firebaseUser || userRole !== 'employee' || !empAccount?.bossUid || !isAuthed) return;
+                if (!firebaseUser || userRole !== 'employee' || !empAccount?.bossUid) return;
                 const unsub = fbDb.collection('workspaces').doc(empAccount.bossUid)
                     .collection('submissions')
                     .where('empUid', '==', firebaseUser.uid)
@@ -1036,12 +981,11 @@
                         setMySubmissions(subs);
                     }, () => {});
                 return () => unsub();
-            }, [firebaseUser, userRole, empAccount?.bossUid, empAccount?.isGoogleEmployee, isEmpAuthenticated]);
+            }, [firebaseUser, userRole, empAccount?.bossUid]);
 
             // 직원 승인 처리 (관리자)
             const handleApproveEmployee = async (empUid) => {
-                const allPending = [...pendingEmployees, ...pendingGoogleEmployees];
-                const empData = allPending.find(e => e.uid === empUid);
+                const empData = pendingGoogleEmployees.find(e => e.uid === empUid);
                 if (!empData) return;
                 try {
                     const newEmpId = nextEmpId;
@@ -1053,19 +997,11 @@
                         bank: empData.bank || '',
                         account: empData.account || '',
                         memo: '', status: 'working',
-                        ...(empData.isGoogleEmployee && { empUid })
+                        empUid
                     };
                     setEmployees(prev => [...prev, newEmp]);
                     setNextEmpId(prev => prev + 1);
-
-                    if (empData.isGoogleEmployee) {
-                        await approveGoogleEmpJoinRequest(currentWorkspaceId || firebaseUser.uid, empUid, newEmpId);
-                    } else {
-                        await fbDb.collection('employeeAccounts').doc(empUid).update({
-                            status: 'approved', employeeId: newEmpId,
-                            approvedAt: firebase.firestore.FieldValue.serverTimestamp()
-                        });
-                    }
+                    await approveGoogleEmpJoinRequest(currentWorkspaceId || firebaseUser.uid, empUid, newEmpId);
                     showAlert(`${empData.name}님이 승인되었습니다.\n근무자 정보 탭에서 시급 등을 설정해주세요.`, '승인 완료', 'success');
                 } catch(e) {
                     showAlert('승인 처리 중 오류: ' + e.message, '오류', 'error');
@@ -1074,18 +1010,10 @@
 
             // 직원 거절 처리 (관리자)
             const handleRejectEmployee = (empUid) => {
-                const allPending = [...pendingEmployees, ...pendingGoogleEmployees];
-                const empData = allPending.find(e => e.uid === empUid);
+                const empData = pendingGoogleEmployees.find(e => e.uid === empUid);
                 showConfirm(`${empData?.name || '직원'}님의 가입을 거절하시겠습니까?`, async () => {
                     try {
-                        if (empData?.isGoogleEmployee) {
-                            await rejectGoogleEmpJoinRequest(currentWorkspaceId || firebaseUser.uid, empUid);
-                        } else {
-                            await fbDb.collection('employeeAccounts').doc(empUid).update({
-                                status: 'rejected',
-                                rejectedAt: firebase.firestore.FieldValue.serverTimestamp()
-                            });
-                        }
+                        await rejectGoogleEmpJoinRequest(currentWorkspaceId || firebaseUser.uid, empUid);
                     } catch(e) {
                         showAlert('처리 중 오류: ' + e.message, '오류', 'error');
                     }
@@ -1161,7 +1089,6 @@
                 setPredictData({});
                 setGlobalMinWage('');
                 setWorkspaceInfo(null);
-                setPendingEmployees([]);
                 setPendingGoogleEmployees([]);
                 lastSyncedDataRef.current = '';
                 setCurrentWorkspaceId(newWorkspaceId);
@@ -1198,8 +1125,7 @@
                 return <LandingScreen onBossLogin={handleGoogleLogin} onEmpGoogleLogin={handleEmpGoogleLogin} modalConfig={modalConfig} />;
             }
 
-            // 관리자용: 대기 직원 합산 (PIN 방식 + Google 방식)
-            const allPendingEmployees = [...pendingEmployees, ...pendingGoogleEmployees];
+            const allPendingEmployees = pendingGoogleEmployees;
 
             // ── 직원 플로우 ──
             if (userRole === 'employee') {
@@ -1315,43 +1241,17 @@
                     );
                 }
 
-                // ── 기존 PIN 방식 직원 플로우 ──
-                if (!empAccount || empAccount.status === 'pending') {
-                    return <PendingApprovalScreen empAccount={empAccount} onLogout={handleLogout} />;
-                }
-                if (empAccount.status === 'rejected') {
-                    return (
-                        <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
-                            <CustomModal config={modalConfig} />
-                            <div className="bg-white p-8 rounded-2xl shadow-xl w-full max-w-sm text-center">
-                                <AlertCircle className="w-16 h-16 text-red-500 mx-auto mb-4" />
-                                <h2 className="text-xl font-bold text-gray-800 mb-2">가입이 거절되었습니다</h2>
-                                <p className="text-gray-500 text-sm mb-6">관리자께 문의해 주세요.</p>
-                                <button onClick={handleLogout} className="w-full bg-gray-600 text-white py-3 rounded-xl font-bold">로그아웃</button>
-                            </div>
-                        </div>
-                    );
-                }
-                if (!isEmpAuthenticated) {
-                    return (
-                        <>
-                            <CustomModal config={modalConfig} />
-                            <LoginScreen appPin={empPin} onLogin={() => setIsEmpAuthenticated(true)} empName={empAccount?.name} />
-                        </>
-                    );
-                }
+                // Google 직원만 지원 — isGoogleEmployee가 없으면 로그아웃 안내
                 return (
-                    <EmployeeApp
-                        empAccount={empAccount}
-                        firebaseUser={firebaseUser}
-                        mySubmissions={mySubmissions}
-                        notifications={empNotifications}
-                        onLogout={handleLogout}
-                        onLock={() => setIsEmpAuthenticated(false)}
-                        showAlert={showAlert}
-                        showConfirm={showConfirm}
-                        modalConfig={modalConfig}
-                    />
+                    <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+                        <CustomModal config={modalConfig} />
+                        <div className="bg-white p-8 rounded-2xl shadow-xl w-full max-w-sm text-center">
+                            <AlertCircle className="w-16 h-16 text-red-500 mx-auto mb-4" />
+                            <h2 className="text-xl font-bold text-gray-800 mb-2">로그인 오류</h2>
+                            <p className="text-gray-500 text-sm mb-6">직원으로 로그인 버튼을 통해 접속해 주세요.</p>
+                            <button onClick={handleLogout} className="w-full bg-gray-600 text-white py-3 rounded-xl font-bold">로그아웃</button>
+                        </div>
+                    </div>
                 );
             }
 
@@ -1721,8 +1621,6 @@
         // ============================================================
 
         function LandingScreen({ onBossLogin, onEmpGoogleLogin, modalConfig }) {
-            const [showEmpEntry, setShowEmpEntry] = useState(false);
-            if (showEmpEntry) return <EmployeeEntryScreen onBack={() => setShowEmpEntry(false)} />;
             return (
                 <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-4">
                     <CustomModal config={modalConfig} />
@@ -1760,10 +1658,6 @@
                                 직원으로 로그인 (Google)
                             </button>
 
-                            {/* 기존 PIN 방식 직원 (하위 호환) */}
-                            <button onClick={() => setShowEmpEntry(true)} className="w-full text-xs text-gray-400 hover:text-gray-600 transition py-1">
-                                기존 PIN 방식 직원 로그인
-                            </button>
                         </div>
                     </div>
                 </div>
@@ -2003,236 +1897,6 @@
                                 <button onClick={handleSubmit} disabled={loading}
                                     className="w-full bg-green-600 text-white py-3 rounded-xl font-bold hover:bg-green-700 transition disabled:opacity-50">
                                     {loading ? '신청 중...' : '가입 신청'}
-                                </button>
-                            </div>
-                        )}
-                    </div>
-                </div>
-            );
-        }
-
-        function EmployeeEntryScreen({ onBack }) {
-            const [step, setStep] = useState('code'); // code → info → pinSetup → pinConfirm → profile → (create)
-            const [code, setCode] = useState('');
-            const [inviteInfo, setInviteInfo] = useState(null);
-            const [name, setName] = useState('');
-            const [pin, setPin] = useState('');
-            const [confirmPin, setConfirmPin] = useState('');
-            const [isNew, setIsNew] = useState(false);
-            const [loading, setLoading] = useState(false);
-            const [error, setError] = useState('');
-            const [profile, setProfile] = useState({ residentId: '', bank: '', account: '' });
-
-            const handleCodeNext = async () => {
-                if (code.trim().length !== 6) { setError('초대코드 6자리를 입력해주세요.'); return; }
-                setLoading(true); setError('');
-                try {
-                    const doc = await fbDb.collection('inviteCodes').doc(code.trim().toUpperCase()).get();
-                    if (!doc.exists) { setError('유효하지 않은 초대코드입니다.'); setLoading(false); return; }
-                    setInviteInfo(doc.data());
-                    setStep('info');
-                } catch(e) { setError('오류: ' + e.message); }
-                setLoading(false);
-            };
-
-            const handleNameNext = async () => {
-                if (!name.trim()) { setError('이름을 입력해주세요.'); return; }
-                setLoading(true); setError('');
-                try {
-                    const nameKey = name.trim().toLowerCase().replace(/\s+/g, '_');
-                    const lookupDoc = await fbDb.collection('inviteCodes').doc(code.trim().toUpperCase())
-                        .collection('employees').doc(nameKey).get();
-                    setIsNew(!lookupDoc.exists);
-                    setStep(lookupDoc.exists ? 'pinLogin' : 'pinSetup');
-                } catch(e) { setError('오류: ' + e.message); }
-                setLoading(false);
-            };
-
-            const handleLogin = async () => {
-                if (pin.length !== 6) { setError('PIN 6자리를 입력해주세요.'); return; }
-                setLoading(true); setError('');
-                try {
-                    const nameKey = name.trim().toLowerCase().replace(/\s+/g, '_');
-                    const lookupDoc = await fbDb.collection('inviteCodes').doc(code.trim().toUpperCase())
-                        .collection('employees').doc(nameKey).get();
-                    if (!lookupDoc.exists) { setError('등록된 직원 정보를 찾을 수 없습니다.'); setLoading(false); return; }
-                    await fbAuth.signInWithEmailAndPassword(lookupDoc.data().email, pin);
-                    // onAuthStateChanged가 자동으로 처리
-                } catch(e) {
-                    setError(e.code === 'auth/wrong-password' || e.code === 'auth/invalid-credential' ? 'PIN이 틀렸습니다.' : '로그인 실패: ' + e.message);
-                }
-                setLoading(false);
-            };
-
-            const handleFinalSignup = async () => {
-                setLoading(true); setError('');
-                try {
-                    const email = `emp${Date.now().toString(36)}@emp.albatracker.page`;
-                    await fbAuth.createUserWithEmailAndPassword(email, pin);
-                    const uid = fbAuth.currentUser.uid;
-                    const nameKey = name.trim().toLowerCase().replace(/\s+/g, '_');
-                    await fbDb.collection('employeeAccounts').doc(uid).set({
-                        name: name.trim(), bossUid: inviteInfo.bossUid,
-                        status: 'pending', pin, email,
-                        inviteCode: code.trim().toUpperCase(),
-                        residentId: profile.residentId || '',
-                        bank: profile.bank || '',
-                        account: profile.account || '',
-                        createdAt: firebase.firestore.FieldValue.serverTimestamp()
-                    });
-                    await fbDb.collection('inviteCodes').doc(code.trim().toUpperCase())
-                        .collection('employees').doc(nameKey).set({ email, uid });
-                } catch(e) {
-                    if (e.code === 'auth/email-already-in-use') {
-                        setError('이미 가입된 계정입니다. 로그인해 주세요.');
-                        setStep('pinLogin');
-                    } else {
-                        setError('가입 실패: ' + e.message);
-                    }
-                }
-                setLoading(false);
-            };
-
-            const formatResidentId = (raw) => {
-                const digits = raw.replace(/[^0-9]/g, '').slice(0, 13);
-                return digits.length > 6 ? `${digits.slice(0,6)}-${digits.slice(6)}` : digits;
-            };
-
-            const PinDots = ({ value }) => (
-                <div className="flex justify-center gap-3 my-6">
-                    {[...Array(6)].map((_, i) => (
-                        <div key={i} className={`w-4 h-4 rounded-full transition-all ${i < value.length ? 'bg-blue-600 scale-110' : 'bg-gray-200'}`} />
-                    ))}
-                </div>
-            );
-
-            const NumPad = ({ onNum, onDel }) => (
-                <div className="grid grid-cols-3 gap-3">
-                    {[1,2,3,4,5,6,7,8,9].map(n => (
-                        <button key={n} onClick={() => onNum(n.toString())} className="h-14 bg-gray-50 hover:bg-gray-100 rounded-xl text-xl font-medium text-gray-700 transition active:scale-95">{n}</button>
-                    ))}
-                    <div/>
-                    <button onClick={() => onNum('0')} className="h-14 bg-gray-50 hover:bg-gray-100 rounded-xl text-xl font-medium text-gray-700 transition active:scale-95">0</button>
-                    <button onClick={onDel} className="h-14 bg-gray-50 hover:bg-gray-100 rounded-xl flex items-center justify-center transition active:scale-95"><X className="w-6 h-6 text-gray-700"/></button>
-                </div>
-            );
-
-            return (
-                <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-4">
-                    <div className="bg-white p-8 rounded-2xl shadow-xl w-full max-w-sm">
-                        <button onClick={onBack} className="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700 mb-6">
-                            <ChevronLeft className="w-4 h-4" /> 뒤로
-                        </button>
-
-                        {step === 'code' && (
-                            <div className="text-center">
-                                <div className="bg-blue-100 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
-                                    <Users className="w-8 h-8 text-blue-600" />
-                                </div>
-                                <h2 className="text-xl font-bold text-gray-800 mb-1">직원 로그인 / 가입</h2>
-                                <p className="text-gray-500 text-sm mb-6">관리자께 받은 초대코드를 입력하세요</p>
-                                <input value={code} onChange={e => setCode(e.target.value.toUpperCase())} onKeyDown={e => e.key==='Enter' && handleCodeNext()}
-                                    className="w-full text-center text-2xl font-bold tracking-widest border-2 border-gray-300 rounded-xl py-3 focus:border-blue-500 outline-none uppercase mb-3" maxLength={6} placeholder="XXXXXX" />
-                                {error && <p className="text-red-500 text-sm mb-3">{error}</p>}
-                                <button onClick={handleCodeNext} disabled={loading} className="w-full bg-blue-600 text-white py-3 rounded-xl font-bold hover:bg-blue-700 transition disabled:opacity-50">
-                                    {loading ? '확인 중...' : '다음'}
-                                </button>
-                            </div>
-                        )}
-
-                        {step === 'info' && (
-                            <div className="text-center">
-                                <div className="bg-green-100 py-2 px-4 rounded-xl mb-6">
-                                    <p className="text-green-700 font-bold text-sm">{inviteInfo?.shopName}</p>
-                                    <p className="text-green-600 text-xs">에 오신 것을 환영합니다!</p>
-                                </div>
-                                <h2 className="text-xl font-bold text-gray-800 mb-1">이름을 입력해주세요</h2>
-                                <p className="text-gray-500 text-sm mb-6">실명을 정확히 입력해야 합니다</p>
-                                <input value={name} onChange={e => setName(e.target.value)} onKeyDown={e => e.key==='Enter' && handleNameNext()}
-                                    className="w-full text-center border-2 border-gray-300 rounded-xl py-3 focus:border-blue-500 outline-none mb-3 text-lg font-medium" placeholder="홍길동" />
-                                {error && <p className="text-red-500 text-sm mb-3">{error}</p>}
-                                <button onClick={handleNameNext} disabled={loading} className="w-full bg-blue-600 text-white py-3 rounded-xl font-bold hover:bg-blue-700 transition disabled:opacity-50">
-                                    {loading ? '확인 중...' : '다음'}
-                                </button>
-                            </div>
-                        )}
-
-                        {step === 'pinLogin' && (
-                            <div className="text-center">
-                                <h2 className="text-xl font-bold text-gray-800 mb-1">{name}님, 반갑습니다</h2>
-                                <p className="text-gray-500 text-sm">PIN 6자리를 입력해주세요</p>
-                                <PinDots value={pin} />
-                                <NumPad onNum={n => { if(pin.length<6) setPin(p=>p+n); }} onDel={() => setPin(p=>p.slice(0,-1))} />
-                                {error && <p className="text-red-500 text-sm mt-3">{error}</p>}
-                                <button onClick={handleLogin} disabled={loading || pin.length!==6} className="w-full mt-4 bg-blue-600 text-white py-3 rounded-xl font-bold hover:bg-blue-700 transition disabled:opacity-50">
-                                    {loading ? '로그인 중...' : '로그인'}
-                                </button>
-                            </div>
-                        )}
-
-                        {step === 'pinSetup' && (
-                            <div className="text-center">
-                                <h2 className="text-xl font-bold text-gray-800 mb-1">PIN을 설정해주세요</h2>
-                                <p className="text-gray-500 text-sm">앱 잠금에 사용할 6자리 숫자</p>
-                                <PinDots value={pin} />
-                                <NumPad onNum={n => { if(pin.length<6) setPin(p=>p+n); }} onDel={() => setPin(p=>p.slice(0,-1))} />
-                                <button onClick={() => { if(pin.length===6) setStep('pinConfirm'); else setError('PIN 6자리를 입력해주세요.'); }} className="w-full mt-4 bg-blue-600 text-white py-3 rounded-xl font-bold hover:bg-blue-700 transition">
-                                    다음
-                                </button>
-                                {error && <p className="text-red-500 text-sm mt-2">{error}</p>}
-                            </div>
-                        )}
-
-                        {step === 'pinConfirm' && (
-                            <div className="text-center">
-                                <h2 className="text-xl font-bold text-gray-800 mb-1">PIN을 다시 입력해주세요</h2>
-                                <p className="text-gray-500 text-sm">확인을 위해 한 번 더 입력</p>
-                                <PinDots value={confirmPin} />
-                                <NumPad onNum={n => { if(confirmPin.length<6) setConfirmPin(p=>p+n); }} onDel={() => setConfirmPin(p=>p.slice(0,-1))} />
-                                <button onClick={() => {
-                                    if (confirmPin.length !== 6) { setError('PIN 6자리를 입력해주세요.'); return; }
-                                    if (pin !== confirmPin) { setError('PIN이 일치하지 않습니다.'); setConfirmPin(''); return; }
-                                    setError(''); setStep('profile');
-                                }} disabled={confirmPin.length!==6} className="w-full mt-4 bg-blue-600 text-white py-3 rounded-xl font-bold hover:bg-blue-700 transition disabled:opacity-50">
-                                    다음
-                                </button>
-                                {error && <p className="text-red-500 text-sm mt-2">{error}</p>}
-                            </div>
-                        )}
-
-                        {step === 'profile' && (
-                            <div>
-                                <h2 className="text-xl font-bold text-gray-800 mb-1">근무자 정보 입력</h2>
-                                <p className="text-gray-500 text-sm mb-5">선택 항목입니다. 나중에 앱에서 수정할 수 있어요.</p>
-                                <div className="space-y-3 text-left mb-5">
-                                    <div>
-                                        <label className="block text-xs font-bold text-gray-600 mb-1">주민번호</label>
-                                        <input value={profile.residentId}
-                                            onChange={e => setProfile(p => ({ ...p, residentId: formatResidentId(e.target.value) }))}
-                                            className="w-full border-2 border-gray-300 rounded-xl py-2.5 px-4 focus:border-blue-500 outline-none text-sm font-mono tracking-wider"
-                                            placeholder="000000-0000000" />
-                                    </div>
-                                    <div>
-                                        <label className="block text-xs font-bold text-gray-600 mb-1">은행명</label>
-                                        <input value={profile.bank}
-                                            onChange={e => setProfile(p => ({ ...p, bank: e.target.value }))}
-                                            className="w-full border-2 border-gray-300 rounded-xl py-2.5 px-4 focus:border-blue-500 outline-none text-sm"
-                                            placeholder="예: 국민은행" />
-                                    </div>
-                                    <div>
-                                        <label className="block text-xs font-bold text-gray-600 mb-1">계좌번호</label>
-                                        <input value={profile.account}
-                                            onChange={e => setProfile(p => ({ ...p, account: e.target.value }))}
-                                            className="w-full border-2 border-gray-300 rounded-xl py-2.5 px-4 focus:border-blue-500 outline-none text-sm"
-                                            placeholder="예: 123-456-789012" />
-                                    </div>
-                                </div>
-                                {error && <p className="text-red-500 text-sm mb-3">{error}</p>}
-                                <button onClick={handleFinalSignup} disabled={loading} className="w-full bg-green-600 text-white py-3 rounded-xl font-bold hover:bg-green-700 transition disabled:opacity-50">
-                                    {loading ? '가입 중...' : '가입 완료'}
-                                </button>
-                                <button onClick={() => { setError(''); handleFinalSignup(); }} disabled={loading} className="w-full mt-2 text-gray-400 text-sm py-2 hover:text-gray-600 transition">
-                                    건너뛰기
                                 </button>
                             </div>
                         )}

@@ -70,6 +70,7 @@
         }
 
         @media print {
+            html, body { height: auto !important; min-height: 0 !important; overflow: visible !important; }
             body * { visibility: hidden; }
             #contract-print-area, #contract-print-area * { visibility: visible; }
             #contract-print-area {
@@ -644,6 +645,18 @@
             const lastSyncedDataRef = useRef("");
             // 직원 자체 퇴사 시 applyData 덮어쓰기 방지용
             const resignedEmpUidsRef = useRef(new Set());
+
+            // PC 네비게이션 스크롤 버튼
+            const navScrollRef = useRef(null);
+            const [navCanScrollLeft, setNavCanScrollLeft] = useState(false);
+            const [navCanScrollRight, setNavCanScrollRight] = useState(false);
+            const updateNavScroll = () => {
+                const el = navScrollRef.current;
+                if (!el) return;
+                setNavCanScrollLeft(el.scrollLeft > 2);
+                setNavCanScrollRight(el.scrollLeft < el.scrollWidth - el.clientWidth - 2);
+            };
+            useEffect(() => { setTimeout(updateNavScroll, 100); }, []);
 
             const showAlert = (message, title = '알림', type = 'info') => {
                 setModalConfig({ type: type, title, message, onConfirm: () => setModalConfig(null) });
@@ -1810,39 +1823,59 @@
                     </header>
 
                     <nav className="hidden md:block bg-white border-b border-gray-200 sticky top-0 z-20 shadow-sm">
-                        <div className="max-w-7xl mx-auto px-4 flex overflow-x-auto no-scrollbar">
-                            {[
-                                { id: 'employees', label: '현재 근무자 정보', icon: Users },
-                                { id: 'calendar', label: '월별 근무현황', icon: CalendarIcon },
-                                { id: 'payroll', label: '인건비 지급', icon: Wallet },
-                                { id: 'chart', label: '인건비 차트', icon: BarChart3 },
-                                { id: 'predict', label: '주휴수당 예측', icon: Search },
-                                { id: 'invite', label: '직원 초대', icon: Users },
-                                { id: 'notices', label: '전체 공지', icon: Megaphone },
-                                { id: 'settings', label: '설정', icon: Settings },
-                            ].map(tab => {
-                                const isLocked = WAGE_REQUIRED_TABS.includes(tab.id) && (globalMinWage === '' || Number(globalMinWage) <= 0);
-                                return (
+                        <div className="max-w-7xl mx-auto px-4 relative flex items-center">
+                            {navCanScrollLeft && (
                                 <button
-                                    key={tab.id}
-                                    onClick={() => handleTabChange(tab.id)}
-                                    className={`relative flex items-center gap-2 px-5 py-4 text-sm font-medium whitespace-nowrap border-b-2 transition-colors ${
-                                        activeTab === tab.id
-                                            ? 'border-green-600 text-green-600'
-                                            : isLocked
-                                                ? 'border-transparent text-gray-300 cursor-not-allowed'
-                                                : 'border-transparent text-gray-500 hover:text-gray-700 hover:bg-gray-50'
-                                    }`}
+                                    onClick={() => { navScrollRef.current.scrollBy({ left: -200, behavior: 'smooth' }); }}
+                                    className="absolute left-0 z-10 flex items-center justify-center w-8 h-full bg-gradient-to-r from-white via-white/90 to-transparent text-gray-500 hover:text-gray-700"
+                                    style={{ minHeight: '48px' }}
                                 >
-                                    <tab.icon className="w-4 h-4" />
-                                    {tab.label}
-                                    {isLocked && <Lock className="w-3 h-3 ml-0.5 text-gray-300" />}
-                                    {tab.id === 'invite' && allPendingEmployees.length > 0 && (
-                                        <span className="absolute top-2 right-1 bg-red-500 text-white text-[10px] rounded-full w-4 h-4 flex items-center justify-center font-bold">{allPendingEmployees.length}</span>
-                                    )}
+                                    <ChevronLeft className="w-5 h-5" />
                                 </button>
-                                );
-                            })}
+                            )}
+                            <div ref={navScrollRef} onScroll={updateNavScroll} className="flex overflow-x-auto no-scrollbar w-full">
+                                {[
+                                    { id: 'employees', label: '현재 근무자 정보', icon: Users },
+                                    { id: 'calendar', label: '월별 근무현황', icon: CalendarIcon },
+                                    { id: 'payroll', label: '인건비 지급', icon: Wallet },
+                                    { id: 'chart', label: '인건비 차트', icon: BarChart3 },
+                                    { id: 'predict', label: '주휴수당 예측', icon: Search },
+                                    { id: 'invite', label: '직원 초대', icon: Users },
+                                    { id: 'notices', label: '전체 공지', icon: Megaphone },
+                                    { id: 'settings', label: '설정', icon: Settings },
+                                ].map(tab => {
+                                    const isLocked = WAGE_REQUIRED_TABS.includes(tab.id) && (globalMinWage === '' || Number(globalMinWage) <= 0);
+                                    return (
+                                    <button
+                                        key={tab.id}
+                                        onClick={() => handleTabChange(tab.id)}
+                                        className={`relative flex items-center gap-2 px-5 py-4 text-sm font-medium whitespace-nowrap border-b-2 transition-colors ${
+                                            activeTab === tab.id
+                                                ? 'border-green-600 text-green-600'
+                                                : isLocked
+                                                    ? 'border-transparent text-gray-300 cursor-not-allowed'
+                                                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:bg-gray-50'
+                                        }`}
+                                    >
+                                        <tab.icon className="w-4 h-4" />
+                                        {tab.label}
+                                        {isLocked && <Lock className="w-3 h-3 ml-0.5 text-gray-300" />}
+                                        {tab.id === 'invite' && allPendingEmployees.length > 0 && (
+                                            <span className="absolute top-2 right-1 bg-red-500 text-white text-[10px] rounded-full w-4 h-4 flex items-center justify-center font-bold">{allPendingEmployees.length}</span>
+                                        )}
+                                    </button>
+                                    );
+                                })}
+                            </div>
+                            {navCanScrollRight && (
+                                <button
+                                    onClick={() => { navScrollRef.current.scrollBy({ left: 200, behavior: 'smooth' }); }}
+                                    className="absolute right-0 z-10 flex items-center justify-center w-8 h-full bg-gradient-to-l from-white via-white/90 to-transparent text-gray-500 hover:text-gray-700"
+                                    style={{ minHeight: '48px' }}
+                                >
+                                    <ChevronRight className="w-5 h-5" />
+                                </button>
+                            )}
                         </div>
                     </nav>
 
@@ -4305,14 +4338,20 @@
                 setMinuteData(prev => ({ ...prev, [day]: { ...prev[day], [empId]: val } }));
             };
 
-            // 시간 입력칸 키 핸들러: Enter/ArrowDown → 다음 날 시간칸, Tab → 다음 직원 시간칸
+            // 시간 입력칸 키 핸들러: Enter/ArrowRight/Tab → 분 입력칸, ArrowDown → 다음 날 시간칸
             const handleHourKeyDown = (e, day, empIdx) => {
                 if (['e', 'E', '+', '-'].includes(e.key)) { e.preventDefault(); return; }
 
                 let nextDay = day;
                 let nextEmpIdx = empIdx;
 
-                if (e.key === 'Enter' || e.key === 'ArrowDown') {
+                if (e.key === 'Enter' || e.key === 'ArrowRight' || (e.key === 'Tab' && !e.shiftKey)) {
+                    e.preventDefault();
+                    // Enter/오른쪽/Tab → 분 입력칸으로
+                    const minRef = minRefs.current[`${day}-${activeEmployees[empIdx].id}`];
+                    if (minRef) { minRef.focus(); minRef.select(); }
+                    return;
+                } else if (e.key === 'ArrowDown') {
                     e.preventDefault();
                     if (day === daysInMonth) {
                         if (empIdx < activeEmployees.length - 1) { nextDay = 1; nextEmpIdx = empIdx + 1; }
@@ -4320,12 +4359,6 @@
                 } else if (e.key === 'ArrowUp') {
                     e.preventDefault();
                     nextDay = Math.max(day - 1, 1);
-                } else if (e.key === 'ArrowRight' || (e.key === 'Tab' && !e.shiftKey)) {
-                    e.preventDefault();
-                    // 오른쪽 → 분 입력칸으로
-                    const minRef = minRefs.current[`${day}-${activeEmployees[empIdx].id}`];
-                    if (minRef) { minRef.focus(); minRef.select(); }
-                    return;
                 } else if (e.key === 'ArrowLeft' || (e.key === 'Tab' && e.shiftKey)) {
                     e.preventDefault();
                     nextEmpIdx = Math.max(empIdx - 1, 0);
@@ -4398,7 +4431,7 @@
                         <div className="p-5 border-b flex justify-between items-center bg-gray-50 rounded-t-2xl shrink-0">
                             <div>
                                 <h3 className="text-lg font-bold text-gray-800">{year}년 {month}월 근무시간 일괄 입력</h3>
-                                <p className="hidden md:block text-xs text-gray-500 mt-1">시간/분 입력 후 Enter → 다음 날짜 이동. 방향키·Tab으로 셀 이동.</p>
+                                <p className="hidden md:block text-xs text-gray-500 mt-1">시간 Enter → 분칸 이동 | 분 Enter → 다음 날 시간칸 | 방향키로 셀 이동</p>
                             </div>
                             <button onClick={onClose} className="p-2 hover:bg-gray-200 rounded-full transition"><X className="w-5 h-5"/></button>
                         </div>
@@ -5473,8 +5506,8 @@
             );
         }
 
-        // ─── 자필서명 캔버스 ───
-        function SignatureCanvas({ onSave, width = 320, height = 110, className = '' }) {
+        // ─── 서명 그리기 모달 (확대 캔버스) ───
+        function SignatureDrawModal({ onSave, onClose }) {
             const canvasRef = useRef(null);
             const [isDrawing, setIsDrawing] = useState(false);
             const [hasDrawn, setHasDrawn] = useState(false);
@@ -5495,9 +5528,8 @@
                 setIsDrawing(true); setHasDrawn(true);
                 lastPosRef.current = pos;
                 const ctx = canvas.getContext('2d');
-                ctx.beginPath(); ctx.arc(pos.x, pos.y, 1, 0, Math.PI * 2);
+                ctx.beginPath(); ctx.arc(pos.x, pos.y, 1.5, 0, Math.PI * 2);
                 ctx.fillStyle = '#1a1a1a'; ctx.fill();
-                if (onSave) onSave(canvas.toDataURL());
             };
 
             const draw = (e) => {
@@ -5508,32 +5540,90 @@
                 const ctx = canvas.getContext('2d');
                 ctx.beginPath(); ctx.moveTo(lastPosRef.current.x, lastPosRef.current.y);
                 ctx.lineTo(pos.x, pos.y);
-                ctx.strokeStyle = '#1a1a1a'; ctx.lineWidth = 2;
+                ctx.strokeStyle = '#1a1a1a'; ctx.lineWidth = 2.5;
                 ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.stroke();
                 lastPosRef.current = pos;
-                if (onSave) onSave(canvas.toDataURL());
             };
 
             const clear = () => {
                 const canvas = canvasRef.current;
                 canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
                 setHasDrawn(false);
-                if (onSave) onSave('');
+            };
+
+            const handleConfirm = () => {
+                if (!hasDrawn) return;
+                onSave(canvasRef.current.toDataURL());
+            };
+
+            return (
+                <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[10000] p-4" onClick={onClose}>
+                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg" onClick={e => e.stopPropagation()}>
+                        <div className="px-5 pt-5 pb-3 flex items-center justify-between">
+                            <h3 className="text-base font-bold text-gray-800">서명하기</h3>
+                            <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl leading-none">✕</button>
+                        </div>
+                        <div className="px-5 pb-2 relative">
+                            <canvas ref={canvasRef} width={600} height={260}
+                                className="border-2 border-dashed border-gray-300 rounded-xl touch-none cursor-crosshair w-full"
+                                style={{ touchAction: 'none', backgroundColor: 'white', display: 'block' }}
+                                onMouseDown={startDraw} onMouseMove={draw}
+                                onMouseUp={() => setIsDrawing(false)} onMouseLeave={() => setIsDrawing(false)}
+                                onTouchStart={startDraw} onTouchMove={draw} onTouchEnd={() => setIsDrawing(false)}
+                            />
+                            {!hasDrawn && (
+                                <p className="absolute inset-0 mx-5 flex items-center justify-center text-gray-400 text-sm pointer-events-none">여기에 서명하세요</p>
+                            )}
+                            {hasDrawn && (
+                                <button onClick={clear} className="absolute top-3 right-7 bg-red-100 text-red-600 text-xs px-2 py-1 rounded-lg hover:bg-red-200 transition">지우기</button>
+                            )}
+                        </div>
+                        <div className="px-5 pb-5 flex gap-3 mt-3">
+                            <button onClick={onClose} className="flex-1 py-3 border border-gray-200 rounded-xl text-gray-600 text-sm font-medium hover:bg-gray-50 transition">취소</button>
+                            <button onClick={handleConfirm} disabled={!hasDrawn}
+                                className={`flex-1 py-3 rounded-xl text-sm font-bold transition ${hasDrawn ? 'bg-green-500 text-white hover:bg-green-600' : 'bg-gray-200 text-gray-400 cursor-not-allowed'}`}>
+                                완료
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        // ─── 자필서명 캔버스 (탭하면 확대 모달 열림) ───
+        function SignatureCanvas({ onSave, width = 320, height = 110, className = '' }) {
+            const [showModal, setShowModal] = useState(false);
+            const [savedSig, setSavedSig] = useState('');
+
+            const handleModalSave = (dataUrl) => {
+                setSavedSig(dataUrl);
+                onSave && onSave(dataUrl);
+                setShowModal(false);
+            };
+
+            const handleClear = (e) => {
+                e.stopPropagation();
+                setSavedSig('');
+                onSave && onSave('');
             };
 
             return (
                 <div className={`relative ${className}`}>
-                    <canvas ref={canvasRef} width={width} height={height}
-                        className="border-2 border-dashed border-gray-300 rounded-xl touch-none cursor-crosshair bg-white w-full"
-                        style={{ touchAction: 'none' }}
-                        onMouseDown={startDraw} onMouseMove={draw} onMouseUp={() => setIsDrawing(false)} onMouseLeave={() => setIsDrawing(false)}
-                        onTouchStart={startDraw} onTouchMove={draw} onTouchEnd={() => setIsDrawing(false)}
-                    />
-                    {hasDrawn ? (
-                        <button onClick={clear} className="absolute top-1 right-1 bg-red-100 text-red-600 text-xs px-2 py-1 rounded-lg hover:bg-red-200 transition">지우기</button>
-                    ) : (
-                        <p className="absolute inset-0 flex items-center justify-center text-gray-400 text-sm pointer-events-none">서명란 (여기에 서명하세요)</p>
+                    <div
+                        onClick={() => setShowModal(true)}
+                        className="border-2 border-dashed border-gray-300 rounded-xl cursor-pointer flex items-center justify-center w-full select-none"
+                        style={{ height: `${height}px`, minHeight: '72px', backgroundColor: 'white' }}
+                    >
+                        {savedSig ? (
+                            <img src={savedSig} alt="서명" className="w-full h-full object-contain p-1" style={{ backgroundColor: 'white' }} />
+                        ) : (
+                            <p className="text-gray-400 text-sm text-center pointer-events-none">서명란 (탭하여 서명)</p>
+                        )}
+                    </div>
+                    {savedSig && (
+                        <button onClick={handleClear} className="absolute top-1 right-1 bg-red-100 text-red-600 text-xs px-2 py-1 rounded-lg hover:bg-red-200 transition">지우기</button>
                     )}
+                    {showModal && <SignatureDrawModal onSave={handleModalSave} onClose={() => setShowModal(false)} />}
                 </div>
             );
         }

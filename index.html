@@ -398,6 +398,18 @@
             await batch.commit();
         }
 
+        // 직원 상태 변경 알림 발송
+        async function sendStatusChangeNotification(empUid, newStatus) {
+            const notifId = `status_${Date.now()}`;
+            await fbDb.collection('employeeAccounts').doc(empUid)
+                .collection('notifications').doc(notifId).set({
+                    type: 'status_change',
+                    newStatus,
+                    read: false,
+                    createdAt: firebase.firestore.FieldValue.serverTimestamp()
+                });
+        }
+
         // 관리자 거절 처리 (Google 직원)
         async function rejectGoogleEmpJoinRequest(bossUid, empUid) {
             const pendingDocId = `${empUid}_${bossUid}`;
@@ -874,6 +886,7 @@
                                 shopName: target.shopName || '',
                                 name: target.name,
                                 status: target.status,
+                                workStatus: target.workStatus || 'working',
                                 employeeId: target.employeeId,
                                 residentId: target.residentId || '',
                                 bank: target.bank || '',
@@ -1202,6 +1215,7 @@
                                             shopName: wp.shopName || '',
                                             name: wp.name,
                                             status: wp.status,
+                                            workStatus: wp.workStatus || 'working',
                                             employeeId: wp.employeeId,
                                             residentId: wp.residentId || '',
                                             bank: wp.bank || '',
@@ -1516,16 +1530,18 @@
 
                     <main className="max-w-7xl mx-auto px-3 md:px-4 py-4 md:py-6">
                         {activeTab === 'employees' && (
-                            <TabEmployees 
-                                employees={employeesWithDisplayId} 
-                                setEmployees={setEmployees} 
-                                nextEmpId={nextEmpId} 
+                            <TabEmployees
+                                employees={employeesWithDisplayId}
+                                setEmployees={setEmployees}
+                                nextEmpId={nextEmpId}
                                 setNextEmpId={setNextEmpId}
                                 getEmployeeStats={getEmployeeStats}
                                 globalMinWage={globalMinWage}
                                 setGlobalMinWage={setGlobalMinWage}
                                 showAlert={showAlert}
                                 showConfirm={showConfirm}
+                                firebaseUser={firebaseUser}
+                                currentWorkspaceId={currentWorkspaceId}
                             />
                         )}
                         {activeTab === 'calendar' && (
@@ -2264,6 +2280,8 @@
             const [viewModal, setViewModal] = useState(null); // 제출된 날 열람 { date, sub }
             const [timeUnit, setTimeUnit] = useState('hour');
             const unreadCount = notifications.filter(n => !n.read).length;
+            const workStatus = empAccount?.workStatus || 'working';
+            const isBlocked = workStatus === 'leave' || workStatus === 'resigned';
 
             useEffect(() => {
                 if (!empAccount?.bossUid) return;
@@ -2333,6 +2351,12 @@
                     <main className="max-w-lg mx-auto px-3 py-4">
                         {activeTab === 'calendar' && (
                             <div>
+                                {isBlocked && (
+                                    <div className={`mb-4 p-3 rounded-xl text-sm font-medium flex items-center gap-2 ${workStatus === 'resigned' ? 'bg-red-50 text-red-700 border border-red-200' : 'bg-yellow-50 text-yellow-700 border border-yellow-200'}`}>
+                                        <AlertCircle className="w-4 h-4 flex-shrink-0"/>
+                                        {workStatus === 'resigned' ? '퇴사 처리되어 근무시간 입력이 불가합니다.' : '휴직 중으로 근무시간 입력이 불가합니다.'}
+                                    </div>
+                                )}
                                 <div className="flex items-center justify-between mb-4">
                                     <button onClick={() => { let m=month-1,y=year; if(m<1){m=12;y--;} setMonth(m);setYear(y); }} className="p-2 rounded-lg hover:bg-gray-200">
                                         <ChevronLeft className="w-5 h-5"/>
@@ -2369,7 +2393,7 @@
                                                             <p className="text-xs font-bold text-green-700">{sub.hours}h</p>
                                                             <p className="text-[9px] text-green-500">{sub.note ? '메모있음' : '제출완료'}</p>
                                                         </button>
-                                                    ) : isPast && (
+                                                    ) : isPast && !isBlocked && (
                                                         <button onClick={() => setSubmitModal({ date: dateStr })}
                                                             className="flex-1 flex items-center justify-center rounded border border-dashed border-gray-300 hover:border-blue-400 hover:bg-blue-50 transition text-gray-400 hover:text-blue-500">
                                                             <Plus className="w-3.5 h-3.5"/>
@@ -2408,11 +2432,21 @@
                                 ) : notifications.map(n => (
                                     <div key={n.id} className={`bg-white rounded-xl border p-4 ${n.read ? 'border-gray-200' : 'border-yellow-300 bg-yellow-50'}`}>
                                         <div className="flex items-start justify-between mb-1">
-                                            <p className="text-sm font-bold text-gray-800">{n.date} 근무시간 변경</p>
+                                            <p className="text-sm font-bold text-gray-800">
+                                                {n.type === 'status_change' ? '근무 상태 변경' : `${n.date} 근무시간 변경`}
+                                            </p>
                                             {!n.read && <span className="text-xs bg-yellow-400 text-yellow-900 px-2 py-0.5 rounded-full font-bold">새 알림</span>}
                                         </div>
-                                        <p className="text-sm text-gray-600">{n.oldHours}h → <span className="font-bold text-blue-600">{n.newHours}h</span> 로 변경되었습니다</p>
-                                        {n.reason && <p className="text-xs text-gray-400 mt-1">사유: {n.reason}</p>}
+                                        {n.type === 'status_change' ? (
+                                            <p className="text-sm text-gray-600">
+                                                {n.newStatus === 'leave' ? '휴직 처리되었습니다.' : n.newStatus === 'resigned' ? '퇴사 처리되었습니다.' : '근무 중 상태로 변경되었습니다.'}
+                                            </p>
+                                        ) : (
+                                            <>
+                                                <p className="text-sm text-gray-600">{n.oldHours}h → <span className="font-bold text-blue-600">{n.newHours}h</span> 로 변경되었습니다</p>
+                                                {n.reason && <p className="text-xs text-gray-400 mt-1">사유: {n.reason}</p>}
+                                            </>
+                                        )}
                                         <p className="text-xs text-gray-400 mt-1">{n.createdAt?.toDate ? n.createdAt.toDate().toLocaleDateString('ko-KR') : ''}</p>
                                     </div>
                                 ))}
@@ -2718,7 +2752,7 @@
             );
         }
 
-        function TabEmployees({ employees, setEmployees, nextEmpId, setNextEmpId, getEmployeeStats, globalMinWage, setGlobalMinWage, showAlert, showConfirm }) {
+        function TabEmployees({ employees, setEmployees, nextEmpId, setNextEmpId, getEmployeeStats, globalMinWage, setGlobalMinWage, showAlert, showConfirm, firebaseUser, currentWorkspaceId }) {
             const [searchTerm, setSearchTerm] = useState('');
             const [isModalOpen, setIsModalOpen] = useState(false);
             const [editingEmp, setEditingEmp] = useState(null);
@@ -2745,12 +2779,24 @@
                     const newStatus = dataToSave.status;
                     setEmployees(prev => prev.map(e => e.id === dataToSave.id ? dataToSave : e));
 
-                    if (oldStatus === 'working' && newStatus === 'leave') {
-                        showAlert(`${dataToSave.name}님이 휴직 처리되었습니다.\n이제 월별 근무시간 입력에서 제외됩니다.`, '변경 완료', 'alert');
-                    } else if (oldStatus !== 'resigned' && newStatus === 'resigned') {
-                        showAlert(`${dataToSave.name}님이 퇴사 처리되었습니다.\n이제 월별 근무시간 입력에서 제외됩니다.`, '변경 완료', 'alert');
-                    } else if ((oldStatus === 'leave' || oldStatus === 'resigned') && newStatus === 'working') {
-                        showAlert(`${dataToSave.name}님이 근무 중 상태로 변경되었습니다.\n월별 근무시간 입력에 포함됩니다.`, '변경 완료', 'success');
+                    if (oldStatus !== newStatus) {
+                        // Google 직원이면 workplaces 서브컬렉션 workStatus 업데이트 + 알림
+                        const empUid = dataToSave.empUid;
+                        if (empUid && currentWorkspaceId) {
+                            fbDb.collection('employeeAccounts').doc(empUid)
+                                .collection('workplaces').doc(currentWorkspaceId)
+                                .update({ workStatus: newStatus })
+                                .catch(() => {});
+                            sendStatusChangeNotification(empUid, newStatus).catch(() => {});
+                        }
+
+                        if (oldStatus === 'working' && newStatus === 'leave') {
+                            showAlert(`${dataToSave.name}님이 휴직 처리되었습니다.\n이제 월별 근무시간 입력에서 제외됩니다.`, '변경 완료', 'alert');
+                        } else if (oldStatus !== 'resigned' && newStatus === 'resigned') {
+                            showAlert(`${dataToSave.name}님이 퇴사 처리되었습니다.\n이제 월별 근무시간 입력에서 제외됩니다.`, '변경 완료', 'alert');
+                        } else if ((oldStatus === 'leave' || oldStatus === 'resigned') && newStatus === 'working') {
+                            showAlert(`${dataToSave.name}님이 근무 중 상태로 변경되었습니다.\n월별 근무시간 입력에 포함됩니다.`, '변경 완료', 'success');
+                        }
                     }
                 } else {
                     setEmployees(prev => [...prev, dataToSave]);

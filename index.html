@@ -726,7 +726,10 @@
                         id: newEmpId, name: empData.name,
                         hireDate: new Date().toISOString().split('T')[0],
                         wage: '', scheduledDays: '', dailyHours: '',
-                        bank: '', account: '', memo: '', status: 'working'
+                        residentId: empData.residentId || '',
+                        bank: empData.bank || '',
+                        account: empData.account || '',
+                        memo: '', status: 'working'
                     };
                     setEmployees(prev => [...prev, newEmp]);
                     setNextEmpId(prev => prev + 1);
@@ -1244,7 +1247,7 @@
         }
 
         function EmployeeEntryScreen({ onBack }) {
-            const [step, setStep] = useState('code'); // code → info → pin(login) | setup(signup) → confirm
+            const [step, setStep] = useState('code'); // code → info → pinSetup → pinConfirm → profile → (create)
             const [code, setCode] = useState('');
             const [inviteInfo, setInviteInfo] = useState(null);
             const [name, setName] = useState('');
@@ -1253,6 +1256,7 @@
             const [isNew, setIsNew] = useState(false);
             const [loading, setLoading] = useState(false);
             const [error, setError] = useState('');
+            const [profile, setProfile] = useState({ residentId: '', bank: '', account: '' });
 
             const handleCodeNext = async () => {
                 if (code.trim().length !== 6) { setError('초대코드 6자리를 입력해주세요.'); return; }
@@ -1295,9 +1299,7 @@
                 setLoading(false);
             };
 
-            const handleSignup = async () => {
-                if (pin.length !== 6) { setError('PIN 6자리를 입력해주세요.'); return; }
-                if (pin !== confirmPin) { setError('PIN이 일치하지 않습니다.'); return; }
+            const handleFinalSignup = async () => {
                 setLoading(true); setError('');
                 try {
                     const email = `emp${Date.now().toString(36)}@emp.albatracker.page`;
@@ -1308,11 +1310,13 @@
                         name: name.trim(), bossUid: inviteInfo.bossUid,
                         status: 'pending', pin, email,
                         inviteCode: code.trim().toUpperCase(),
+                        residentId: profile.residentId || '',
+                        bank: profile.bank || '',
+                        account: profile.account || '',
                         createdAt: firebase.firestore.FieldValue.serverTimestamp()
                     });
                     await fbDb.collection('inviteCodes').doc(code.trim().toUpperCase())
                         .collection('employees').doc(nameKey).set({ email, uid });
-                    // onAuthStateChanged → 역할 감지 → PendingApprovalScreen
                 } catch(e) {
                     if (e.code === 'auth/email-already-in-use') {
                         setError('이미 가입된 계정입니다. 로그인해 주세요.');
@@ -1322,6 +1326,11 @@
                     }
                 }
                 setLoading(false);
+            };
+
+            const formatResidentId = (raw) => {
+                const digits = raw.replace(/[^0-9]/g, '').slice(0, 13);
+                return digits.length > 6 ? `${digits.slice(0,6)}-${digits.slice(6)}` : digits;
             };
 
             const PinDots = ({ value }) => (
@@ -1415,10 +1424,51 @@
                                 <p className="text-gray-500 text-sm">확인을 위해 한 번 더 입력</p>
                                 <PinDots value={confirmPin} />
                                 <NumPad onNum={n => { if(confirmPin.length<6) setConfirmPin(p=>p+n); }} onDel={() => setConfirmPin(p=>p.slice(0,-1))} />
-                                <button onClick={handleSignup} disabled={loading || confirmPin.length!==6} className="w-full mt-4 bg-green-600 text-white py-3 rounded-xl font-bold hover:bg-green-700 transition disabled:opacity-50">
-                                    {loading ? '가입 중...' : '가입 완료'}
+                                <button onClick={() => {
+                                    if (confirmPin.length !== 6) { setError('PIN 6자리를 입력해주세요.'); return; }
+                                    if (pin !== confirmPin) { setError('PIN이 일치하지 않습니다.'); setConfirmPin(''); return; }
+                                    setError(''); setStep('profile');
+                                }} disabled={confirmPin.length!==6} className="w-full mt-4 bg-blue-600 text-white py-3 rounded-xl font-bold hover:bg-blue-700 transition disabled:opacity-50">
+                                    다음
                                 </button>
                                 {error && <p className="text-red-500 text-sm mt-2">{error}</p>}
+                            </div>
+                        )}
+
+                        {step === 'profile' && (
+                            <div>
+                                <h2 className="text-xl font-bold text-gray-800 mb-1">근무자 정보 입력</h2>
+                                <p className="text-gray-500 text-sm mb-5">선택 항목입니다. 나중에 앱에서 수정할 수 있어요.</p>
+                                <div className="space-y-3 text-left mb-5">
+                                    <div>
+                                        <label className="block text-xs font-bold text-gray-600 mb-1">주민번호</label>
+                                        <input value={profile.residentId}
+                                            onChange={e => setProfile(p => ({ ...p, residentId: formatResidentId(e.target.value) }))}
+                                            className="w-full border-2 border-gray-300 rounded-xl py-2.5 px-4 focus:border-blue-500 outline-none text-sm font-mono tracking-wider"
+                                            placeholder="000000-0000000" />
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs font-bold text-gray-600 mb-1">은행명</label>
+                                        <input value={profile.bank}
+                                            onChange={e => setProfile(p => ({ ...p, bank: e.target.value }))}
+                                            className="w-full border-2 border-gray-300 rounded-xl py-2.5 px-4 focus:border-blue-500 outline-none text-sm"
+                                            placeholder="예: 국민은행" />
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs font-bold text-gray-600 mb-1">계좌번호</label>
+                                        <input value={profile.account}
+                                            onChange={e => setProfile(p => ({ ...p, account: e.target.value }))}
+                                            className="w-full border-2 border-gray-300 rounded-xl py-2.5 px-4 focus:border-blue-500 outline-none text-sm"
+                                            placeholder="예: 123-456-789012" />
+                                    </div>
+                                </div>
+                                {error && <p className="text-red-500 text-sm mb-3">{error}</p>}
+                                <button onClick={handleFinalSignup} disabled={loading} className="w-full bg-green-600 text-white py-3 rounded-xl font-bold hover:bg-green-700 transition disabled:opacity-50">
+                                    {loading ? '가입 중...' : '가입 완료'}
+                                </button>
+                                <button onClick={() => { setError(''); handleFinalSignup(); }} disabled={loading} className="w-full mt-2 text-gray-400 text-sm py-2 hover:text-gray-600 transition">
+                                    건너뛰기
+                                </button>
                             </div>
                         )}
                     </div>
@@ -1621,7 +1671,8 @@
             const [today] = useState(new Date());
             const [year, setYear] = useState(today.getFullYear());
             const [month, setMonth] = useState(today.getMonth() + 1);
-            const [submitModal, setSubmitModal] = useState(null); // { date, existing }
+            const [submitModal, setSubmitModal] = useState(null);
+            const [viewModal, setViewModal] = useState(null); // 제출된 날 열람 { date, sub }
             const unreadCount = notifications.filter(n => !n.read).length;
 
             const monthKey = `${year}-${String(month).padStart(2,'0')}`;
@@ -1646,12 +1697,14 @@
                     {submitModal && (
                         <EmpSubmitModal
                             date={submitModal.date}
-                            existing={submitModal.existing}
                             empAccount={empAccount}
                             firebaseUser={firebaseUser}
                             onClose={() => setSubmitModal(null)}
                             showAlert={showAlert}
                         />
+                    )}
+                    {viewModal && (
+                        <EmpDayViewModal sub={viewModal.sub} date={viewModal.date} onClose={() => setViewModal(null)} />
                     )}
 
                     <header className="bg-blue-600 text-white shadow-md">
@@ -1705,12 +1758,13 @@
                                                 <div key={day} className={`min-h-[60px] border-b border-r border-gray-100 p-1.5 flex flex-col ${isToday ? 'bg-blue-50' : ''}`}>
                                                     <span className={`text-xs font-bold mb-1 ${isToday ? 'text-blue-600' : isSun ? 'text-red-500' : isSat ? 'text-blue-500' : 'text-gray-600'}`}>{day}</span>
                                                     {sub ? (
-                                                        <div className="flex-1 bg-green-100 rounded p-1 text-center">
+                                                        <button onClick={() => setViewModal({ date: dateStr, sub })}
+                                                            className="flex-1 bg-green-100 hover:bg-green-200 rounded p-1 text-center transition cursor-pointer">
                                                             <p className="text-xs font-bold text-green-700">{sub.hours}h</p>
-                                                            <p className="text-[9px] text-green-500">제출완료</p>
-                                                        </div>
+                                                            <p className="text-[9px] text-green-500">{sub.note ? '메모있음' : '제출완료'}</p>
+                                                        </button>
                                                     ) : isPast && (
-                                                        <button onClick={() => setSubmitModal({ date: dateStr, existing: null })}
+                                                        <button onClick={() => setSubmitModal({ date: dateStr })}
                                                             className="flex-1 flex items-center justify-center rounded border border-dashed border-gray-300 hover:border-blue-400 hover:bg-blue-50 transition text-gray-400 hover:text-blue-500">
                                                             <Plus className="w-3.5 h-3.5"/>
                                                         </button>
@@ -1758,6 +1812,10 @@
                                 ))}
                             </div>
                         )}
+
+                        {activeTab === 'myinfo' && (
+                            <EmpProfileTab empAccount={empAccount} firebaseUser={firebaseUser} showAlert={showAlert} />
+                        )}
                     </main>
 
                     <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 z-40 mobile-nav-safe">
@@ -1770,8 +1828,111 @@
                                 알림
                                 {unreadCount > 0 && <span className="absolute top-1.5 right-6 bg-red-500 text-white text-[9px] rounded-full w-4 h-4 flex items-center justify-center font-bold">{unreadCount}</span>}
                             </button>
+                            <button onClick={() => setActiveTab('myinfo')} className={`flex-1 flex flex-col items-center py-3 gap-1 text-xs font-medium ${activeTab==='myinfo' ? 'text-blue-600' : 'text-gray-400'}`}>
+                                <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>
+                                내 정보
+                            </button>
                         </div>
                     </nav>
+                </div>
+            );
+        }
+
+        // 제출된 날 열람 팝업 (수정 불가, 읽기 전용)
+        function EmpDayViewModal({ sub, date, onClose }) {
+            return (
+                <div className="fixed inset-0 bg-black/60 flex items-end sm:items-center justify-center p-4 z-[9999]">
+                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6">
+                        <div className="flex items-center justify-between mb-4">
+                            <h3 className="text-lg font-bold text-gray-800">{date} 근무 기록</h3>
+                            <button onClick={onClose}><X className="w-5 h-5 text-gray-500"/></button>
+                        </div>
+                        <div className="bg-green-50 border border-green-200 rounded-xl p-4 mb-3">
+                            <p className="text-sm text-gray-500 mb-1">근무시간</p>
+                            <p className="text-3xl font-bold text-green-700">{sub.hours}<span className="text-base font-normal text-green-600">시간</span></p>
+                        </div>
+                        {sub.note ? (
+                            <div className="bg-gray-50 border border-gray-200 rounded-xl p-4 mb-3">
+                                <p className="text-sm text-gray-500 mb-1">메모</p>
+                                <p className="text-sm text-gray-800 whitespace-pre-wrap">{sub.note}</p>
+                            </div>
+                        ) : (
+                            <div className="bg-gray-50 rounded-xl p-4 mb-3 text-center text-gray-400 text-sm">메모 없음</div>
+                        )}
+                        <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-3 text-xs text-yellow-700 mb-4">
+                            제출된 근무기록은 수정할 수 없습니다.<br/>변경이 필요하면 사장님께 문의하세요.
+                        </div>
+                        <button onClick={onClose} className="w-full bg-gray-100 text-gray-700 py-3 rounded-xl font-medium hover:bg-gray-200 transition">닫기</button>
+                    </div>
+                </div>
+            );
+        }
+
+        // 직원 내 정보 탭
+        function EmpProfileTab({ empAccount, firebaseUser, showAlert }) {
+            const [formData, setFormData] = useState({
+                residentId: empAccount?.residentId || '',
+                bank: empAccount?.bank || '',
+                account: empAccount?.account || ''
+            });
+            const [saving, setSaving] = useState(false);
+
+            const formatResidentId = (raw) => {
+                const digits = raw.replace(/[^0-9]/g, '').slice(0, 13);
+                return digits.length > 6 ? `${digits.slice(0,6)}-${digits.slice(6)}` : digits;
+            };
+
+            const handleSave = async () => {
+                setSaving(true);
+                try {
+                    await fbDb.collection('employeeAccounts').doc(firebaseUser.uid).update({
+                        residentId: formData.residentId,
+                        bank: formData.bank,
+                        account: formData.account
+                    });
+                    showAlert('정보가 저장되었습니다.', '저장 완료', 'success');
+                } catch(e) {
+                    showAlert('저장 실패: ' + e.message, '오류', 'error');
+                }
+                setSaving(false);
+            };
+
+            return (
+                <div className="max-w-lg mx-auto space-y-4">
+                    <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6">
+                        <h2 className="text-lg font-bold text-gray-800 mb-1">내 정보</h2>
+                        <p className="text-sm text-gray-500 mb-5">입력한 정보는 사장님에게만 공유됩니다.</p>
+                        <div className="space-y-4">
+                            <div>
+                                <label className="block text-sm font-bold text-gray-700 mb-1">이름</label>
+                                <p className="border border-gray-200 rounded-xl py-3 px-4 text-gray-700 bg-gray-50">{empAccount?.name}</p>
+                            </div>
+                            <div>
+                                <label className="block text-sm font-bold text-gray-700 mb-1">주민번호</label>
+                                <input value={formData.residentId}
+                                    onChange={e => setFormData(p => ({ ...p, residentId: formatResidentId(e.target.value) }))}
+                                    className="w-full border-2 border-gray-300 rounded-xl py-3 px-4 focus:border-blue-500 outline-none font-mono tracking-wider"
+                                    placeholder="000000-0000000" />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-bold text-gray-700 mb-1">은행명</label>
+                                <input value={formData.bank}
+                                    onChange={e => setFormData(p => ({ ...p, bank: e.target.value }))}
+                                    className="w-full border-2 border-gray-300 rounded-xl py-3 px-4 focus:border-blue-500 outline-none"
+                                    placeholder="예: 국민은행" />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-bold text-gray-700 mb-1">계좌번호</label>
+                                <input value={formData.account}
+                                    onChange={e => setFormData(p => ({ ...p, account: e.target.value }))}
+                                    className="w-full border-2 border-gray-300 rounded-xl py-3 px-4 focus:border-blue-500 outline-none"
+                                    placeholder="예: 123-456-789012" />
+                            </div>
+                        </div>
+                        <button onClick={handleSave} disabled={saving} className="w-full mt-6 bg-blue-600 text-white py-3 rounded-xl font-bold hover:bg-blue-700 transition disabled:opacity-50">
+                            {saving ? '저장 중...' : '저장하기'}
+                        </button>
+                    </div>
                 </div>
             );
         }
@@ -2582,6 +2743,8 @@
                 combinedEmployees.forEach(emp => { init[emp.id] = currentDayData.entries[emp.id]?.hours || ''; });
                 return init;
             });
+            // 메모 삭제 상태 (직원이 입력한 메모를 사장이 삭제할 수 있음)
+            const [deletedNotes, setDeletedNotes] = useState({});
 
             const handleSave = () => {
                 const dateStr = `${year}-${String(month).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
@@ -2608,6 +2771,7 @@
                             }
                             newData[monthKey].days[day].entries[emp.id] = {
                                 hours, pay: Math.round(hours * emp.wage), name: emp.name, wage: emp.wage,
+                                note: deletedNotes[emp.id] ? '' : (existingEntry?.note || ''),
                                 submittedByEmp: existingEntry?.submittedByEmp || false,
                                 empUid: existingEntry?.empUid || null,
                                 submittedHours: existingEntry?.submittedHours || null,
@@ -2655,7 +2819,7 @@
                                             {emp.name}
                                         </span>
                                         <div className="flex items-center gap-2">
-                                            <input 
+                                            <input
                                                 type="number" step="0.5" min="0"
                                                 value={hoursData[emp.id] ?? ''}
                                                 onChange={e => setHoursData(prev => ({...prev, [emp.id]: e.target.value}))}
@@ -2665,6 +2829,24 @@
                                             <span className="text-sm text-gray-500 font-medium">시간</span>
                                         </div>
                                     </div>
+                                    {/* 직원이 입력한 메모 표시 (읽기전용, 사장은 삭제만 가능) */}
+                                    {currentDayData.entries[emp.id]?.submittedByEmp &&
+                                     currentDayData.entries[emp.id]?.note &&
+                                     !deletedNotes[emp.id] && (
+                                        <div className="mt-1.5 flex items-start gap-2 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2">
+                                            <div className="flex-1">
+                                                <p className="text-[10px] text-blue-500 font-bold mb-0.5">직원 메모</p>
+                                                <p className="text-xs text-gray-700 whitespace-pre-wrap">{currentDayData.entries[emp.id].note}</p>
+                                            </div>
+                                            <button type="button" onClick={() => setDeletedNotes(p => ({...p, [emp.id]: true}))}
+                                                className="text-red-400 hover:text-red-600 transition shrink-0 mt-0.5" title="메모 삭제">
+                                                <Trash2 className="w-3.5 h-3.5"/>
+                                            </button>
+                                        </div>
+                                    )}
+                                    {deletedNotes[emp.id] && (
+                                        <p className="text-[10px] text-red-400 mt-1 ml-1">메모가 삭제됩니다 (저장 후 적용)</p>
+                                    )}
                                 ))}
                             </div>
                             

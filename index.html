@@ -898,6 +898,19 @@
                         snap.forEach(d => workplaces.push({ bossUid: d.id, ...d.data() }));
                         setEmpGoogleWorkplaces(workplaces);
 
+                        // 거절된 업체 — 최초 1회만 팝업 알림
+                        const rejected = workplaces.filter(w => w.status === 'rejected');
+                        if (rejected.length > 0) {
+                            const seenKey = 'rejectedSeenBossUids';
+                            const seen = JSON.parse(localStorage.getItem(seenKey) || '[]');
+                            const unseen = rejected.filter(w => !seen.includes(w.bossUid));
+                            if (unseen.length > 0) {
+                                const names = unseen.map(w => w.shopName || '(업체명 없음)').join(', ');
+                                setTimeout(() => showAlert(`[${names}]\n가입 신청이 거절되었습니다.`, '가입 거절 안내', 'alert'), 300);
+                                localStorage.setItem(seenKey, JSON.stringify([...seen, ...unseen.map(w => w.bossUid)]));
+                            }
+                        }
+
                         // 저장된 업체 또는 단독 승인 업체 자동 선택
                         const savedBossUid = localStorage.getItem('selectedEmpBossUid');
                         const approved = workplaces.filter(w => w.status === 'approved');
@@ -1908,10 +1921,9 @@
 
         // ─── Google 직원: 업체 목록 화면 ───
         function WorkplaceSelectScreen({ workplaces, firebaseUser, onSelect, onAddWorkplace, onLogout }) {
-            const active = workplaces.filter(w => w.status !== 'disconnected' && w.status !== 'resigned_by_emp');
+            const active = workplaces.filter(w => w.status !== 'disconnected' && w.status !== 'resigned_by_emp' && w.status !== 'rejected');
             const approved = active.filter(w => w.status === 'approved');
             const pending = active.filter(w => w.status === 'pending');
-            const rejected = active.filter(w => w.status === 'rejected');
             const hasAny = active.length > 0;
 
             return (
@@ -1960,19 +1972,6 @@
                                             <p className="font-bold text-gray-700">{wp.shopName || '업체명 없음'}</p>
                                             <p className="text-xs text-yellow-600 mt-0.5">관리자 승인을 기다리고 있습니다</p>
                                         </button>
-                                    ))}
-                                </div>
-                            )}
-
-                            {/* 거절됨 */}
-                            {rejected.length > 0 && (
-                                <div>
-                                    <p className="text-xs font-bold text-gray-400 mb-2">거절됨</p>
-                                    {rejected.map(wp => (
-                                        <div key={wp.bossUid} className="p-3 rounded-xl border border-red-200 bg-red-50 mb-2">
-                                            <p className="font-bold text-gray-700 text-sm">{wp.shopName || '업체명 없음'}</p>
-                                            <p className="text-xs text-red-500 mt-0.5">가입이 거절되었습니다</p>
-                                        </div>
                                     ))}
                                 </div>
                             )}
@@ -3385,14 +3384,14 @@
                     {editDayModal && (
                         <DailyEditModal
                             year={year} month={month} day={editDayModal} monthKey={monthKey}
-                            activeEmployees={activeEmployees} monthlyData={monthlyData} setMonthlyData={setMonthlyData}
+                            activeEmployees={activeEmployees} allEmployees={employees} monthlyData={monthlyData} setMonthlyData={setMonthlyData}
                             onClose={() => setEditDayModal(null)}
                             onDelete={() => handleDeleteDay(editDayModal)}
                         />
                     )}
 
                     <div className="flex justify-end mt-4">
-                        <button 
+                        <button
                             onClick={() => {
                                 showConfirm(`${year}년 ${month}월 정보를 정말 초기화하시겠습니까?`, () => {
                                     setMonthlyData(prev => {
@@ -3611,7 +3610,7 @@
             );
         }
 
-        function DailyEditModal({ year, month, day, monthKey, activeEmployees, monthlyData, setMonthlyData, onClose, onDelete }) {
+        function DailyEditModal({ year, month, day, monthKey, activeEmployees, allEmployees, monthlyData, setMonthlyData, onClose, onDelete }) {
             const currentDayData = monthlyData[monthKey]?.days[day] || { revenue: 0, entries: {} };
 
             const combinedEmployees = useMemo(() => {
@@ -3620,13 +3619,16 @@
 
                 Object.entries(currentDayData.entries).forEach(([empIdStr, data]) => {
                     if (!activeIds.has(empIdStr)) {
+                        const empInfo = (allEmployees || []).find(e => e.id.toString() === empIdStr);
+                        const empStatus = empInfo?.status || (empInfo?.isWorking === false ? 'resigned' : 'resigned');
                         list.push({
-                            id: empIdStr, displayId: '-', name: data.name, wage: data.wage, isInactive: true
+                            id: empIdStr, displayId: '-', name: data.name, wage: data.wage,
+                            isInactive: true, inactiveStatus: empStatus
                         });
                     }
                 });
                 return list;
-            }, [activeEmployees, currentDayData.entries]);
+            }, [activeEmployees, allEmployees, currentDayData.entries]);
 
             const hourRefs = useRef({});
             const minRefs = useRef({});
@@ -3741,10 +3743,12 @@
                                 <p className="text-xs text-gray-400 mb-3">시간/분 입력 후 Enter → 다음 근무자로 이동</p>
                                 {combinedEmployees.map((emp, idx) => (
                                     <React.Fragment key={emp.id}>
-                                        <div className={`flex justify-between items-center mb-1 p-2 rounded-lg ${emp.isInactive ? 'bg-red-50/50' : 'bg-gray-50'}`}>
+                                        <div className={`flex justify-between items-center mb-1 p-2 rounded-lg ${emp.isInactive ? (emp.inactiveStatus === 'leave' ? 'bg-yellow-50/50' : 'bg-red-50/50') : 'bg-gray-50'}`}>
                                             <span className="text-sm text-gray-700 truncate flex items-center gap-1 font-medium">
                                                 {emp.isInactive ? (
-                                                    <span className="text-xs text-red-500 bg-red-50 border border-red-200 px-1.5 py-0.5 rounded font-bold">제외/퇴사</span>
+                                                    emp.inactiveStatus === 'leave'
+                                                        ? <span className="text-xs text-yellow-600 bg-yellow-50 border border-yellow-200 px-1.5 py-0.5 rounded font-bold">휴직</span>
+                                                        : <span className="text-xs text-red-500 bg-red-50 border border-red-200 px-1.5 py-0.5 rounded font-bold">퇴사</span>
                                                 ) : (
                                                     <span>{emp.displayId}.</span>
                                                 )}
@@ -3757,8 +3761,7 @@
                                                     value={hoursData[emp.id] ?? ''}
                                                     onChange={e => setHoursData(prev => ({...prev, [emp.id]: e.target.value}))}
                                                     onKeyDown={e => handleHourKeyDown(e, idx)}
-                                                    disabled={emp.isInactive}
-                                                    className={`w-14 border border-gray-300 rounded-lg px-2 py-1.5 text-right text-sm focus:ring-2 focus:ring-green-500 outline-none ${emp.isInactive ? 'bg-gray-100 text-gray-400 cursor-not-allowed' : ''}`}
+                                                    className="w-14 border border-gray-300 rounded-lg px-2 py-1.5 text-right text-sm focus:ring-2 focus:ring-green-500 outline-none"
                                                     placeholder="0"
                                                 />
                                                 <span className="text-xs text-gray-500">시간</span>
@@ -3768,8 +3771,7 @@
                                                     value={minsData[emp.id] ?? ''}
                                                     onChange={e => setMinsData(prev => ({...prev, [emp.id]: e.target.value}))}
                                                     onKeyDown={e => handleMinKeyDown(e, idx)}
-                                                    disabled={emp.isInactive}
-                                                    className={`w-14 border border-gray-300 rounded-lg px-2 py-1.5 text-right text-sm focus:ring-2 focus:ring-blue-400 outline-none ${emp.isInactive ? 'bg-gray-100 text-gray-400 cursor-not-allowed' : ''}`}
+                                                    className="w-14 border border-gray-300 rounded-lg px-2 py-1.5 text-right text-sm focus:ring-2 focus:ring-blue-400 outline-none"
                                                     placeholder="0"
                                                 />
                                                 <span className="text-xs text-gray-500">분</span>
@@ -3972,10 +3974,9 @@
                             <button onClick={nextMonth} className="p-2 hover:bg-gray-100 rounded-full transition"><ChevronRight className="w-5 h-5 md:w-6 md:h-6" /></button>
                         </div>
                         {payrollList.length > 0 && (
-                            <button onClick={handleExcelDownload} className="flex items-center gap-2 text-sm font-bold bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2.5 rounded-xl transition shadow-sm whitespace-nowrap">
+                            <button onClick={handleExcelDownload} className="hidden md:flex items-center gap-2 text-sm font-bold bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2.5 rounded-xl transition shadow-sm whitespace-nowrap">
                                 <FileSpreadsheet className="w-4 h-4" />
-                                <span className="hidden md:inline">엑셀 다운로드</span>
-                                <span className="md:hidden">엑셀</span>
+                                엑셀 다운로드
                             </button>
                         )}
                     </div>
@@ -4595,7 +4596,7 @@
                     {editDayModal && (
                         <DailyEditModal
                             year={year} month={month} day={editDayModal} monthKey={monthKey}
-                            activeEmployees={activeEmployees} monthlyData={predictData} setMonthlyData={setPredictData}
+                            activeEmployees={activeEmployees} allEmployees={employees} monthlyData={predictData} setMonthlyData={setPredictData}
                             onClose={() => setEditDayModal(null)}
                             onDelete={() => handleDeleteDay(editDayModal)}
                         />

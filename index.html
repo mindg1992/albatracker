@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>알바트래커 v1.8.3</title>
+    <title>알바트래커 v1.8.4</title>
 
     <!-- PWA -->
     <link rel="manifest" href="manifest.json">
@@ -598,6 +598,17 @@
             await fbDb.collection('empPending').doc(pendingDocId).delete().catch(() => {});
         }
 
+        // --- 업체 삭제 남은 시간 포맷 ---
+        function formatDeleteRemaining(deleteScheduledAt) {
+            if (!deleteScheduledAt) return '';
+            const ms = deleteScheduledAt.toMillis ? deleteScheduledAt.toMillis() : new Date(deleteScheduledAt).getTime();
+            const remaining = ms + 24 * 60 * 60 * 1000 - Date.now();
+            if (remaining <= 0) return '곧 삭제됨';
+            const h = Math.floor(remaining / 3600000);
+            const m = Math.floor((remaining % 3600000) / 60000);
+            return h > 0 ? `${h}시간 ${m}분` : `${m}분`;
+        }
+
         // --- 메인 애플리케이션 컴포넌트 ---
         function AlbaTracker() {
             const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -1024,12 +1035,16 @@
                             }).catch(() => {});
                         }
 
-                        // 각 워크스페이스의 shopName 로드
+                        // 각 워크스페이스의 shopName + deleteScheduledAt 로드
                         const details = await Promise.all(
                             workspaceIds.map(id =>
                                 fbDb.collection('workspaces').doc(id).get()
-                                    .then(d => ({ id, shopName: d.exists ? (d.data().shopName || '') : '' }))
-                                    .catch(() => ({ id, shopName: '' }))
+                                    .then(d => ({
+                                        id,
+                                        shopName: d.exists ? (d.data().shopName || '') : '',
+                                        deleteScheduledAt: d.exists ? (d.data().deleteScheduledAt || null) : null
+                                    }))
+                                    .catch(() => ({ id, shopName: '', deleteScheduledAt: null }))
                             )
                         );
                         if (cancelled) return;
@@ -1131,11 +1146,37 @@
                     .then(doc => {
                         if (cancelled) return;
                         if (doc.exists) {
-                            setWorkspaceInfo(doc.data());
-                            // bossWorkspaceList의 shopName도 최신화
+                            const data = doc.data();
+                            setWorkspaceInfo(data);
+                            // bossWorkspaceList shopName + deleteScheduledAt 최신화
                             setBossWorkspaceList(prev => prev.map(w =>
-                                w.id === currentWorkspaceId ? { ...w, shopName: doc.data().shopName || '' } : w
+                                w.id === currentWorkspaceId
+                                    ? { ...w, shopName: data.shopName || '', deleteScheduledAt: data.deleteScheduledAt || null }
+                                    : w
                             ));
+                            // 24시간 경과 시 자동 삭제 실행
+                            if (data.deleteScheduledAt) {
+                                const scheduledMs = data.deleteScheduledAt.toMillis
+                                    ? data.deleteScheduledAt.toMillis()
+                                    : new Date(data.deleteScheduledAt).getTime();
+                                if (Date.now() > scheduledMs + 24 * 60 * 60 * 1000) {
+                                    const wsId = currentWorkspaceId;
+                                    (async () => {
+                                        try {
+                                            await fbDb.collection('users').doc(wsId).delete();
+                                            await fbDb.collection('workspaces').doc(wsId).delete();
+                                            await fbDb.collection('bossWorkspaces').doc(firebaseUser.uid).update({
+                                                workspaceIds: firebase.firestore.FieldValue.arrayRemove(wsId)
+                                            });
+                                            localStorage.removeItem('at_cache_' + wsId);
+                                            setBossWorkspaceList(prev => prev.filter(w => w.id !== wsId));
+                                            setCurrentWorkspaceId(null);
+                                            sessionStorage.removeItem('bossWorkspaceSelected');
+                                            localStorage.removeItem('bossWorkspaceId');
+                                        } catch(e) { console.error('자동 삭제 실패:', e); }
+                                    })();
+                                }
+                            }
                         } else {
                             setBossSetupWorkspaceId(currentWorkspaceId);
                             setShowBossSetup(true);
@@ -1437,6 +1478,42 @@
                 setShowBossWorkspaceSelect(false);
             };
 
+            // 업체 삭제 예약 (24시간 후 실제 삭제)
+            const handleDeleteWorkspace = async () => {
+                if (!firebaseUser || !currentWorkspaceId) return;
+                try {
+                    await fbDb.collection('workspaces').doc(currentWorkspaceId).update({
+                        deleteScheduledAt: firebase.firestore.FieldValue.serverTimestamp()
+                    });
+                    // 클라이언트에서 현재 시각으로 즉시 반영
+                    const now = { toMillis: () => Date.now(), _now: true };
+                    setWorkspaceInfo(prev => ({ ...prev, deleteScheduledAt: now }));
+                    setBossWorkspaceList(prev => prev.map(ws =>
+                        ws.id === currentWorkspaceId ? { ...ws, deleteScheduledAt: now } : ws
+                    ));
+                } catch(e) {
+                    showAlert('삭제 예약 실패: ' + e.message, '오류', 'error');
+                }
+            };
+
+            // 업체 삭제 취소 (복구)
+            const handleCancelDeleteWorkspace = async () => {
+                if (!firebaseUser || !currentWorkspaceId) return;
+                try {
+                    await fbDb.collection('workspaces').doc(currentWorkspaceId).update({
+                        deleteScheduledAt: firebase.firestore.FieldValue.delete()
+                    });
+                    setWorkspaceInfo(prev => { const n = { ...prev }; delete n.deleteScheduledAt; return n; });
+                    setBossWorkspaceList(prev => prev.map(ws => {
+                        if (ws.id === currentWorkspaceId) { const n = { ...ws }; delete n.deleteScheduledAt; return n; }
+                        return ws;
+                    }));
+                    showAlert('업체 삭제가 취소되었습니다. 정상적으로 복구되었습니다.', '복구 완료', 'success');
+                } catch(e) {
+                    showAlert('복구 실패: ' + e.message, '오류', 'error');
+                }
+            };
+
             // 관리자 새 업체 추가 (BossSetupModal 트리거)
             const handleAddBossWorkspace = () => {
                 const newId = `${firebaseUser.uid}__ws${Date.now()}`;
@@ -1444,6 +1521,14 @@
                 setShowBossWorkspaceSelect(false);
                 setShowBossSetup(true);
             };
+
+            // 현재 업체 삭제 예약 여부 (24시간 이내)
+            const wsDeleteScheduledAt = workspaceInfo?.deleteScheduledAt;
+            const isWorkspaceDeleting = (() => {
+                if (!wsDeleteScheduledAt) return false;
+                const ms = wsDeleteScheduledAt.toMillis ? wsDeleteScheduledAt.toMillis() : new Date(wsDeleteScheduledAt).getTime();
+                return Date.now() < ms + 24 * 60 * 60 * 1000;
+            })();
 
             // === 렌더 분기 ===
 
@@ -1672,6 +1757,17 @@
                                 setShowBossSetup(true);
                             }}
                             onLogout={handleLogout}
+                            onCancelDelete={async (wsId) => {
+                                try {
+                                    await fbDb.collection('workspaces').doc(wsId).update({
+                                        deleteScheduledAt: firebase.firestore.FieldValue.delete()
+                                    });
+                                    setBossWorkspaceList(prev => prev.map(ws => {
+                                        if (ws.id === wsId) { const n = { ...ws }; delete n.deleteScheduledAt; return n; }
+                                        return ws;
+                                    }));
+                                } catch(e) { showAlert('복구 실패: ' + e.message, '오류', 'error'); }
+                            }}
                         />
                     </>
                 );
@@ -1742,6 +1838,20 @@
                             onSelect={handleSwitchBossWorkspace}
                             onAdd={handleAddBossWorkspace}
                             onClose={() => setShowBossWorkspaceSelect(false)}
+                            onCancelDelete={async (wsId) => {
+                                try {
+                                    await fbDb.collection('workspaces').doc(wsId).update({
+                                        deleteScheduledAt: firebase.firestore.FieldValue.delete()
+                                    });
+                                    setBossWorkspaceList(prev => prev.map(ws => {
+                                        if (ws.id === wsId) { const n = { ...ws }; delete n.deleteScheduledAt; return n; }
+                                        return ws;
+                                    }));
+                                    if (wsId === currentWorkspaceId) {
+                                        setWorkspaceInfo(prev => { const n = { ...prev }; delete n.deleteScheduledAt; return n; });
+                                    }
+                                } catch(e) { showAlert('복구 실패: ' + e.message, '오류', 'error'); }
+                            }}
                         />
                     )}
 
@@ -1879,7 +1989,26 @@
                         </div>
                     </nav>
 
+                    {/* 삭제 예약 경고 배너 */}
+                    {isWorkspaceDeleting && (
+                        <div className="bg-red-50 border-b border-red-200 px-4 py-3 flex items-center justify-between gap-3">
+                            <div className="flex items-center gap-2 min-w-0">
+                                <span className="text-red-500 text-base flex-shrink-0">⚠️</span>
+                                <div className="min-w-0">
+                                    <p className="text-red-700 font-bold text-sm">삭제 예약 중 — {formatDeleteRemaining(wsDeleteScheduledAt)} 후 삭제</p>
+                                    <p className="text-red-500 text-xs truncate">열람만 가능합니다. 설정 탭에서 복구할 수 있습니다.</p>
+                                </div>
+                            </div>
+                            <button
+                                onClick={handleCancelDeleteWorkspace}
+                                className="flex-shrink-0 bg-red-600 text-white text-xs font-bold px-3 py-2 rounded-xl hover:bg-red-700 transition"
+                            >복구</button>
+                        </div>
+                    )}
+
                     <main className="max-w-7xl mx-auto px-3 md:px-4 py-4 md:py-6">
+                        {/* 삭제 예약 중: 설정탭 외 조작 불가 (inert로 클릭/포커스 차단, 스크롤은 허용) */}
+                        <div {...(isWorkspaceDeleting && activeTab !== 'settings' ? { inert: '' } : {})}>
                         {activeTab === 'employees' && (
                             <TabEmployees
                                 employees={employeesWithDisplayId}
@@ -1897,17 +2026,17 @@
                             />
                         )}
                         {activeTab === 'calendar' && (
-                            <TabCalendar 
-                                employees={employeesWithDisplayId} 
-                                monthlyData={monthlyData} 
-                                setMonthlyData={setMonthlyData} 
+                            <TabCalendar
+                                employees={employeesWithDisplayId}
+                                monthlyData={monthlyData}
+                                setMonthlyData={setMonthlyData}
                                 showConfirm={showConfirm}
                             />
                         )}
                         {activeTab === 'payroll' && (
-                            <TabPayroll 
-                                employees={employeesWithDisplayId} 
-                                monthlyData={monthlyData} 
+                            <TabPayroll
+                                employees={employeesWithDisplayId}
+                                monthlyData={monthlyData}
                                 showAlert={showAlert}
                             />
                         )}
@@ -1948,12 +2077,18 @@
                                 appPin={appPin}
                                 setAppPin={setAppPin}
                                 showAlert={showAlert}
+                                showConfirm={showConfirm}
                                 workspaceInfo={workspaceInfo}
                                 setWorkspaceInfo={setWorkspaceInfo}
                                 firebaseUser={firebaseUser}
                                 workspaceId={currentWorkspaceId}
+                                isDeleting={isWorkspaceDeleting}
+                                deleteScheduledAt={wsDeleteScheduledAt}
+                                onDeleteWorkspace={handleDeleteWorkspace}
+                                onCancelDeleteWorkspace={handleCancelDeleteWorkspace}
                             />
                         )}
+                        </div>
                     </main>
 
                     {/* 모바일 하단 네비게이션 */}
@@ -2128,7 +2263,12 @@
         }
 
         // ─── 관리자: 업체 전환/추가 모달 ───
-        function BossWorkspaceSelectScreen({ workspaceList, currentId, onSelect, onAdd, onClose }) {
+        function BossWorkspaceSelectScreen({ workspaceList, currentId, onSelect, onAdd, onClose, onCancelDelete }) {
+            const [tick, setTick] = useState(0);
+            useEffect(() => {
+                const t = setInterval(() => setTick(n => n + 1), 60000);
+                return () => clearInterval(t);
+            }, []);
             return (
                 <div className="fixed inset-0 bg-black/60 flex items-end sm:items-center justify-center p-4 z-[9999] backdrop-blur-sm" onClick={onClose}>
                     <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden" onClick={e => e.stopPropagation()}>
@@ -2137,15 +2277,34 @@
                             <button onClick={onClose} className="p-1 hover:bg-green-500 rounded-lg transition"><X className="w-5 h-5"/></button>
                         </div>
                         <div className="p-4 space-y-2 max-h-80 overflow-y-auto">
-                            {workspaceList.map(ws => (
-                                <button key={ws.id} onClick={() => onSelect(ws.id)}
-                                    className={`w-full text-left p-4 rounded-xl border-2 transition ${ws.id === currentId ? 'border-green-500 bg-green-50' : 'border-gray-200 hover:border-green-300 hover:bg-green-50/50'}`}>
-                                    <div className="flex items-center justify-between">
-                                        <p className="font-bold text-gray-800">{ws.shopName || '(업체명 없음)'}</p>
-                                        {ws.id === currentId && <span className="text-xs text-green-600 font-bold">현재</span>}
-                                    </div>
-                                </button>
-                            ))}
+                            {workspaceList.map(ws => {
+                                const dsa = ws.deleteScheduledAt;
+                                const isDeleting = dsa && (() => {
+                                    const ms = dsa.toMillis ? dsa.toMillis() : new Date(dsa).getTime();
+                                    return Date.now() < ms + 24 * 60 * 60 * 1000;
+                                })();
+                                return (
+                                <div key={ws.id} className="relative">
+                                    <button onClick={() => onSelect(ws.id)}
+                                        className={`w-full text-left p-4 rounded-xl border-2 transition ${isDeleting ? 'border-red-200 bg-red-50 opacity-60' : ws.id === currentId ? 'border-green-500 bg-green-50' : 'border-gray-200 hover:border-green-300 hover:bg-green-50/50'}`}>
+                                        <div className="flex items-center justify-between">
+                                            <p className={`font-bold ${isDeleting ? 'text-red-700' : 'text-gray-800'}`}>{ws.shopName || '(업체명 없음)'}</p>
+                                            {!isDeleting && ws.id === currentId && <span className="text-xs text-green-600 font-bold">현재</span>}
+                                            {isDeleting && <span className="text-xs text-red-600 font-bold">삭제중</span>}
+                                        </div>
+                                        {isDeleting && (
+                                            <p className="text-xs text-red-500 mt-1">{formatDeleteRemaining(dsa)} 후 삭제</p>
+                                        )}
+                                    </button>
+                                    {isDeleting && onCancelDelete && (
+                                        <button
+                                            onClick={e => { e.stopPropagation(); onCancelDelete(ws.id); }}
+                                            className="absolute right-2 top-1/2 -translate-y-1/2 bg-red-600 text-white text-xs font-bold px-3 py-1.5 rounded-lg hover:bg-red-700 transition z-10"
+                                        >복구</button>
+                                    )}
+                                </div>
+                                );
+                            })}
                         </div>
                         <div className="p-4 border-t border-gray-100">
                             <button onClick={onAdd}
@@ -2159,8 +2318,13 @@
         }
 
         // ─── 관리자: 업체 선택 로그인 화면 ───
-        function BossWorkspaceLoginPage({ workspaceList, firebaseUser, onSelect, onAdd, onLogout }) {
+        function BossWorkspaceLoginPage({ workspaceList, firebaseUser, onSelect, onAdd, onLogout, onCancelDelete }) {
             const hasAny = workspaceList.length > 0;
+            const [tick, setTick] = useState(0);
+            useEffect(() => {
+                const t = setInterval(() => setTick(n => n + 1), 60000);
+                return () => clearInterval(t);
+            }, []);
             return (
                 <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-4">
                     <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm overflow-hidden">
@@ -2187,12 +2351,28 @@
                             {hasAny && (
                                 <div>
                                     <p className="text-xs font-bold text-gray-400 mb-2">업체 선택</p>
-                                    {workspaceList.map(ws => (
-                                        <button key={ws.id} onClick={() => onSelect(ws.id)}
-                                            className="w-full text-left p-4 rounded-xl border-2 border-green-200 bg-green-50 hover:bg-green-100 active:bg-green-200 transition mb-2">
-                                            <p className="font-bold text-gray-800">{ws.shopName || '(업체명 없음)'}</p>
-                                        </button>
-                                    ))}
+                                    {workspaceList.map(ws => {
+                                        const dsa = ws.deleteScheduledAt;
+                                        const isDeleting = dsa && (() => {
+                                            const ms = dsa.toMillis ? dsa.toMillis() : new Date(dsa).getTime();
+                                            return Date.now() < ms + 24 * 60 * 60 * 1000;
+                                        })();
+                                        return (
+                                        <div key={ws.id} className="relative mb-2">
+                                            <button onClick={() => onSelect(ws.id)}
+                                                className={`w-full text-left p-4 rounded-xl border-2 transition ${isDeleting ? 'border-red-200 bg-red-50 opacity-60' : 'border-green-200 bg-green-50 hover:bg-green-100 active:bg-green-200'}`}>
+                                                <p className={`font-bold ${isDeleting ? 'text-red-700' : 'text-gray-800'}`}>{ws.shopName || '(업체명 없음)'}</p>
+                                                {isDeleting && <p className="text-xs text-red-500 mt-0.5">삭제중 — {formatDeleteRemaining(dsa)} 후 삭제</p>}
+                                            </button>
+                                            {isDeleting && onCancelDelete && (
+                                                <button
+                                                    onClick={e => { e.stopPropagation(); onCancelDelete(ws.id); }}
+                                                    className="absolute right-2 top-1/2 -translate-y-1/2 bg-red-600 text-white text-xs font-bold px-3 py-1.5 rounded-lg hover:bg-red-700 transition"
+                                                >복구</button>
+                                            )}
+                                        </div>
+                                        );
+                                    })}
                                 </div>
                             )}
 
@@ -5923,7 +6103,76 @@
             );
         }
 
-        function TabSettings({ appPin, setAppPin, showAlert, workspaceInfo, setWorkspaceInfo, firebaseUser, workspaceId }) {
+        // ─── 업체 삭제 섹션 ───
+        function WorkspaceDeleteSection({ isDeleting, deleteScheduledAt, onDelete, onCancel, showConfirm, shopName }) {
+            const [tick, setTick] = useState(0);
+            useEffect(() => {
+                if (!isDeleting) return;
+                const t = setInterval(() => setTick(n => n + 1), 60000);
+                return () => clearInterval(t);
+            }, [isDeleting]);
+
+            const handleDeleteClick = () => {
+                showConfirm(
+                    `"${shopName || '이 업체'}"를 삭제 예약하시겠습니까?\n\n` +
+                    `• 삭제 버튼을 누른 후 24시간 뒤에 모든 데이터가 영구 삭제됩니다.\n` +
+                    `• 24시간 이내에 복구 버튼을 누르면 취소할 수 있습니다.\n` +
+                    `• 삭제 중에는 데이터 열람만 가능합니다.`,
+                    onDelete,
+                    '업체 삭제 확인'
+                );
+            };
+
+            return (
+                <div className="max-w-md mx-auto mt-6 mb-8 bg-white rounded-2xl shadow-sm border border-red-100 overflow-hidden">
+                    <div className="p-5 flex items-center gap-3 border-b border-red-50">
+                        <div className="bg-red-100 p-2.5 rounded-xl flex-shrink-0">
+                            <Trash2 className="w-5 h-5 text-red-600" />
+                        </div>
+                        <div>
+                            <h2 className="text-base font-bold text-red-700">업체 삭제</h2>
+                            <p className="text-xs text-gray-500">삭제 후 24시간 이내 복구 가능</p>
+                        </div>
+                    </div>
+                    <div className="p-5">
+                        {isDeleting ? (
+                            <div className="space-y-4">
+                                <div className="bg-red-50 rounded-xl p-4 border border-red-200">
+                                    <p className="text-red-700 font-bold text-sm mb-1">⚠️ 삭제 예약 중</p>
+                                    <p className="text-red-600 text-sm">
+                                        <span className="font-bold">{formatDeleteRemaining(deleteScheduledAt)}</span> 후에 모든 데이터가 영구 삭제됩니다.
+                                    </p>
+                                    <p className="text-red-500 text-xs mt-1">현재 열람만 가능합니다.</p>
+                                </div>
+                                <button
+                                    onClick={onCancel}
+                                    className="w-full py-3.5 bg-green-600 text-white font-bold rounded-xl hover:bg-green-700 transition flex items-center justify-center gap-2"
+                                >
+                                    <CheckCircle2 className="w-5 h-5" />
+                                    삭제 취소 (복구하기)
+                                </button>
+                            </div>
+                        ) : (
+                            <div className="space-y-3">
+                                <p className="text-sm text-gray-600">
+                                    업체를 삭제하면 모든 근무자, 근무 기록, 설정이 영구적으로 삭제됩니다.
+                                    삭제 버튼 클릭 후 24시간 이내에는 복구할 수 있습니다.
+                                </p>
+                                <button
+                                    onClick={handleDeleteClick}
+                                    className="w-full py-3.5 bg-red-500 text-white font-bold rounded-xl hover:bg-red-600 transition flex items-center justify-center gap-2"
+                                >
+                                    <Trash2 className="w-5 h-5" />
+                                    이 업체 삭제
+                                </button>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            );
+        }
+
+        function TabSettings({ appPin, setAppPin, showAlert, showConfirm, workspaceInfo, setWorkspaceInfo, firebaseUser, workspaceId, isDeleting, deleteScheduledAt, onDeleteWorkspace, onCancelDeleteWorkspace }) {
             const [currentPin, setCurrentPin] = useState('');
             const [newPin, setNewPin] = useState('');
             const [confirmPin, setConfirmPin] = useState('');
@@ -6083,12 +6332,24 @@
                 </div>
 
                 {/* 근로계약서 설정 */}
-                <ContractTemplateEditor
-                    workspaceInfo={workspaceInfo}
-                    setWorkspaceInfo={setWorkspaceInfo}
-                    workspaceId={workspaceId}
-                    firebaseUser={firebaseUser}
-                    showAlert={showAlert}
+                {!isDeleting && (
+                    <ContractTemplateEditor
+                        workspaceInfo={workspaceInfo}
+                        setWorkspaceInfo={setWorkspaceInfo}
+                        workspaceId={workspaceId}
+                        firebaseUser={firebaseUser}
+                        showAlert={showAlert}
+                    />
+                )}
+
+                {/* 업체 삭제 */}
+                <WorkspaceDeleteSection
+                    isDeleting={isDeleting}
+                    deleteScheduledAt={deleteScheduledAt}
+                    onDelete={onDeleteWorkspace}
+                    onCancel={onCancelDeleteWorkspace}
+                    showConfirm={showConfirm}
+                    shopName={workspaceInfo?.shopName}
                 />
                 </>
             );

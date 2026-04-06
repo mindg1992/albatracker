@@ -814,6 +814,15 @@
                 if (!firebaseUser || userRole !== 'boss') return;
                 let cancelled = false;
 
+                // 5초 폴백: Firestore 응답 없어도 기본값으로 진행 (모바일 무한 스피너 방지)
+                const fallbackTimer = setTimeout(() => {
+                    if (!cancelled && !currentWorkspaceId) {
+                        const savedId = localStorage.getItem('bossWorkspaceId') || firebaseUser.uid;
+                        setCurrentWorkspaceId(savedId);
+                        setBossWorkspaceList([{ id: savedId, shopName: '' }]);
+                    }
+                }, 5000);
+
                 fbDb.collection('bossWorkspaces').doc(firebaseUser.uid).get()
                     .then(async doc => {
                         if (cancelled) return;
@@ -838,6 +847,7 @@
                             )
                         );
                         if (cancelled) return;
+                        clearTimeout(fallbackTimer);
                         setBossWorkspaceList(details);
 
                         // 저장된 업체 또는 첫 번째 업체 자동 선택
@@ -849,9 +859,17 @@
                             localStorage.setItem('bossWorkspaceId', workspaceIds[0]);
                         }
                     })
-                    .catch(e => { if (!cancelled) console.error('업체 목록 로드 오류:', e); });
+                    .catch(e => {
+                        if (cancelled) return;
+                        clearTimeout(fallbackTimer);
+                        console.error('업체 목록 로드 오류:', e);
+                        // 오류 시 기본값으로 폴백
+                        const savedId = localStorage.getItem('bossWorkspaceId') || firebaseUser.uid;
+                        setCurrentWorkspaceId(savedId);
+                        setBossWorkspaceList([{ id: savedId, shopName: '' }]);
+                    });
 
-                return () => { cancelled = true; };
+                return () => { cancelled = true; clearTimeout(fallbackTimer); };
             }, [firebaseUser?.uid, userRole]);
 
             // Google 직원 업체(workplaces) 로드
@@ -1839,9 +1857,15 @@
                                 className="w-full py-3 border-2 border-dashed border-gray-300 rounded-xl text-gray-500 hover:border-blue-400 hover:text-blue-600 transition text-sm font-medium">
                                 + 새 업체 초대코드 입력
                             </button>
-                            <button onClick={onLogout} className="w-full py-2.5 text-xs text-gray-400 hover:text-gray-600 transition">
-                                로그아웃
-                            </button>
+                            <div className="border-t border-gray-100 pt-2 space-y-1">
+                                <button onClick={() => { localStorage.setItem('albaLoginRole','boss'); window.location.reload(); }}
+                                    className="w-full py-2.5 text-xs text-green-600 hover:text-green-700 transition font-medium">
+                                    관리자 모드로 전환
+                                </button>
+                                <button onClick={onLogout} className="w-full py-2 text-xs text-gray-400 hover:text-gray-600 transition">
+                                    로그아웃
+                                </button>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -1910,9 +1934,15 @@
             return (
                 <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-4">
                     <div className="bg-white p-8 rounded-2xl shadow-xl w-full max-w-sm">
-                        <button onClick={onBack} className="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700 mb-6">
-                            <ChevronLeft className="w-4 h-4" /> 뒤로
-                        </button>
+                        <div className="flex items-center justify-between mb-6">
+                            <button onClick={onBack} className="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700">
+                                <ChevronLeft className="w-4 h-4" /> 뒤로
+                            </button>
+                            <button onClick={() => { localStorage.setItem('albaLoginRole','boss'); window.location.reload(); }}
+                                className="text-xs text-green-600 hover:text-green-700 font-medium">
+                                관리자 모드로 전환
+                            </button>
+                        </div>
 
                         {step === 'code' && (
                             <div className="text-center">

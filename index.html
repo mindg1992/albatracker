@@ -3,11 +3,12 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>알바트래커 v1.0</title>
+    <title>알바트래커 v1.8.3</title>
 
     <!-- PWA -->
     <link rel="manifest" href="manifest.json">
-    <meta name="theme-color" content="#3b82f6">
+    <meta name="theme-color" content="#22c55e">
+    <link rel="icon" type="image/svg+xml" href="icon.svg">
     <link rel="apple-touch-icon" href="icon.svg">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -97,6 +98,18 @@
         const Cloud = ({className}) => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/></svg>;
         const SaveIcon = ({className}) => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>;
         const Megaphone = ({className}) => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M3 9v6"/><path d="M7 5l10-3v18L7 17H3a1 1 0 0 1-1-1v-6a1 1 0 0 1 1-1h4z"/><path d="M7 5v12"/><path d="M21 9a3 3 0 0 1 0 6"/></svg>;
+        const ATLogo = ({className}) => (
+            <svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" className={className}>
+                <defs>
+                    <linearGradient id="atGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                        <stop offset="0%" stopColor="#22c55e"/>
+                        <stop offset="100%" stopColor="#059669"/>
+                    </linearGradient>
+                </defs>
+                <rect width="100" height="100" rx="22" fill="url(#atGrad)"/>
+                <text x="50" y="68" textAnchor="middle" fontFamily="Arial Black, Arial, sans-serif" fontWeight="900" fontSize="44" fill="white" letterSpacing="-2">AT</text>
+            </svg>
+        );
 
         // --- 전역 설정 및 유틸리티 ---
         const MIN_WAGE = 10030; // 2026년 기준 예상 최저시급 (참고용)
@@ -1276,7 +1289,8 @@
                 return (
                     <div className="min-h-screen bg-gray-50 flex items-center justify-center">
                         <div className="text-center">
-                            <div className="w-12 h-12 border-4 border-green-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+                            <ATLogo className="w-16 h-16 mx-auto mb-5 rounded-2xl shadow-lg" />
+                            <div className="w-8 h-8 border-3 border-green-500 border-t-transparent rounded-full animate-spin mx-auto mb-3" style={{borderWidth:'3px'}}></div>
                             <p className="text-gray-500 text-sm font-medium">
                                 {(firebaseUser && !userRole) ? '사용자 정보를 확인 중...' : '데이터를 동기화하고 있습니다...'}
                             </p>
@@ -1301,7 +1315,8 @@
                         return (
                             <div className="min-h-screen bg-gray-50 flex items-center justify-center">
                                 <div className="text-center">
-                                    <div className="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+                                    <ATLogo className="w-16 h-16 mx-auto mb-5 rounded-2xl shadow-lg" />
+                                    <div className="w-8 h-8 border-green-500 border-t-transparent rounded-full animate-spin mx-auto mb-3" style={{borderWidth:'3px', borderStyle:'solid'}}></div>
                                     <p className="text-gray-500 text-sm">업체 정보를 불러오는 중...</p>
                                 </div>
                             </div>
@@ -1816,18 +1831,16 @@
             return (
                 <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-4">
                     <div className="bg-white p-8 rounded-2xl shadow-xl w-full max-w-sm text-center">
-                        <div className="bg-yellow-100 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
-                            <Lock className="w-8 h-8 text-yellow-600" />
-                        </div>
-                        <h2 className="text-2xl font-bold text-gray-800 mb-1">{empName ? `${empName}님` : '알바트래커 v1.0'}</h2>
+                        <ATLogo className="w-16 h-16 mx-auto mb-4 rounded-2xl shadow-md" />
+                        <h2 className="text-2xl font-bold text-gray-800 mb-1">{empName ? `${empName}님` : '알바트래커 v1.8.3'}</h2>
                         <p className="text-gray-500 mb-6 text-sm">
                             {empName ? 'PIN을 입력해주세요.' : (appPin === INITIAL_PIN ? '초기 비밀번호는 "000000"입니다.' : '비밀번호를 입력해주세요.')}
                         </p>
 
                         <div className="flex justify-center gap-3 mb-8">
                             {[...Array(6)].map((_, i) => (
-                                <div 
-                                    key={i} 
+                                <div
+                                    key={i}
                                     className={`w-4 h-4 rounded-full transition-all ${
                                         i < input.length ? 'bg-green-600 scale-110' : 'bg-gray-200'
                                     } ${error ? 'bg-red-500' : ''}`}
@@ -1859,6 +1872,13 @@
                                 <X className="w-6 h-6" />
                             </button>
                         </div>
+
+                        {!empName && (
+                            <div className="mt-6 text-left border-t border-gray-100 pt-4 space-y-1">
+                                <p className="text-[10px] text-gray-300 leading-relaxed">알바트래커v1.8.2: 근무자 로그인 및 시간입력 등 대규모 개선</p>
+                                <p className="text-[10px] text-gray-300 leading-relaxed">알바트래커v1.8.3: 관리자 전체공지기능 추가</p>
+                            </div>
+                        )}
                     </div>
                 </div>
             );
@@ -1873,9 +1893,7 @@
                 <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-4">
                     <CustomModal config={modalConfig} />
                     <div className="bg-white p-8 rounded-2xl shadow-xl w-full max-w-sm text-center">
-                        <div className="bg-green-100 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
-                            <CalendarIcon className="w-8 h-8 text-green-600" />
-                        </div>
+                        <ATLogo className="w-16 h-16 mx-auto mb-4 rounded-2xl shadow-md" />
                         <h2 className="text-2xl font-bold text-gray-800 mb-2">알바트래커</h2>
                         <p className="text-gray-500 mb-8 text-sm">근무 관리를 시작해볼까요?</p>
                         <div className="space-y-3">
@@ -2421,6 +2439,10 @@
             const [currentNoticePopup, setCurrentNoticePopup] = useState(null);
             const pendingSubmitDateRef = useRef(null);
             const unreadCount = notifications.filter(n => !n.read).length;
+            const unreadNoticeCount = (() => {
+                const confirmed = JSON.parse(localStorage.getItem(`confirmedNotices_${empAccount?.bossUid}`) || '[]');
+                return notices.filter(n => !confirmed.includes(n.id)).length;
+            })();
             const workStatus = empAccount?.workStatus || 'working';
             const isBlocked = workStatus === 'leave' || workStatus === 'resigned';
 
@@ -2677,9 +2699,10 @@
                                 알림
                                 {unreadCount > 0 && <span className="absolute top-1.5 right-6 bg-red-500 text-white text-[9px] rounded-full w-4 h-4 flex items-center justify-center font-bold">{unreadCount}</span>}
                             </button>
-                            <button onClick={() => setActiveTab('empnotices')} className={`flex-1 flex flex-col items-center py-3 gap-1 text-xs font-medium ${activeTab==='empnotices' ? 'text-blue-600' : 'text-gray-400'}`}>
+                            <button onClick={() => setActiveTab('empnotices')} className={`flex-1 relative flex flex-col items-center py-3 gap-1 text-xs font-medium ${activeTab==='empnotices' ? 'text-blue-600' : 'text-gray-400'}`}>
                                 <Megaphone className={`w-5 h-5 ${activeTab==='empnotices' ? 'text-blue-600' : 'text-gray-400'}`} />
                                 공지사항
+                                {unreadNoticeCount > 0 && <span className="absolute top-1.5 right-6 bg-red-500 text-white text-[9px] rounded-full w-4 h-4 flex items-center justify-center font-bold">{unreadNoticeCount > 9 ? '9+' : unreadNoticeCount}</span>}
                             </button>
                             <button onClick={() => setActiveTab('myinfo')} className={`flex-1 flex flex-col items-center py-3 gap-1 text-xs font-medium ${activeTab==='myinfo' ? 'text-blue-600' : 'text-gray-400'}`}>
                                 <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>

@@ -5555,14 +5555,14 @@
             const existing = workspaceInfo?.contractTemplate;
             const [title, setTitle] = useState(existing?.title || '근로계약서');
             const [sections, setSections] = useState(
-                existing?.sections?.length >= 2 ? existing.sections : [{ content: '', instruction: '' }, { content: '', instruction: '' }]
+                existing?.sections?.length >= 1 ? existing.sections : [{ content: '', instruction: '' }]
             );
             const [ownerInfo, setOwnerInfo] = useState(existing?.ownerInfo || { shopName: '', phone: '', address: '', representative: '', signatureData: '' });
             const [saving, setSaving] = useState(false);
             const [expanded, setExpanded] = useState(!!existing);
 
             const addSection = () => setSections(prev => [...prev, { content: '', instruction: '' }]);
-            const removeSection = (i) => { if (sections.length <= 2) return; setSections(prev => prev.filter((_, j) => j !== i)); };
+            const removeSection = (i) => { if (sections.length <= 1) return; setSections(prev => prev.filter((_, j) => j !== i)); };
             const updateSection = (i, key, val) => setSections(prev => prev.map((s, j) => j === i ? { ...s, [key]: val } : s));
 
             const handleSave = async () => {
@@ -5614,7 +5614,7 @@
                                 <div key={i} className="border-2 border-gray-200 rounded-xl p-4 space-y-3 relative">
                                     <div className="flex items-center justify-between mb-1">
                                         <span className="text-xs font-bold text-gray-500">항목 {i + 1}</span>
-                                        {sections.length > 2 && (
+                                        {sections.length > 1 && (
                                             <button onClick={() => removeSection(i)} className="text-red-400 hover:text-red-600 text-xs">삭제</button>
                                         )}
                                     </div>
@@ -5622,7 +5622,7 @@
                                         <label className="block text-xs font-bold text-gray-600 mb-1">내용 (관리자 작성)</label>
                                         <textarea value={s.content} onChange={e => updateSection(i, 'content', e.target.value)} rows={3}
                                             className="w-full border-2 border-gray-200 rounded-xl py-2 px-3 text-sm focus:border-purple-400 outline-none resize-none"
-                                            placeholder="예: 귀하의 시급은 15,000원으로 계약합니다." />
+                                            placeholder="예: 업무내용, 소정근로시간, 임금 등" />
                                     </div>
                                     <div>
                                         <label className="block text-xs font-bold text-gray-600 mb-1">지시 (근무자에게 어떻게 작성하게 할지)</label>

@@ -319,6 +319,98 @@
                 });
         }
 
+        // --- Google 직원 시스템 헬퍼 ---
+
+        // Google 직원 계정 생성 (처음 Google로 직원 로그인 시)
+        async function ensureGoogleEmpAccount(empUid, googleEmail, googleDisplayName) {
+            const docRef = fbDb.collection('employeeAccounts').doc(empUid);
+            const doc = await docRef.get();
+            if (!doc.exists) {
+                await docRef.set({
+                    isGoogleEmployee: true,
+                    googleEmail: googleEmail || '',
+                    googleDisplayName: googleDisplayName || '',
+                    createdAt: firebase.firestore.FieldValue.serverTimestamp()
+                });
+            }
+        }
+
+        // 업체 가입 신청 (초대코드 입력 후)
+        async function createGoogleEmpJoinRequest(empUid, googleEmail, empName, inviteInfo, inviteCode, profile) {
+            const bossUid = inviteInfo.bossUid;
+            const pendingDocId = `${empUid}_${bossUid}`;
+            const batch = fbDb.batch();
+
+            // 메인 계정 문서 보장
+            batch.set(fbDb.collection('employeeAccounts').doc(empUid),
+                { isGoogleEmployee: true, googleEmail: googleEmail || '', googleDisplayName: '' },
+                { merge: true });
+
+            // 업체별 workspace 서브컬렉션
+            batch.set(
+                fbDb.collection('employeeAccounts').doc(empUid).collection('workplaces').doc(bossUid),
+                {
+                    bossUid, empUid,
+                    shopName: inviteInfo.shopName || '',
+                    status: 'pending',
+                    employeeId: null,
+                    inviteCode: inviteCode,
+                    name: empName,
+                    residentId: profile.residentId || '',
+                    bank: profile.bank || '',
+                    account: profile.account || '',
+                    createdAt: firebase.firestore.FieldValue.serverTimestamp()
+                }
+            );
+
+            // 관리자가 조회할 empPending 컬렉션
+            batch.set(fbDb.collection('empPending').doc(pendingDocId), {
+                empUid, bossUid,
+                shopName: inviteInfo.shopName || '',
+                name: empName,
+                googleEmail: googleEmail || '',
+                inviteCode,
+                residentId: profile.residentId || '',
+                bank: profile.bank || '',
+                account: profile.account || '',
+                isGoogleEmployee: true,
+                createdAt: firebase.firestore.FieldValue.serverTimestamp()
+            });
+
+            await batch.commit();
+        }
+
+        // 관리자 승인 처리 (Google 직원)
+        async function approveGoogleEmpJoinRequest(bossUid, empUid, employeeId) {
+            const pendingDocId = `${empUid}_${bossUid}`;
+            const batch = fbDb.batch();
+            batch.update(
+                fbDb.collection('employeeAccounts').doc(empUid).collection('workplaces').doc(bossUid),
+                { status: 'approved', employeeId, approvedAt: firebase.firestore.FieldValue.serverTimestamp() }
+            );
+            batch.delete(fbDb.collection('empPending').doc(pendingDocId));
+            await batch.commit();
+        }
+
+        // 관리자 거절 처리 (Google 직원)
+        async function rejectGoogleEmpJoinRequest(bossUid, empUid) {
+            const pendingDocId = `${empUid}_${bossUid}`;
+            const batch = fbDb.batch();
+            batch.update(
+                fbDb.collection('employeeAccounts').doc(empUid).collection('workplaces').doc(bossUid),
+                { status: 'rejected', rejectedAt: firebase.firestore.FieldValue.serverTimestamp() }
+            );
+            batch.delete(fbDb.collection('empPending').doc(pendingDocId));
+            await batch.commit();
+        }
+
+        // 직원이 업체 연결 끊기
+        async function disconnectGoogleEmpWorkplace(empUid, bossUid) {
+            await fbDb.collection('employeeAccounts').doc(empUid)
+                .collection('workplaces').doc(bossUid)
+                .update({ status: 'disconnected', disconnectedAt: firebase.firestore.FieldValue.serverTimestamp() });
+        }
+
         // --- 메인 애플리케이션 컴포넌트 ---
         function AlbaTracker() {
             const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -346,7 +438,16 @@
             const [workspaceInfo, setWorkspaceInfo] = useState(null);
             const [showBossSetup, setShowBossSetup] = useState(false);
             const [pendingEmployees, setPendingEmployees] = useState([]);
+            const [pendingGoogleEmployees, setPendingGoogleEmployees] = useState([]);
             const [showPendingModal, setShowPendingModal] = useState(false);
+
+            // === Google 직원 전용 상태 ===
+            const [empGoogleWorkplaces, setEmpGoogleWorkplaces] = useState([]);
+            const [selectedEmpBossUid, setSelectedEmpBossUid] = useState(() =>
+                localStorage.getItem('selectedEmpBossUid') || null
+            );
+            const [empWorkplaceLoading, setEmpWorkplaceLoading] = useState(false);
+            const [showEmpJoinScreen, setShowEmpJoinScreen] = useState(false);
 
             // 데이터 루프 및 무의미한 저장을 방지하기 위한 기준점
             const lastSyncedDataRef = useRef("");
@@ -380,40 +481,59 @@
                 return () => unsubscribeAuth();
             }, []);
 
-            // 역할 감지: Google 계정 = 관리자, @emp.albatracker.page 이메일 = 직원
+            // 역할 감지: Google 계정 = 관리자 또는 Google 직원, @emp.albatracker.page = 기존 직원
             useEffect(() => {
                 if (!firebaseUser) return;
                 let cancelled = false;
 
                 const isGoogleUser = firebaseUser.providerData?.some(p => p.providerId === 'google.com');
-                if (isGoogleUser || !firebaseUser.email?.includes('@emp.albatracker.page')) {
-                    setUserRole('boss');
-                    return;
+
+                // 기존 직원 (이메일+PIN 방식)
+                if (!isGoogleUser && firebaseUser.email?.includes('@emp.albatracker.page')) {
+                    let attempts = 0;
+                    const tryLoad = () => {
+                        fbDb.collection('employeeAccounts').doc(firebaseUser.uid).get()
+                            .then(doc => {
+                                if (cancelled) return;
+                                if (doc.exists) {
+                                    const data = doc.data();
+                                    setUserRole('employee');
+                                    setEmpAccount(data);
+                                    setEmpPin(data.pin || '');
+                                    setFbLoading(false);
+                                } else if (attempts < 3) {
+                                    attempts++;
+                                    setTimeout(tryLoad, 1500);
+                                } else {
+                                    setUserRole('boss');
+                                    setFbLoading(false);
+                                }
+                            })
+                            .catch(() => { if (!cancelled) { setUserRole('boss'); setFbLoading(false); } });
+                    };
+                    tryLoad();
+                    return () => { cancelled = true; };
                 }
 
-                // 직원 계정 로드 (생성 직후 딜레이 대응: 최대 3회 재시도)
-                let attempts = 0;
-                const tryLoad = () => {
-                    fbDb.collection('employeeAccounts').doc(firebaseUser.uid).get()
-                        .then(doc => {
-                            if (cancelled) return;
-                            if (doc.exists) {
-                                const data = doc.data();
-                                setUserRole('employee');
-                                setEmpAccount(data);
-                                setEmpPin(data.pin || '');
-                                setFbLoading(false);
-                            } else if (attempts < 3) {
-                                attempts++;
-                                setTimeout(tryLoad, 1500);
-                            } else {
-                                setUserRole('boss');
-                                setFbLoading(false);
-                            }
-                        })
-                        .catch(() => { if (!cancelled) { setUserRole('boss'); setFbLoading(false); } });
-                };
-                tryLoad();
+                // Google 계정: employeeAccounts 문서의 isGoogleEmployee 플래그로 구분
+                fbDb.collection('employeeAccounts').doc(firebaseUser.uid).get()
+                    .then(doc => {
+                        if (cancelled) return;
+                        if (doc.exists && doc.data().isGoogleEmployee) {
+                            // Google 직원 계정
+                            setUserRole('employee');
+                            setEmpAccount({ ...doc.data(), uid: firebaseUser.uid });
+                            setFbLoading(false);
+                        } else {
+                            // 관리자 계정
+                            setUserRole('boss');
+                            // fbLoading은 데이터 로딩 useEffect에서 해제
+                        }
+                    })
+                    .catch(() => {
+                        if (!cancelled) { setUserRole('boss'); }
+                    });
+
                 return () => { cancelled = true; };
             }, [firebaseUser]);
 
@@ -572,26 +692,46 @@
                     });
             };
 
-            const handleGoogleLogin = async () => {
+            const checkInAppBrowser = () => {
                 const ua = navigator.userAgent;
                 const isInApp = /KAKAOTALK|Instagram|FBAN|FBAV|Line\/|Twitter|NAVER|DaumApps|Whale/i.test(ua)
                     || (/Android/i.test(ua) && /wv/.test(ua))
                     || (/iPhone|iPad/i.test(ua) && !/Safari/i.test(ua) && /AppleWebKit/i.test(ua));
-                
                 if (isInApp) {
                     const isKakao = /KAKAOTALK/i.test(ua);
-                    if (isKakao) {
-                        showAlert('카카오톡 브라우저에서는 Google 로그인이 차단됩니다.\n\n우측 하단 ⋯ 메뉴 → "다른 브라우저로 열기"를 눌러 Chrome 또는 Safari에서 접속해 주세요.', '브라우저 안내', 'alert');
-                    } else {
-                        showAlert('현재 앱 내 브라우저에서는 Google 로그인이 차단됩니다.\n\nChrome 또는 Safari 브라우저로 열어서 로그인해 주세요.', '브라우저 안내', 'alert');
-                    }
-                    return;
+                    showAlert(
+                        isKakao
+                            ? '카카오톡 브라우저에서는 Google 로그인이 차단됩니다.\n\n우측 하단 ⋯ 메뉴 → "다른 브라우저로 열기"를 눌러 Chrome 또는 Safari에서 접속해 주세요.'
+                            : '현재 앱 내 브라우저에서는 Google 로그인이 차단됩니다.\n\nChrome 또는 Safari 브라우저로 열어서 로그인해 주세요.',
+                        '브라우저 안내', 'alert'
+                    );
+                    return true;
                 }
+                return false;
+            };
 
+            const handleGoogleLogin = async () => {
+                if (checkInAppBrowser()) return;
                 setFbLoading(true);
                 const provider = new firebase.auth.GoogleAuthProvider();
                 try {
                     await fbAuth.signInWithPopup(provider);
+                } catch(e) {
+                    setFbLoading(false);
+                    showAlert('Google 로그인에 실패했습니다.\n' + e.message, '오류', 'error');
+                }
+            };
+
+            // Google 직원 로그인 — isGoogleEmployee 플래그 설정 후 동일한 Google OAuth 사용
+            const handleEmpGoogleLogin = async () => {
+                if (checkInAppBrowser()) return;
+                setFbLoading(true);
+                const provider = new firebase.auth.GoogleAuthProvider();
+                try {
+                    const result = await fbAuth.signInWithPopup(provider);
+                    const uid = result.user.uid;
+                    // 직원 계정 문서 생성 (없을 경우)
+                    await ensureGoogleEmpAccount(uid, result.user.email, result.user.displayName);
                 } catch(e) {
                     setFbLoading(false);
                     showAlert('Google 로그인에 실패했습니다.\n' + e.message, '오류', 'error');
@@ -615,10 +755,82 @@
                     setIsEmpAuthenticated(false);
                     setWorkspaceInfo(null);
                     setPendingEmployees([]);
+                    setPendingGoogleEmployees([]);
                     setEmpNotifications([]);
                     setMySubmissions({});
+                    setEmpGoogleWorkplaces([]);
+                    setSelectedEmpBossUid(null);
+                    setShowEmpJoinScreen(false);
+                    localStorage.removeItem('selectedEmpBossUid');
                 });
             };
+
+            // Google 직원이 업체 연결 끊기
+            const handleEmpDisconnectWorkplace = (bossUid) => {
+                showConfirm(
+                    '이 업체와의 연결을 끊으시겠습니까?\n관리자의 근무자 카드는 유지되며,\n근무 기록은 삭제되지 않습니다.',
+                    async () => {
+                        try {
+                            await disconnectGoogleEmpWorkplace(firebaseUser.uid, bossUid);
+                            setEmpGoogleWorkplaces(prev => prev.map(w =>
+                                w.bossUid === bossUid ? { ...w, status: 'disconnected' } : w
+                            ));
+                            setSelectedEmpBossUid(null);
+                            localStorage.removeItem('selectedEmpBossUid');
+                            setEmpAccount(prev => ({ ...prev, status: undefined, bossUid: undefined }));
+                        } catch(e) {
+                            showAlert('처리 오류: ' + e.message, '오류', 'error');
+                        }
+                    },
+                    '업체 연결 끊기'
+                );
+            };
+
+            // Google 직원 업체(workplaces) 로드
+            useEffect(() => {
+                if (!firebaseUser || userRole !== 'employee' || !empAccount?.isGoogleEmployee) return;
+                let cancelled = false;
+                setEmpWorkplaceLoading(true);
+
+                fbDb.collection('employeeAccounts').doc(firebaseUser.uid)
+                    .collection('workplaces').get()
+                    .then(snap => {
+                        if (cancelled) return;
+                        const workplaces = [];
+                        snap.forEach(d => workplaces.push({ bossUid: d.id, ...d.data() }));
+                        setEmpGoogleWorkplaces(workplaces);
+
+                        // 저장된 업체 또는 단독 승인 업체 자동 선택
+                        const savedBossUid = localStorage.getItem('selectedEmpBossUid');
+                        const approved = workplaces.filter(w => w.status === 'approved');
+                        let target = null;
+                        if (savedBossUid) target = approved.find(w => w.bossUid === savedBossUid) || null;
+                        if (!target && approved.length === 1) target = approved[0];
+
+                        if (target) {
+                            setSelectedEmpBossUid(target.bossUid);
+                            localStorage.setItem('selectedEmpBossUid', target.bossUid);
+                            setEmpAccount(prev => ({
+                                ...prev,
+                                bossUid: target.bossUid,
+                                shopName: target.shopName || '',
+                                name: target.name,
+                                status: target.status,
+                                employeeId: target.employeeId,
+                                residentId: target.residentId || '',
+                                bank: target.bank || '',
+                                account: target.account || '',
+                                inviteCode: target.inviteCode || ''
+                            }));
+                        } else {
+                            setSelectedEmpBossUid(null);
+                        }
+                    })
+                    .catch(e => { if (!cancelled) console.error('업체 로드 오류:', e); })
+                    .finally(() => { if (!cancelled) setEmpWorkplaceLoading(false); });
+
+                return () => { cancelled = true; };
+            }, [firebaseUser?.uid, userRole, empAccount?.isGoogleEmployee]);
 
             // 관리자 워크스페이스 로드
             useEffect(() => {
@@ -633,7 +845,7 @@
                 return () => { cancelled = true; };
             }, [firebaseUser, userRole]);
 
-            // 대기 중인 직원 실시간 감지 (관리자)
+            // 대기 중인 직원 실시간 감지 (관리자) — 기존 PIN 방식
             useEffect(() => {
                 if (!firebaseUser || userRole !== 'boss') return;
                 const unsub = fbDb.collection('employeeAccounts')
@@ -643,6 +855,19 @@
                         const list = [];
                         snap.forEach(d => list.push({ uid: d.id, ...d.data() }));
                         setPendingEmployees(list);
+                    }, () => {});
+                return () => unsub();
+            }, [firebaseUser, userRole]);
+
+            // Google 직원 대기 감지 (관리자) — empPending 컬렉션
+            useEffect(() => {
+                if (!firebaseUser || userRole !== 'boss') return;
+                const unsub = fbDb.collection('empPending')
+                    .where('bossUid', '==', firebaseUser.uid)
+                    .onSnapshot(snap => {
+                        const list = [];
+                        snap.forEach(d => list.push({ uid: d.data().empUid, isGoogleEmployee: true, ...d.data() }));
+                        setPendingGoogleEmployees(list);
                     }, () => {});
                 return () => unsub();
             }, [firebaseUser, userRole]);
@@ -689,8 +914,10 @@
             }, [firebaseUser, userRole, isAuthenticated, globalMinWage]);
 
             // 직원 본인 알림 실시간 로드
+            // Google 직원은 isEmpAuthenticated 없이 firebaseUser로 인증됨
             useEffect(() => {
-                if (!firebaseUser || userRole !== 'employee' || !isEmpAuthenticated) return;
+                const isAuthed = empAccount?.isGoogleEmployee ? true : isEmpAuthenticated;
+                if (!firebaseUser || userRole !== 'employee' || !isAuthed) return;
                 const unsub = fbDb.collection('employeeAccounts').doc(firebaseUser.uid)
                     .collection('notifications')
                     .orderBy('createdAt', 'desc').limit(50)
@@ -700,11 +927,12 @@
                         setEmpNotifications(list);
                     }, () => {});
                 return () => unsub();
-            }, [firebaseUser, userRole, isEmpAuthenticated]);
+            }, [firebaseUser, userRole, isEmpAuthenticated, empAccount?.isGoogleEmployee]);
 
             // 직원 본인 제출 기록 실시간 로드
             useEffect(() => {
-                if (!firebaseUser || userRole !== 'employee' || !empAccount?.bossUid || !isEmpAuthenticated) return;
+                const isAuthed = empAccount?.isGoogleEmployee ? true : isEmpAuthenticated;
+                if (!firebaseUser || userRole !== 'employee' || !empAccount?.bossUid || !isAuthed) return;
                 const unsub = fbDb.collection('workspaces').doc(empAccount.bossUid)
                     .collection('submissions')
                     .where('empUid', '==', firebaseUser.uid)
@@ -714,11 +942,12 @@
                         setMySubmissions(subs);
                     }, () => {});
                 return () => unsub();
-            }, [firebaseUser, userRole, empAccount, isEmpAuthenticated]);
+            }, [firebaseUser, userRole, empAccount?.bossUid, empAccount?.isGoogleEmployee, isEmpAuthenticated]);
 
             // 직원 승인 처리 (관리자)
             const handleApproveEmployee = async (empUid) => {
-                const empData = pendingEmployees.find(e => e.uid === empUid);
+                const allPending = [...pendingEmployees, ...pendingGoogleEmployees];
+                const empData = allPending.find(e => e.uid === empUid);
                 if (!empData) return;
                 try {
                     const newEmpId = nextEmpId;
@@ -729,14 +958,20 @@
                         residentId: empData.residentId || '',
                         bank: empData.bank || '',
                         account: empData.account || '',
-                        memo: '', status: 'working'
+                        memo: '', status: 'working',
+                        ...(empData.isGoogleEmployee && { empUid })
                     };
                     setEmployees(prev => [...prev, newEmp]);
                     setNextEmpId(prev => prev + 1);
-                    await fbDb.collection('employeeAccounts').doc(empUid).update({
-                        status: 'approved', employeeId: newEmpId,
-                        approvedAt: firebase.firestore.FieldValue.serverTimestamp()
-                    });
+
+                    if (empData.isGoogleEmployee) {
+                        await approveGoogleEmpJoinRequest(firebaseUser.uid, empUid, newEmpId);
+                    } else {
+                        await fbDb.collection('employeeAccounts').doc(empUid).update({
+                            status: 'approved', employeeId: newEmpId,
+                            approvedAt: firebase.firestore.FieldValue.serverTimestamp()
+                        });
+                    }
                     showAlert(`${empData.name}님이 승인되었습니다.\n근무자 정보 탭에서 시급 등을 설정해주세요.`, '승인 완료', 'success');
                 } catch(e) {
                     showAlert('승인 처리 중 오류: ' + e.message, '오류', 'error');
@@ -745,13 +980,18 @@
 
             // 직원 거절 처리 (관리자)
             const handleRejectEmployee = (empUid) => {
-                const empData = pendingEmployees.find(e => e.uid === empUid);
+                const allPending = [...pendingEmployees, ...pendingGoogleEmployees];
+                const empData = allPending.find(e => e.uid === empUid);
                 showConfirm(`${empData?.name || '직원'}님의 가입을 거절하시겠습니까?`, async () => {
                     try {
-                        await fbDb.collection('employeeAccounts').doc(empUid).update({
-                            status: 'rejected',
-                            rejectedAt: firebase.firestore.FieldValue.serverTimestamp()
-                        });
+                        if (empData?.isGoogleEmployee) {
+                            await rejectGoogleEmpJoinRequest(firebaseUser.uid, empUid);
+                        } else {
+                            await fbDb.collection('employeeAccounts').doc(empUid).update({
+                                status: 'rejected',
+                                rejectedAt: firebase.firestore.FieldValue.serverTimestamp()
+                            });
+                        }
                     } catch(e) {
                         showAlert('처리 중 오류: ' + e.message, '오류', 'error');
                     }
@@ -835,11 +1075,127 @@
 
             // 로그인 안 된 상태 → 랜딩 화면
             if (!firebaseUser) {
-                return <LandingScreen onBossLogin={handleGoogleLogin} modalConfig={modalConfig} />;
+                return <LandingScreen onBossLogin={handleGoogleLogin} onEmpGoogleLogin={handleEmpGoogleLogin} modalConfig={modalConfig} />;
             }
+
+            // 관리자용: 대기 직원 합산 (PIN 방식 + Google 방식)
+            const allPendingEmployees = [...pendingEmployees, ...pendingGoogleEmployees];
 
             // ── 직원 플로우 ──
             if (userRole === 'employee') {
+
+                // ── Google 직원 플로우 ──
+                if (empAccount?.isGoogleEmployee) {
+                    if (empWorkplaceLoading) {
+                        return (
+                            <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+                                <div className="text-center">
+                                    <div className="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+                                    <p className="text-gray-500 text-sm">업체 정보를 불러오는 중...</p>
+                                </div>
+                            </div>
+                        );
+                    }
+
+                    const approvedWorkplaces = empGoogleWorkplaces.filter(w => w.status === 'approved');
+                    const pendingWorkplaces = empGoogleWorkplaces.filter(w => w.status === 'pending');
+                    const selectedWorkplace = selectedEmpBossUid
+                        ? empGoogleWorkplaces.find(w => w.bossUid === selectedEmpBossUid)
+                        : null;
+
+                    // 새 업체 등록 화면
+                    if (showEmpJoinScreen || (empGoogleWorkplaces.filter(w => w.status !== 'disconnected').length === 0 && pendingWorkplaces.length === 0)) {
+                        return (
+                            <>
+                                <CustomModal config={modalConfig} />
+                                <EmpGoogleJoinScreen
+                                    firebaseUser={firebaseUser}
+                                    empGoogleWorkplaces={empGoogleWorkplaces}
+                                    onJoined={(newWorkplace) => {
+                                        setEmpGoogleWorkplaces(prev => {
+                                            const idx = prev.findIndex(w => w.bossUid === newWorkplace.bossUid);
+                                            return idx >= 0 ? prev.map((w,i) => i===idx ? newWorkplace : w) : [...prev, newWorkplace];
+                                        });
+                                        setShowEmpJoinScreen(false);
+                                    }}
+                                    onBack={() => setShowEmpJoinScreen(false)}
+                                    onLogout={handleLogout}
+                                    showAlert={showAlert}
+                                />
+                            </>
+                        );
+                    }
+
+                    // 업체 선택 화면 (승인된 업체 여러 개 OR 선택 안 됨)
+                    if (!selectedEmpBossUid || !selectedWorkplace || selectedWorkplace.status !== 'approved') {
+                        return (
+                            <>
+                                <CustomModal config={modalConfig} />
+                                <WorkplaceSelectScreen
+                                    workplaces={empGoogleWorkplaces}
+                                    firebaseUser={firebaseUser}
+                                    onSelect={(bossUid) => {
+                                        const wp = empGoogleWorkplaces.find(w => w.bossUid === bossUid);
+                                        if (!wp) return;
+                                        setSelectedEmpBossUid(bossUid);
+                                        localStorage.setItem('selectedEmpBossUid', bossUid);
+                                        setEmpAccount(prev => ({
+                                            ...prev,
+                                            bossUid: wp.bossUid,
+                                            shopName: wp.shopName || '',
+                                            name: wp.name,
+                                            status: wp.status,
+                                            employeeId: wp.employeeId,
+                                            residentId: wp.residentId || '',
+                                            bank: wp.bank || '',
+                                            account: wp.account || '',
+                                        }));
+                                    }}
+                                    onAddWorkplace={() => setShowEmpJoinScreen(true)}
+                                    onLogout={handleLogout}
+                                />
+                            </>
+                        );
+                    }
+
+                    // 승인 대기 중
+                    if (selectedWorkplace.status === 'pending') {
+                        return (
+                            <>
+                                <CustomModal config={modalConfig} />
+                                <PendingApprovalScreen
+                                    empAccount={{ ...empAccount, ...selectedWorkplace }}
+                                    onLogout={handleLogout}
+                                    onBack={() => { setSelectedEmpBossUid(null); localStorage.removeItem('selectedEmpBossUid'); }}
+                                />
+                            </>
+                        );
+                    }
+
+                    // Google 직원 앱 (PIN 없음 — Google이 인증 역할)
+                    return (
+                        <>
+                            <CustomModal config={modalConfig} />
+                            <EmployeeApp
+                                empAccount={{ ...empAccount, ...selectedWorkplace }}
+                                firebaseUser={firebaseUser}
+                                mySubmissions={mySubmissions}
+                                notifications={empNotifications}
+                                onLogout={handleLogout}
+                                onLock={handleLogout}
+                                showAlert={showAlert}
+                                showConfirm={showConfirm}
+                                modalConfig={modalConfig}
+                                onSwitchWorkplace={() => { setSelectedEmpBossUid(null); localStorage.removeItem('selectedEmpBossUid'); }}
+                                onDisconnectWorkplace={handleEmpDisconnectWorkplace}
+                                onAddWorkplace={() => setShowEmpJoinScreen(true)}
+                                allWorkplaces={empGoogleWorkplaces}
+                            />
+                        </>
+                    );
+                }
+
+                // ── 기존 PIN 방식 직원 플로우 ──
                 if (!empAccount || empAccount.status === 'pending') {
                     return <PendingApprovalScreen empAccount={empAccount} onLogout={handleLogout} />;
                 }
@@ -920,13 +1276,13 @@
                     )}
                     {showPendingModal && (
                         <PendingApprovalsModal
-                            pendingEmployees={pendingEmployees}
+                            pendingEmployees={allPendingEmployees}
                             onApprove={handleApproveEmployee}
                             onReject={handleRejectEmployee}
                             onClose={() => setShowPendingModal(false)}
                         />
                     )}
-                    
+
                     <header className="bg-green-600 text-white shadow-md relative z-30">
                         <div className="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
                             <h1 className="text-xl font-bold flex items-center gap-2">
@@ -934,11 +1290,11 @@
                                 <span>{workspaceInfo?.shopName || '알바트래커'}</span>
                             </h1>
                             <div className="flex items-center gap-1 md:gap-3">
-                                {pendingEmployees.length > 0 && (
+                                {allPendingEmployees.length > 0 && (
                                     <button onClick={() => setShowPendingModal(true)} className="relative flex items-center gap-1 text-sm bg-yellow-500 hover:bg-yellow-400 text-white px-2 md:px-3 py-1.5 rounded-md transition font-bold">
                                         <Users className="w-4 h-4" />
                                         <span className="hidden sm:inline">가입 대기</span>
-                                        <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full w-4 h-4 flex items-center justify-center">{pendingEmployees.length}</span>
+                                        <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full w-4 h-4 flex items-center justify-center">{allPendingEmployees.length}</span>
                                     </button>
                                 )}
                                 {isSyncing ? (
@@ -1021,8 +1377,8 @@
                                 >
                                     <tab.icon className="w-4 h-4" />
                                     {tab.label}
-                                    {tab.id === 'invite' && pendingEmployees.length > 0 && (
-                                        <span className="absolute top-2 right-1 bg-red-500 text-white text-[10px] rounded-full w-4 h-4 flex items-center justify-center font-bold">{pendingEmployees.length}</span>
+                                    {tab.id === 'invite' && allPendingEmployees.length > 0 && (
+                                        <span className="absolute top-2 right-1 bg-red-500 text-white text-[10px] rounded-full w-4 h-4 flex items-center justify-center font-bold">{allPendingEmployees.length}</span>
                                     )}
                                 </button>
                             ))}
@@ -1074,7 +1430,7 @@
                                 workspaceInfo={workspaceInfo}
                                 setWorkspaceInfo={setWorkspaceInfo}
                                 firebaseUser={firebaseUser}
-                                pendingEmployees={pendingEmployees}
+                                pendingEmployees={allPendingEmployees}
                                 onApprove={handleApproveEmployee}
                                 onReject={handleRejectEmployee}
                                 showAlert={showAlert}
@@ -1114,8 +1470,8 @@
                                 >
                                     <tab.icon className={`w-5 h-5 ${activeTab === tab.id ? 'text-green-600' : 'text-gray-400'}`} />
                                     {tab.label}
-                                    {tab.id === 'invite' && pendingEmployees.length > 0 && (
-                                        <span className="absolute top-1.5 right-2 bg-red-500 text-white text-[9px] rounded-full w-3.5 h-3.5 flex items-center justify-center font-bold">{pendingEmployees.length}</span>
+                                    {tab.id === 'invite' && allPendingEmployees.length > 0 && (
+                                        <span className="absolute top-1.5 right-2 bg-red-500 text-white text-[9px] rounded-full w-3.5 h-3.5 flex items-center justify-center font-bold">{allPendingEmployees.length}</span>
                                     )}
                                 </button>
                             ))}
@@ -1213,7 +1569,7 @@
         // 새 컴포넌트: 랜딩/직원가입/직원앱
         // ============================================================
 
-        function LandingScreen({ onBossLogin, modalConfig }) {
+        function LandingScreen({ onBossLogin, onEmpGoogleLogin, modalConfig }) {
             const [showEmpEntry, setShowEmpEntry] = useState(false);
             if (showEmpEntry) return <EmployeeEntryScreen onBack={() => setShowEmpEntry(false)} />;
             return (
@@ -1226,6 +1582,7 @@
                         <h2 className="text-2xl font-bold text-gray-800 mb-2">알바트래커</h2>
                         <p className="text-gray-500 mb-8 text-sm">근무 관리를 시작해볼까요?</p>
                         <div className="space-y-3">
+                            {/* 관리자 Google 로그인 */}
                             <button onClick={onBossLogin} className="w-full flex items-center justify-center gap-3 border border-gray-300 rounded-xl py-3 px-4 hover:bg-gray-50 transition font-medium text-gray-700 shadow-sm">
                                 <svg className="w-5 h-5" viewBox="0 0 24 24">
                                     <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
@@ -1235,15 +1592,226 @@
                                 </svg>
                                 관리자로 로그인 (Google)
                             </button>
+
                             <div className="relative">
                                 <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-gray-200"></div></div>
-                                <div className="relative flex justify-center"><span className="bg-white px-2 text-xs text-gray-400">또는</span></div>
+                                <div className="relative flex justify-center"><span className="bg-white px-2 text-xs text-gray-400">직원</span></div>
                             </div>
-                            <button onClick={() => setShowEmpEntry(true)} className="w-full flex items-center justify-center gap-3 bg-blue-600 text-white rounded-xl py-3 px-4 hover:bg-blue-700 transition font-medium shadow-sm">
-                                <Users className="w-5 h-5" />
-                                직원으로 로그인 / 가입
+
+                            {/* 직원 Google 로그인 (신규) */}
+                            <button onClick={onEmpGoogleLogin} className="w-full flex items-center justify-center gap-3 bg-blue-600 text-white rounded-xl py-3 px-4 hover:bg-blue-700 transition font-medium shadow-sm">
+                                <svg className="w-5 h-5" viewBox="0 0 24 24">
+                                    <path fill="white" opacity="0.9" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+                                    <path fill="white" opacity="0.9" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+                                    <path fill="white" opacity="0.9" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z"/>
+                                    <path fill="white" opacity="0.9" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+                                </svg>
+                                직원으로 로그인 (Google)
+                            </button>
+
+                            {/* 기존 PIN 방식 직원 (하위 호환) */}
+                            <button onClick={() => setShowEmpEntry(true)} className="w-full text-xs text-gray-400 hover:text-gray-600 transition py-1">
+                                기존 PIN 방식 직원 로그인
                             </button>
                         </div>
+                    </div>
+                </div>
+            );
+        }
+
+        // ─── Google 직원: 업체 선택 화면 ───
+        function WorkplaceSelectScreen({ workplaces, firebaseUser, onSelect, onAddWorkplace, onLogout }) {
+            const active = workplaces.filter(w => w.status !== 'disconnected');
+            const approved = active.filter(w => w.status === 'approved');
+            const pending = active.filter(w => w.status === 'pending');
+            const rejected = active.filter(w => w.status === 'rejected');
+
+            return (
+                <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-4">
+                    <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm overflow-hidden">
+                        <div className="bg-blue-600 text-white p-6 text-center">
+                            <div className="bg-white/20 w-14 h-14 rounded-full flex items-center justify-center mx-auto mb-3">
+                                <Users className="w-7 h-7" />
+                            </div>
+                            <h2 className="text-lg font-bold">업체 선택</h2>
+                            <p className="text-blue-100 text-xs mt-1">{firebaseUser?.email}</p>
+                        </div>
+                        <div className="p-5 space-y-3">
+                            {approved.length > 0 && (
+                                <div>
+                                    <p className="text-xs font-bold text-gray-500 mb-2">근무 중인 업체</p>
+                                    {approved.map(wp => (
+                                        <button key={wp.bossUid} onClick={() => onSelect(wp.bossUid)}
+                                            className="w-full text-left p-4 rounded-xl border-2 border-blue-200 bg-blue-50 hover:bg-blue-100 transition mb-2">
+                                            <p className="font-bold text-gray-800">{wp.shopName || '업체명 없음'}</p>
+                                            <p className="text-xs text-gray-500 mt-0.5">{wp.name} · 승인완료</p>
+                                        </button>
+                                    ))}
+                                </div>
+                            )}
+                            {pending.length > 0 && (
+                                <div>
+                                    <p className="text-xs font-bold text-gray-500 mb-2">승인 대기 중</p>
+                                    {pending.map(wp => (
+                                        <div key={wp.bossUid} className="p-4 rounded-xl border border-yellow-200 bg-yellow-50 mb-2">
+                                            <p className="font-bold text-gray-700">{wp.shopName || '업체명 없음'}</p>
+                                            <p className="text-xs text-yellow-600 mt-0.5">관리자 승인을 기다리고 있습니다</p>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                            {rejected.length > 0 && (
+                                <div>
+                                    <p className="text-xs font-bold text-gray-500 mb-2">거절됨</p>
+                                    {rejected.map(wp => (
+                                        <div key={wp.bossUid} className="p-3 rounded-xl border border-red-200 bg-red-50 mb-2">
+                                            <p className="font-bold text-gray-700 text-sm">{wp.shopName || '업체명 없음'}</p>
+                                            <p className="text-xs text-red-500 mt-0.5">가입이 거절되었습니다</p>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                            <button onClick={onAddWorkplace}
+                                className="w-full py-3 border-2 border-dashed border-gray-300 rounded-xl text-gray-500 hover:border-blue-400 hover:text-blue-600 transition text-sm font-medium">
+                                + 새 업체 초대코드 입력
+                            </button>
+                            <button onClick={onLogout} className="w-full py-2.5 text-xs text-gray-400 hover:text-gray-600 transition">
+                                로그아웃
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        // ─── Google 직원: 새 업체 가입 화면 ───
+        function EmpGoogleJoinScreen({ firebaseUser, empGoogleWorkplaces, onJoined, onBack, onLogout, showAlert }) {
+            const [step, setStep] = useState('code'); // code → name → profile → done
+            const [code, setCode] = useState('');
+            const [inviteInfo, setInviteInfo] = useState(null);
+            const [name, setName] = useState(firebaseUser?.displayName || '');
+            const [profile, setProfile] = useState({ residentId: '', bank: '', account: '' });
+            const [loading, setLoading] = useState(false);
+            const [error, setError] = useState('');
+
+            const handleCodeNext = async () => {
+                if (code.trim().length !== 6) { setError('초대코드 6자리를 입력해주세요.'); return; }
+                setLoading(true); setError('');
+                try {
+                    // 이미 이 업체에 가입 신청했는지 확인
+                    const existingWp = empGoogleWorkplaces.find(w => w.inviteCode === code.trim().toUpperCase());
+                    if (existingWp) {
+                        if (existingWp.status === 'pending') { setError('이미 이 업체에 가입 신청 중입니다.'); setLoading(false); return; }
+                        if (existingWp.status === 'approved') { setError('이미 이 업체에 승인된 계정이 있습니다.'); setLoading(false); return; }
+                    }
+                    const doc = await fbDb.collection('inviteCodes').doc(code.trim().toUpperCase()).get();
+                    if (!doc.exists) { setError('유효하지 않은 초대코드입니다.'); setLoading(false); return; }
+                    // 퇴사 후 재입사: 이미 해당 업체(bossUid)의 workspace가 있으면 재활성화
+                    const bossUid = doc.data().bossUid;
+                    const existingBossWp = empGoogleWorkplaces.find(w => w.bossUid === bossUid && w.status !== 'disconnected');
+                    if (existingBossWp && existingBossWp.status === 'approved') {
+                        showAlert('이미 이 업체에 승인된 계정이 있습니다.\n업체 선택 화면에서 선택해 주세요.', '안내', 'info');
+                        setLoading(false); onBack(); return;
+                    }
+                    setInviteInfo(doc.data());
+                    setStep('name');
+                } catch(e) { setError('오류: ' + e.message); }
+                setLoading(false);
+            };
+
+            const formatResidentId = (raw) => {
+                const digits = raw.replace(/[^0-9]/g, '').slice(0, 13);
+                return digits.length > 6 ? `${digits.slice(0,6)}-${digits.slice(6)}` : digits;
+            };
+
+            const handleSubmit = async () => {
+                if (!name.trim()) { setError('이름을 입력해주세요.'); return; }
+                setLoading(true); setError('');
+                try {
+                    await createGoogleEmpJoinRequest(
+                        firebaseUser.uid, firebaseUser.email, name.trim(),
+                        inviteInfo, code.trim().toUpperCase(), profile
+                    );
+                    const newWp = {
+                        bossUid: inviteInfo.bossUid, empUid: firebaseUser.uid,
+                        shopName: inviteInfo.shopName, status: 'pending',
+                        employeeId: null, inviteCode: code.trim().toUpperCase(),
+                        name: name.trim(), residentId: profile.residentId, bank: profile.bank, account: profile.account
+                    };
+                    onJoined(newWp);
+                } catch(e) { setError('가입 실패: ' + e.message); }
+                setLoading(false);
+            };
+
+            return (
+                <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-4">
+                    <div className="bg-white p-8 rounded-2xl shadow-xl w-full max-w-sm">
+                        <button onClick={onBack} className="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700 mb-6">
+                            <ChevronLeft className="w-4 h-4" /> 뒤로
+                        </button>
+
+                        {step === 'code' && (
+                            <div className="text-center">
+                                <div className="bg-blue-100 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
+                                    <Users className="w-8 h-8 text-blue-600" />
+                                </div>
+                                <h2 className="text-xl font-bold text-gray-800 mb-1">업체 등록</h2>
+                                <p className="text-gray-500 text-sm mb-6">관리자께 받은 초대코드를 입력하세요</p>
+                                <input value={code} onChange={e => setCode(e.target.value.toUpperCase())}
+                                    onKeyDown={e => e.key === 'Enter' && handleCodeNext()}
+                                    className="w-full text-center text-2xl font-bold tracking-widest border-2 border-gray-300 rounded-xl py-3 focus:border-blue-500 outline-none uppercase mb-3"
+                                    maxLength={6} placeholder="XXXXXX" />
+                                {error && <p className="text-red-500 text-sm mb-3">{error}</p>}
+                                <button onClick={handleCodeNext} disabled={loading}
+                                    className="w-full bg-blue-600 text-white py-3 rounded-xl font-bold hover:bg-blue-700 transition disabled:opacity-50">
+                                    {loading ? '확인 중...' : '다음'}
+                                </button>
+                            </div>
+                        )}
+
+                        {step === 'name' && (
+                            <div>
+                                <div className="bg-green-50 border border-green-200 rounded-xl py-2 px-4 mb-6 text-center">
+                                    <p className="text-green-700 font-bold text-sm">{inviteInfo?.shopName}</p>
+                                </div>
+                                <h2 className="text-lg font-bold text-gray-800 mb-1">이름 & 프로필 입력</h2>
+                                <p className="text-gray-500 text-xs mb-5">실명을 입력하세요 (나중에 수정 가능)</p>
+                                <div className="space-y-3 mb-5">
+                                    <div>
+                                        <label className="block text-xs font-bold text-gray-600 mb-1">이름 *</label>
+                                        <input value={name} onChange={e => setName(e.target.value)}
+                                            className="w-full border-2 border-gray-300 rounded-xl py-2.5 px-4 focus:border-blue-500 outline-none text-sm"
+                                            placeholder="홍길동" />
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs font-bold text-gray-600 mb-1">주민번호 (선택)</label>
+                                        <input value={profile.residentId}
+                                            onChange={e => setProfile(p => ({ ...p, residentId: formatResidentId(e.target.value) }))}
+                                            className="w-full border-2 border-gray-300 rounded-xl py-2.5 px-4 focus:border-blue-500 outline-none text-sm font-mono tracking-wider"
+                                            placeholder="000000-0000000" />
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-2">
+                                        <div>
+                                            <label className="block text-xs font-bold text-gray-600 mb-1">은행명 (선택)</label>
+                                            <input value={profile.bank} onChange={e => setProfile(p => ({ ...p, bank: e.target.value }))}
+                                                className="w-full border-2 border-gray-300 rounded-xl py-2.5 px-3 focus:border-blue-500 outline-none text-sm"
+                                                placeholder="국민은행" />
+                                        </div>
+                                        <div>
+                                            <label className="block text-xs font-bold text-gray-600 mb-1">계좌번호 (선택)</label>
+                                            <input value={profile.account} onChange={e => setProfile(p => ({ ...p, account: e.target.value }))}
+                                                className="w-full border-2 border-gray-300 rounded-xl py-2.5 px-3 focus:border-blue-500 outline-none text-sm"
+                                                placeholder="123-456-789" />
+                                        </div>
+                                    </div>
+                                </div>
+                                {error && <p className="text-red-500 text-sm mb-3">{error}</p>}
+                                <button onClick={handleSubmit} disabled={loading}
+                                    className="w-full bg-green-600 text-white py-3 rounded-xl font-bold hover:bg-green-700 transition disabled:opacity-50">
+                                    {loading ? '신청 중...' : '가입 신청'}
+                                </button>
+                            </div>
+                        )}
                     </div>
                 </div>
             );
@@ -1479,7 +2047,7 @@
             );
         }
 
-        function PendingApprovalScreen({ empAccount, onLogout }) {
+        function PendingApprovalScreen({ empAccount, onLogout, onBack }) {
             return (
                 <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
                     <div className="bg-white p-8 rounded-2xl shadow-xl w-full max-w-sm text-center">
@@ -1487,11 +2055,19 @@
                             <svg className="w-10 h-10 text-yellow-500 animate-pulse" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
                         </div>
                         <h2 className="text-xl font-bold text-gray-800 mb-2">승인 대기 중</h2>
+                        {empAccount?.shopName && (
+                            <p className="text-blue-600 font-bold text-sm mb-1">{empAccount.shopName}</p>
+                        )}
                         <p className="text-gray-500 text-sm mb-2">
                             <span className="font-bold text-gray-700">{empAccount?.name || ''}님</span>의 가입 신청이<br/>
                             관리자 승인을 기다리고 있습니다.
                         </p>
                         <p className="text-xs text-gray-400 mb-8">관리자가 승인하면 자동으로 접속됩니다.</p>
+                        {onBack && (
+                            <button onClick={onBack} className="w-full bg-blue-50 text-blue-600 py-3 rounded-xl font-medium hover:bg-blue-100 transition mb-2">
+                                업체 목록으로 돌아가기
+                            </button>
+                        )}
                         <button onClick={onLogout} className="w-full bg-gray-200 text-gray-700 py-3 rounded-xl font-medium hover:bg-gray-300 transition">
                             로그아웃
                         </button>
@@ -1669,7 +2245,7 @@
             );
         }
 
-        function EmployeeApp({ empAccount, firebaseUser, mySubmissions, notifications, onLogout, onLock, showAlert, showConfirm, modalConfig }) {
+        function EmployeeApp({ empAccount, firebaseUser, mySubmissions, notifications, onLogout, onLock, showAlert, showConfirm, modalConfig, onSwitchWorkplace, onDisconnectWorkplace, onAddWorkplace, allWorkplaces }) {
             const [activeTab, setActiveTab] = useState('calendar');
             const [today] = useState(new Date());
             const [year, setYear] = useState(today.getFullYear());
@@ -1722,13 +2298,21 @@
                     <header className="bg-blue-600 text-white shadow-md">
                         <div className="max-w-lg mx-auto px-4 h-16 flex items-center justify-between">
                             <div>
-                                <p className="text-xs text-blue-200">직원</p>
+                                <p className="text-xs text-blue-200">{empAccount?.shopName || '직원'}</p>
                                 <h1 className="text-lg font-bold">{empAccount?.name}님</h1>
                             </div>
-                            <div className="flex items-center gap-2">
-                                <button onClick={onLock} className="p-2 rounded-lg hover:bg-blue-700 transition" title="잠금">
-                                    <Lock className="w-5 h-5" />
-                                </button>
+                            <div className="flex items-center gap-1">
+                                {/* Google 직원: 업체 전환 버튼 */}
+                                {onSwitchWorkplace && (allWorkplaces?.filter(w=>w.status!=='disconnected').length > 1 || onAddWorkplace) && (
+                                    <button onClick={onSwitchWorkplace} className="px-2 py-1.5 rounded-lg hover:bg-blue-700 transition text-xs font-bold bg-blue-500" title="업체 전환">
+                                        업체전환
+                                    </button>
+                                )}
+                                {!empAccount?.isGoogleEmployee && (
+                                    <button onClick={onLock} className="p-2 rounded-lg hover:bg-blue-700 transition" title="잠금">
+                                        <Lock className="w-5 h-5" />
+                                    </button>
+                                )}
                                 <button onClick={onLogout} className="p-2 rounded-lg hover:bg-blue-700 transition" title="로그아웃">
                                     <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" x2="9" y1="12" y2="12"/></svg>
                                 </button>
@@ -1826,7 +2410,14 @@
                         )}
 
                         {activeTab === 'myinfo' && (
-                            <EmpProfileTab empAccount={empAccount} firebaseUser={firebaseUser} showAlert={showAlert} />
+                            <EmpProfileTab
+                                empAccount={empAccount}
+                                firebaseUser={firebaseUser}
+                                showAlert={showAlert}
+                                onDisconnectWorkplace={onDisconnectWorkplace && empAccount?.bossUid
+                                    ? () => onDisconnectWorkplace(empAccount.bossUid)
+                                    : null}
+                            />
                         )}
                     </main>
 
@@ -1881,7 +2472,7 @@
         }
 
         // 직원 내 정보 탭
-        function EmpProfileTab({ empAccount, firebaseUser, showAlert }) {
+        function EmpProfileTab({ empAccount, firebaseUser, showAlert, onDisconnectWorkplace }) {
             const [formData, setFormData] = useState({
                 residentId: empAccount?.residentId || '',
                 bank: empAccount?.bank || '',
@@ -1897,11 +2488,22 @@
             const handleSave = async () => {
                 setSaving(true);
                 try {
-                    await fbDb.collection('employeeAccounts').doc(firebaseUser.uid).update({
-                        residentId: formData.residentId,
-                        bank: formData.bank,
-                        account: formData.account
-                    });
+                    if (empAccount?.isGoogleEmployee && empAccount?.bossUid) {
+                        // Google 직원: 워크플레이스 서브컬렉션에 저장
+                        await fbDb.collection('employeeAccounts').doc(firebaseUser.uid)
+                            .collection('workplaces').doc(empAccount.bossUid)
+                            .update({
+                                residentId: formData.residentId,
+                                bank: formData.bank,
+                                account: formData.account
+                            });
+                    } else {
+                        await fbDb.collection('employeeAccounts').doc(firebaseUser.uid).update({
+                            residentId: formData.residentId,
+                            bank: formData.bank,
+                            account: formData.account
+                        });
+                    }
                     showAlert('정보가 저장되었습니다.', '저장 완료', 'success');
                 } catch(e) {
                     showAlert('저장 실패: ' + e.message, '오류', 'error');
@@ -1945,6 +2547,18 @@
                             {saving ? '저장 중...' : '저장하기'}
                         </button>
                     </div>
+
+                    {/* Google 직원: 업체 연결 해제 */}
+                    {empAccount?.isGoogleEmployee && onDisconnectWorkplace && (
+                        <div className="bg-white rounded-xl border border-red-200 shadow-sm p-6">
+                            <h3 className="text-base font-bold text-red-700 mb-1">업체 연결 해제</h3>
+                            <p className="text-sm text-gray-500 mb-4">이 업체와의 연결을 끊습니다. 관리자의 근무자 카드는 삭제되지 않으며, 기록은 관리자에게 유지됩니다.</p>
+                            <button onClick={onDisconnectWorkplace}
+                                className="w-full border-2 border-red-400 text-red-600 py-3 rounded-xl font-bold hover:bg-red-50 transition">
+                                {empAccount.shopName || '이 업체'} 연결 해제
+                            </button>
+                        </div>
+                    )}
                 </div>
             );
         }

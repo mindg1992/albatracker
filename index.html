@@ -5721,30 +5721,31 @@
 
             return (
                 <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[10000] p-4" onClick={onClose}>
-                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg" onClick={e => e.stopPropagation()}>
+                    <div className="rounded-2xl shadow-2xl w-full max-w-lg" style={{ backgroundColor: 'white', color: '#111' }} onClick={e => e.stopPropagation()}>
                         <div className="px-5 pt-5 pb-3 flex items-center justify-between">
-                            <h3 className="text-base font-bold text-gray-800">서명하기</h3>
-                            <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl leading-none">✕</button>
+                            <h3 className="text-base font-bold" style={{ color: '#1f2937' }}>서명하기</h3>
+                            <button onClick={onClose} className="text-xl leading-none" style={{ color: '#9ca3af' }}>✕</button>
                         </div>
                         <div className="px-5 pb-2 relative">
                             <canvas ref={canvasRef} width={600} height={260}
-                                className="border-2 border-dashed border-gray-300 rounded-xl touch-none cursor-crosshair w-full"
-                                style={{ touchAction: 'none', backgroundColor: 'white', display: 'block' }}
+                                className="rounded-xl touch-none cursor-crosshair w-full"
+                                style={{ touchAction: 'none', backgroundColor: 'white', display: 'block', border: '2px dashed #d1d5db' }}
                                 onMouseDown={startDraw} onMouseMove={draw}
                                 onMouseUp={() => setIsDrawing(false)} onMouseLeave={() => setIsDrawing(false)}
                                 onTouchStart={startDraw} onTouchMove={draw} onTouchEnd={() => setIsDrawing(false)}
                             />
                             {!hasDrawn && (
-                                <p className="absolute inset-0 mx-5 flex items-center justify-center text-gray-400 text-sm pointer-events-none">여기에 서명하세요</p>
+                                <p className="absolute inset-0 mx-5 flex items-center justify-center text-sm pointer-events-none" style={{ color: '#9ca3af' }}>여기에 서명하세요</p>
                             )}
                             {hasDrawn && (
-                                <button onClick={clear} className="absolute top-3 right-7 bg-red-100 text-red-600 text-xs px-2 py-1 rounded-lg hover:bg-red-200 transition">지우기</button>
+                                <button onClick={clear} className="absolute top-3 right-7 text-xs px-2 py-1 rounded-lg transition" style={{ backgroundColor: '#fee2e2', color: '#dc2626' }}>지우기</button>
                             )}
                         </div>
                         <div className="px-5 pb-5 flex gap-3 mt-3">
-                            <button onClick={onClose} className="flex-1 py-3 border border-gray-200 rounded-xl text-gray-600 text-sm font-medium hover:bg-gray-50 transition">취소</button>
+                            <button onClick={onClose} className="flex-1 py-3 rounded-xl text-sm font-medium transition" style={{ border: '1px solid #e5e7eb', backgroundColor: 'white', color: '#4b5563' }}>취소</button>
                             <button onClick={handleConfirm} disabled={!hasDrawn}
-                                className={`flex-1 py-3 rounded-xl text-sm font-bold transition ${hasDrawn ? 'bg-green-500 text-white hover:bg-green-600' : 'bg-gray-200 text-gray-400 cursor-not-allowed'}`}>
+                                className="flex-1 py-3 rounded-xl text-sm font-bold transition"
+                                style={{ backgroundColor: hasDrawn ? '#22c55e' : '#e5e7eb', color: hasDrawn ? 'white' : '#9ca3af', cursor: hasDrawn ? 'pointer' : 'not-allowed' }}>
                                 완료
                             </button>
                         </div>

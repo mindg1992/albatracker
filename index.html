@@ -274,28 +274,32 @@
             return code;
         }
 
-        async function setupBossWorkspace(bossUid, shopName) {
+        // workspaceId = 워크스페이스 ID (관리자 uid 또는 uid__ws{timestamp})
+        // ownerUid = 실제 Google 계정 uid (여러 업체의 소유자 식별용)
+        async function setupBossWorkspace(workspaceId, shopName, ownerUid) {
             const inviteCode = generateInviteCode();
             const batch = fbDb.batch();
-            batch.set(fbDb.collection('workspaces').doc(bossUid), {
-                shopName, inviteCode, bossUid,
+            batch.set(fbDb.collection('workspaces').doc(workspaceId), {
+                shopName, inviteCode,
+                bossUid: workspaceId,       // 초대/직원 연결용 ID (= workspaceId)
+                ownerUid: ownerUid || workspaceId,  // 실제 소유자 Google uid
                 createdAt: firebase.firestore.FieldValue.serverTimestamp()
             });
             batch.set(fbDb.collection('inviteCodes').doc(inviteCode), {
-                bossUid, shopName,
+                bossUid: workspaceId, shopName,
                 createdAt: firebase.firestore.FieldValue.serverTimestamp()
             });
             await batch.commit();
             return inviteCode;
         }
 
-        async function regenerateInviteCode(bossUid, oldCode, shopName) {
+        async function regenerateInviteCode(workspaceId, oldCode, shopName) {
             const newCode = generateInviteCode();
             const batch = fbDb.batch();
             if (oldCode) batch.delete(fbDb.collection('inviteCodes').doc(oldCode));
-            batch.update(fbDb.collection('workspaces').doc(bossUid), { inviteCode: newCode });
+            batch.update(fbDb.collection('workspaces').doc(workspaceId), { inviteCode: newCode });
             batch.set(fbDb.collection('inviteCodes').doc(newCode), {
-                bossUid, shopName: shopName || '',
+                bossUid: workspaceId, shopName: shopName || '',
                 createdAt: firebase.firestore.FieldValue.serverTimestamp()
             });
             await batch.commit();
@@ -441,6 +445,12 @@
             const [pendingGoogleEmployees, setPendingGoogleEmployees] = useState([]);
             const [showPendingModal, setShowPendingModal] = useState(false);
 
+            // === 관리자 다중 업체 상태 ===
+            const [currentWorkspaceId, setCurrentWorkspaceId] = useState(null);
+            const [bossWorkspaceList, setBossWorkspaceList] = useState([]);
+            const [bossSetupWorkspaceId, setBossSetupWorkspaceId] = useState(null);
+            const [showBossWorkspaceSelect, setShowBossWorkspaceSelect] = useState(false);
+
             // === Google 직원 전용 상태 ===
             const [empGoogleWorkplaces, setEmpGoogleWorkplaces] = useState([]);
             const [selectedEmpBossUid, setSelectedEmpBossUid] = useState(() =>
@@ -481,14 +491,14 @@
                 return () => unsubscribeAuth();
             }, []);
 
-            // 역할 감지: Google 계정 = 관리자 또는 Google 직원, @emp.albatracker.page = 기존 직원
+            // 역할 감지: loginRole localStorage로 구분 (같은 Google 계정이 관리자/직원 모두 가능)
             useEffect(() => {
                 if (!firebaseUser) return;
                 let cancelled = false;
 
                 const isGoogleUser = firebaseUser.providerData?.some(p => p.providerId === 'google.com');
 
-                // 기존 직원 (이메일+PIN 방식)
+                // 기존 직원 (이메일+PIN 방식) — loginRole 무관하게 이메일로 판단
                 if (!isGoogleUser && firebaseUser.email?.includes('@emp.albatracker.page')) {
                     let attempts = 0;
                     const tryLoad = () => {
@@ -515,35 +525,41 @@
                     return () => { cancelled = true; };
                 }
 
-                // Google 계정: employeeAccounts 문서의 isGoogleEmployee 플래그로 구분
-                fbDb.collection('employeeAccounts').doc(firebaseUser.uid).get()
-                    .then(doc => {
-                        if (cancelled) return;
-                        if (doc.exists && doc.data().isGoogleEmployee) {
-                            // Google 직원 계정
+                // Google 계정: loginRole로 역할 결정 (같은 계정으로 관리자/직원 모두 사용 가능)
+                const loginRole = localStorage.getItem('albaLoginRole');
+                if (loginRole === 'employee') {
+                    // 직원 역할로 로그인
+                    fbDb.collection('employeeAccounts').doc(firebaseUser.uid).get()
+                        .then(doc => {
+                            if (cancelled) return;
+                            const data = doc.exists ? doc.data() : {};
                             setUserRole('employee');
-                            setEmpAccount({ ...doc.data(), uid: firebaseUser.uid });
+                            setEmpAccount({ ...data, isGoogleEmployee: true, uid: firebaseUser.uid });
                             setFbLoading(false);
-                        } else {
-                            // 관리자 계정
-                            setUserRole('boss');
-                            // fbLoading은 데이터 로딩 useEffect에서 해제
-                        }
-                    })
-                    .catch(() => {
-                        if (!cancelled) { setUserRole('boss'); }
-                    });
+                        })
+                        .catch(() => {
+                            if (!cancelled) {
+                                setUserRole('employee');
+                                setEmpAccount({ isGoogleEmployee: true, uid: firebaseUser.uid });
+                                setFbLoading(false);
+                            }
+                        });
+                } else {
+                    // 관리자 역할로 로그인 (기본값)
+                    setUserRole('boss');
+                    // fbLoading은 데이터 로딩 useEffect에서 해제
+                }
 
                 return () => { cancelled = true; };
             }, [firebaseUser]);
 
             // 인증 완료 후 데이터 로딩 (localStorage 캐시 우선 → Firestore 서버 동기화) — 관리자 전용
             useEffect(() => {
-                if (!firebaseUser || userRole !== 'boss') return;
+                if (!firebaseUser || userRole !== 'boss' || !currentWorkspaceId) return;
 
                 let cancelled = false;
-                const cacheKey = 'at_cache_' + firebaseUser.uid;
-                const docRef = fbDb.collection('users').doc(firebaseUser.uid);
+                const cacheKey = 'at_cache_' + currentWorkspaceId;
+                const docRef = fbDb.collection('users').doc(currentWorkspaceId);
 
                 const applyData = (d) => {
                     if (cancelled) return;
@@ -619,7 +635,7 @@
                 syncFromServer();
 
                 return () => { cancelled = true; };
-            }, [firebaseUser, userRole]);
+            }, [firebaseUser, userRole, currentWorkspaceId]);
 
             const saveTimerRef = useRef(null);
             const [saveSuccess, setSaveSuccess] = useState(false);
@@ -627,13 +643,13 @@
             const saveSuccessTimerRef = useRef(null);
 
             useEffect(() => {
-                if (!firebaseUser || fbLoading || userRole !== 'boss') return;
+                if (!firebaseUser || fbLoading || userRole !== 'boss' || !currentWorkspaceId) return;
 
                 const currentData = { appPin, employees, nextEmpId, monthlyData, predictData, globalMinWage };
                 const currentDataStr = JSON.stringify(currentData);
 
                 // ① localStorage 즉시 저장 — 앱을 바로 닫아도 이 기기에선 데이터 보존
-                localStorage.setItem('at_cache_' + firebaseUser.uid, JSON.stringify(currentData));
+                localStorage.setItem('at_cache_' + currentWorkspaceId, JSON.stringify(currentData));
 
                 // ② Firestore 동기화 — 이미 서버와 동일하면 건너뜀
                 if (currentDataStr === lastSyncedDataRef.current) return;
@@ -642,7 +658,7 @@
                 if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
                 saveTimerRef.current = setTimeout(() => {
                     setIsSyncing(true);
-                    fsSet(fbDb.collection('users').doc(firebaseUser.uid), currentData)
+                    fsSet(fbDb.collection('users').doc(currentWorkspaceId), currentData)
                         .then(() => {
                             lastSyncedDataRef.current = currentDataStr;
                             setIsSyncing(false);
@@ -659,7 +675,7 @@
                         });
                 }, 2000);
                 return () => clearTimeout(saveTimerRef.current);
-            }, [appPin, employees, nextEmpId, monthlyData, predictData, globalMinWage, firebaseUser, fbLoading, userRole]);
+            }, [appPin, employees, nextEmpId, monthlyData, predictData, globalMinWage, firebaseUser, fbLoading, userRole, currentWorkspaceId]);
 
             // 저장 버튼 — localStorage 즉시 저장 후 Firestore 동기화
             const handleManualSave = () => {
@@ -673,10 +689,11 @@
                 if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
 
                 // localStorage 즉시 저장 (이 기기 데이터 보호)
-                localStorage.setItem('at_cache_' + firebaseUser.uid, JSON.stringify(currentData));
+                const wsId = currentWorkspaceId || firebaseUser.uid;
+                localStorage.setItem('at_cache_' + wsId, JSON.stringify(currentData));
 
                 setIsSyncing(true);
-                fsSet(fbDb.collection('users').doc(firebaseUser.uid), currentData)
+                fsSet(fbDb.collection('users').doc(wsId), currentData)
                     .then(() => {
                         lastSyncedDataRef.current = JSON.stringify(currentData);
                         setIsSyncing(false);
@@ -712,6 +729,7 @@
 
             const handleGoogleLogin = async () => {
                 if (checkInAppBrowser()) return;
+                localStorage.setItem('albaLoginRole', 'boss');  // 역할 선택: 관리자
                 setFbLoading(true);
                 const provider = new firebase.auth.GoogleAuthProvider();
                 try {
@@ -722,17 +740,18 @@
                 }
             };
 
-            // Google 직원 로그인 — isGoogleEmployee 플래그 설정 후 동일한 Google OAuth 사용
+            // Google 직원 로그인 — loginRole='employee' 저장 후 동일한 Google OAuth 사용
             const handleEmpGoogleLogin = async () => {
                 if (checkInAppBrowser()) return;
+                localStorage.setItem('albaLoginRole', 'employee');  // 역할 선택: 직원
                 setFbLoading(true);
                 const provider = new firebase.auth.GoogleAuthProvider();
                 try {
                     const result = await fbAuth.signInWithPopup(provider);
-                    const uid = result.user.uid;
-                    // 직원 계정 문서 생성 (없을 경우)
-                    await ensureGoogleEmpAccount(uid, result.user.email, result.user.displayName);
+                    // 직원 계정 문서 보장 (없을 경우 생성)
+                    await ensureGoogleEmpAccount(result.user.uid, result.user.email, result.user.displayName);
                 } catch(e) {
+                    localStorage.removeItem('albaLoginRole');  // 실패시 롤백
                     setFbLoading(false);
                     showAlert('Google 로그인에 실패했습니다.\n' + e.message, '오류', 'error');
                 }
@@ -761,7 +780,11 @@
                     setEmpGoogleWorkplaces([]);
                     setSelectedEmpBossUid(null);
                     setShowEmpJoinScreen(false);
+                    setCurrentWorkspaceId(null);
+                    setBossWorkspaceList([]);
                     localStorage.removeItem('selectedEmpBossUid');
+                    localStorage.removeItem('albaLoginRole');
+                    localStorage.removeItem('bossWorkspaceId');
                 });
             };
 
@@ -785,6 +808,51 @@
                     '업체 연결 끊기'
                 );
             };
+
+            // 관리자 업체(workspaces) 목록 로드 — 다중 업체 지원
+            useEffect(() => {
+                if (!firebaseUser || userRole !== 'boss') return;
+                let cancelled = false;
+
+                fbDb.collection('bossWorkspaces').doc(firebaseUser.uid).get()
+                    .then(async doc => {
+                        if (cancelled) return;
+                        let workspaceIds;
+                        if (doc.exists && doc.data().workspaceIds?.length) {
+                            workspaceIds = doc.data().workspaceIds;
+                        } else {
+                            // 첫 사용자: 기본 업체(= uid) 등록
+                            workspaceIds = [firebaseUser.uid];
+                            fbDb.collection('bossWorkspaces').doc(firebaseUser.uid).set({
+                                workspaceIds: [firebaseUser.uid],
+                                createdAt: firebase.firestore.FieldValue.serverTimestamp()
+                            }).catch(() => {});
+                        }
+
+                        // 각 워크스페이스의 shopName 로드
+                        const details = await Promise.all(
+                            workspaceIds.map(id =>
+                                fbDb.collection('workspaces').doc(id).get()
+                                    .then(d => ({ id, shopName: d.exists ? (d.data().shopName || '') : '' }))
+                                    .catch(() => ({ id, shopName: '' }))
+                            )
+                        );
+                        if (cancelled) return;
+                        setBossWorkspaceList(details);
+
+                        // 저장된 업체 또는 첫 번째 업체 자동 선택
+                        const savedId = localStorage.getItem('bossWorkspaceId');
+                        if (savedId && workspaceIds.includes(savedId)) {
+                            setCurrentWorkspaceId(savedId);
+                        } else {
+                            setCurrentWorkspaceId(workspaceIds[0]);
+                            localStorage.setItem('bossWorkspaceId', workspaceIds[0]);
+                        }
+                    })
+                    .catch(e => { if (!cancelled) console.error('업체 목록 로드 오류:', e); });
+
+                return () => { cancelled = true; };
+            }, [firebaseUser?.uid, userRole]);
 
             // Google 직원 업체(workplaces) 로드
             useEffect(() => {
@@ -832,24 +900,32 @@
                 return () => { cancelled = true; };
             }, [firebaseUser?.uid, userRole, empAccount?.isGoogleEmployee]);
 
-            // 관리자 워크스페이스 로드
+            // 관리자 워크스페이스 로드 — currentWorkspaceId 기반
             useEffect(() => {
-                if (!firebaseUser || userRole !== 'boss') return;
+                if (!firebaseUser || userRole !== 'boss' || !currentWorkspaceId) return;
                 let cancelled = false;
-                fbDb.collection('workspaces').doc(firebaseUser.uid).get()
+                fbDb.collection('workspaces').doc(currentWorkspaceId).get()
                     .then(doc => {
                         if (cancelled) return;
-                        if (doc.exists) setWorkspaceInfo(doc.data());
-                        else setShowBossSetup(true);
+                        if (doc.exists) {
+                            setWorkspaceInfo(doc.data());
+                            // bossWorkspaceList의 shopName도 최신화
+                            setBossWorkspaceList(prev => prev.map(w =>
+                                w.id === currentWorkspaceId ? { ...w, shopName: doc.data().shopName || '' } : w
+                            ));
+                        } else {
+                            setBossSetupWorkspaceId(currentWorkspaceId);
+                            setShowBossSetup(true);
+                        }
                     }).catch(() => {});
                 return () => { cancelled = true; };
-            }, [firebaseUser, userRole]);
+            }, [firebaseUser, userRole, currentWorkspaceId]);
 
             // 대기 중인 직원 실시간 감지 (관리자) — 기존 PIN 방식
             useEffect(() => {
-                if (!firebaseUser || userRole !== 'boss') return;
+                if (!firebaseUser || userRole !== 'boss' || !currentWorkspaceId) return;
                 const unsub = fbDb.collection('employeeAccounts')
-                    .where('bossUid', '==', firebaseUser.uid)
+                    .where('bossUid', '==', currentWorkspaceId)
                     .where('status', '==', 'pending')
                     .onSnapshot(snap => {
                         const list = [];
@@ -857,25 +933,25 @@
                         setPendingEmployees(list);
                     }, () => {});
                 return () => unsub();
-            }, [firebaseUser, userRole]);
+            }, [firebaseUser, userRole, currentWorkspaceId]);
 
             // Google 직원 대기 감지 (관리자) — empPending 컬렉션
             useEffect(() => {
-                if (!firebaseUser || userRole !== 'boss') return;
+                if (!firebaseUser || userRole !== 'boss' || !currentWorkspaceId) return;
                 const unsub = fbDb.collection('empPending')
-                    .where('bossUid', '==', firebaseUser.uid)
+                    .where('bossUid', '==', currentWorkspaceId)
                     .onSnapshot(snap => {
                         const list = [];
                         snap.forEach(d => list.push({ uid: d.data().empUid, isGoogleEmployee: true, ...d.data() }));
                         setPendingGoogleEmployees(list);
                     }, () => {});
                 return () => unsub();
-            }, [firebaseUser, userRole]);
+            }, [firebaseUser, userRole, currentWorkspaceId]);
 
             // 직원 제출 근무시간 실시간 수신 → 월별 현황 자동 반영 (관리자)
             useEffect(() => {
-                if (!firebaseUser || userRole !== 'boss' || !isAuthenticated) return;
-                const unsub = fbDb.collection('workspaces').doc(firebaseUser.uid)
+                if (!firebaseUser || userRole !== 'boss' || !isAuthenticated || !currentWorkspaceId) return;
+                const unsub = fbDb.collection('workspaces').doc(currentWorkspaceId)
                     .collection('submissions')
                     .onSnapshot(snap => {
                         snap.docChanges().forEach(change => {
@@ -911,7 +987,7 @@
                         });
                     }, () => {});
                 return () => unsub();
-            }, [firebaseUser, userRole, isAuthenticated, globalMinWage]);
+            }, [firebaseUser, userRole, isAuthenticated, currentWorkspaceId, globalMinWage]);
 
             // 직원 본인 알림 실시간 로드
             // Google 직원은 isEmpAuthenticated 없이 firebaseUser로 인증됨
@@ -965,7 +1041,7 @@
                     setNextEmpId(prev => prev + 1);
 
                     if (empData.isGoogleEmployee) {
-                        await approveGoogleEmpJoinRequest(firebaseUser.uid, empUid, newEmpId);
+                        await approveGoogleEmpJoinRequest(currentWorkspaceId || firebaseUser.uid, empUid, newEmpId);
                     } else {
                         await fbDb.collection('employeeAccounts').doc(empUid).update({
                             status: 'approved', employeeId: newEmpId,
@@ -985,7 +1061,7 @@
                 showConfirm(`${empData?.name || '직원'}님의 가입을 거절하시겠습니까?`, async () => {
                     try {
                         if (empData?.isGoogleEmployee) {
-                            await rejectGoogleEmpJoinRequest(firebaseUser.uid, empUid);
+                            await rejectGoogleEmpJoinRequest(currentWorkspaceId || firebaseUser.uid, empUid);
                         } else {
                             await fbDb.collection('employeeAccounts').doc(empUid).update({
                                 status: 'rejected',
@@ -1055,6 +1131,32 @@
                 };
                 reader.readAsText(file);
                 e.target.value = null;
+            };
+
+            // 관리자 업체 전환
+            const handleSwitchBossWorkspace = (newWorkspaceId) => {
+                if (newWorkspaceId === currentWorkspaceId) { setShowBossWorkspaceSelect(false); return; }
+                // 현재 데이터 초기화 후 새 업체로 전환
+                setEmployees([]);
+                setNextEmpId(1);
+                setMonthlyData({});
+                setPredictData({});
+                setGlobalMinWage('');
+                setWorkspaceInfo(null);
+                setPendingEmployees([]);
+                setPendingGoogleEmployees([]);
+                lastSyncedDataRef.current = '';
+                setCurrentWorkspaceId(newWorkspaceId);
+                localStorage.setItem('bossWorkspaceId', newWorkspaceId);
+                setShowBossWorkspaceSelect(false);
+            };
+
+            // 관리자 새 업체 추가 (BossSetupModal 트리거)
+            const handleAddBossWorkspace = () => {
+                const newId = `${firebaseUser.uid}__ws${Date.now()}`;
+                setBossSetupWorkspaceId(newId);
+                setShowBossWorkspaceSelect(false);
+                setShowBossSetup(true);
             };
 
             // === 렌더 분기 ===
@@ -1271,7 +1373,21 @@
                     {showBossSetup && (
                         <BossSetupModal
                             firebaseUser={firebaseUser}
-                            onSetup={(info) => { setWorkspaceInfo(info); setShowBossSetup(false); }}
+                            workspaceId={bossSetupWorkspaceId || currentWorkspaceId || firebaseUser.uid}
+                            onSetup={(info) => {
+                                setWorkspaceInfo(info);
+                                setShowBossSetup(false);
+                                // 새 업체였을 경우: 목록 추가 + 업체 인덱스 업데이트 + 전환
+                                if (bossSetupWorkspaceId && bossSetupWorkspaceId !== firebaseUser.uid) {
+                                    setBossWorkspaceList(prev => [...prev, { id: bossSetupWorkspaceId, shopName: info.shopName }]);
+                                    fbDb.collection('bossWorkspaces').doc(firebaseUser.uid).update({
+                                        workspaceIds: firebase.firestore.FieldValue.arrayUnion(bossSetupWorkspaceId)
+                                    }).catch(() => {});
+                                    setCurrentWorkspaceId(bossSetupWorkspaceId);
+                                    localStorage.setItem('bossWorkspaceId', bossSetupWorkspaceId);
+                                }
+                                setBossSetupWorkspaceId(null);
+                            }}
                         />
                     )}
                     {showPendingModal && (
@@ -1283,12 +1399,27 @@
                         />
                     )}
 
+                    {showBossWorkspaceSelect && (
+                        <BossWorkspaceSelectScreen
+                            workspaceList={bossWorkspaceList}
+                            currentId={currentWorkspaceId}
+                            onSelect={handleSwitchBossWorkspace}
+                            onAdd={handleAddBossWorkspace}
+                            onClose={() => setShowBossWorkspaceSelect(false)}
+                        />
+                    )}
+
                     <header className="bg-green-600 text-white shadow-md relative z-30">
                         <div className="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
-                            <h1 className="text-xl font-bold flex items-center gap-2">
+                            <button
+                                onClick={() => bossWorkspaceList.length > 0 && setShowBossWorkspaceSelect(true)}
+                                className="text-xl font-bold flex items-center gap-2 hover:text-green-200 transition group"
+                                title="업체 전환 / 업체 추가"
+                            >
                                 <CalendarIcon className="w-6 h-6" />
                                 <span>{workspaceInfo?.shopName || '알바트래커'}</span>
-                            </h1>
+                                <svg className="w-4 h-4 text-green-300 group-hover:text-green-100 hidden sm:block" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="m6 9 6 6 6-6"/></svg>
+                            </button>
                             <div className="flex items-center gap-1 md:gap-3">
                                 {allPendingEmployees.length > 0 && (
                                     <button onClick={() => setShowPendingModal(true)} className="relative flex items-center gap-1 text-sm bg-yellow-500 hover:bg-yellow-400 text-white px-2 md:px-3 py-1.5 rounded-md transition font-bold">
@@ -1430,6 +1561,7 @@
                                 workspaceInfo={workspaceInfo}
                                 setWorkspaceInfo={setWorkspaceInfo}
                                 firebaseUser={firebaseUser}
+                                workspaceId={currentWorkspaceId}
                                 pendingEmployees={allPendingEmployees}
                                 onApprove={handleApproveEmployee}
                                 onReject={handleRejectEmployee}
@@ -1445,6 +1577,7 @@
                                 workspaceInfo={workspaceInfo}
                                 setWorkspaceInfo={setWorkspaceInfo}
                                 firebaseUser={firebaseUser}
+                                workspaceId={currentWorkspaceId}
                             />
                         )}
                     </main>
@@ -1612,6 +1745,37 @@
                             {/* 기존 PIN 방식 직원 (하위 호환) */}
                             <button onClick={() => setShowEmpEntry(true)} className="w-full text-xs text-gray-400 hover:text-gray-600 transition py-1">
                                 기존 PIN 방식 직원 로그인
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        // ─── 관리자: 업체 전환/추가 모달 ───
+        function BossWorkspaceSelectScreen({ workspaceList, currentId, onSelect, onAdd, onClose }) {
+            return (
+                <div className="fixed inset-0 bg-black/60 flex items-end sm:items-center justify-center p-4 z-[9999] backdrop-blur-sm" onClick={onClose}>
+                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden" onClick={e => e.stopPropagation()}>
+                        <div className="bg-green-600 text-white p-5 flex items-center justify-between">
+                            <h2 className="text-lg font-bold">업체 선택</h2>
+                            <button onClick={onClose} className="p-1 hover:bg-green-500 rounded-lg transition"><X className="w-5 h-5"/></button>
+                        </div>
+                        <div className="p-4 space-y-2 max-h-80 overflow-y-auto">
+                            {workspaceList.map(ws => (
+                                <button key={ws.id} onClick={() => onSelect(ws.id)}
+                                    className={`w-full text-left p-4 rounded-xl border-2 transition ${ws.id === currentId ? 'border-green-500 bg-green-50' : 'border-gray-200 hover:border-green-300 hover:bg-green-50/50'}`}>
+                                    <div className="flex items-center justify-between">
+                                        <p className="font-bold text-gray-800">{ws.shopName || '(업체명 없음)'}</p>
+                                        {ws.id === currentId && <span className="text-xs text-green-600 font-bold">현재</span>}
+                                    </div>
+                                </button>
+                            ))}
+                        </div>
+                        <div className="p-4 border-t border-gray-100">
+                            <button onClick={onAdd}
+                                className="w-full flex items-center justify-center gap-2 bg-green-600 text-white py-3 rounded-xl font-bold hover:bg-green-700 transition">
+                                <Plus className="w-4 h-4" /> 새 업체 추가
                             </button>
                         </div>
                     </div>
@@ -2076,17 +2240,19 @@
             );
         }
 
-        function BossSetupModal({ firebaseUser, onSetup }) {
+        function BossSetupModal({ firebaseUser, workspaceId, onSetup }) {
             const [shopName, setShopName] = useState('');
             const [loading, setLoading] = useState(false);
             const [error, setError] = useState('');
+            const isNewWorkspace = workspaceId && workspaceId !== firebaseUser?.uid;
 
             const handleSubmit = async () => {
                 if (!shopName.trim()) { setError('가게 이름을 입력해주세요.'); return; }
                 setLoading(true);
                 try {
-                    const inviteCode = await setupBossWorkspace(firebaseUser.uid, shopName.trim());
-                    onSetup({ shopName: shopName.trim(), inviteCode, bossUid: firebaseUser.uid });
+                    const wsId = workspaceId || firebaseUser.uid;
+                    const inviteCode = await setupBossWorkspace(wsId, shopName.trim(), firebaseUser.uid);
+                    onSetup({ shopName: shopName.trim(), inviteCode, bossUid: wsId });
                 } catch(e) {
                     setError('설정 실패: ' + e.message);
                 }
@@ -2100,15 +2266,15 @@
                             <div className="bg-green-100 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
                                 <CalendarIcon className="w-8 h-8 text-green-600" />
                             </div>
-                            <h2 className="text-xl font-bold text-gray-800">알바트래커 시작하기</h2>
-                            <p className="text-gray-500 text-sm mt-1">처음 사용하시는군요! 가게 이름을 입력해주세요.</p>
+                            <h2 className="text-xl font-bold text-gray-800">{isNewWorkspace ? '새 업체 추가' : '알바트래커 시작하기'}</h2>
+                            <p className="text-gray-500 text-sm mt-1">{isNewWorkspace ? '추가할 업체 이름을 입력해주세요.' : '처음 사용하시는군요! 가게 이름을 입력해주세요.'}</p>
                         </div>
                         <input value={shopName} onChange={e => setShopName(e.target.value)} onKeyDown={e => e.key==='Enter' && handleSubmit()}
                             className="w-full border-2 border-gray-300 rounded-xl py-3 px-4 focus:border-green-500 outline-none mb-3 text-lg text-center font-medium"
                             placeholder="예: 홍길동 카페" />
                         {error && <p className="text-red-500 text-sm mb-3 text-center">{error}</p>}
                         <button onClick={handleSubmit} disabled={loading} className="w-full bg-green-600 text-white py-3 rounded-xl font-bold hover:bg-green-700 transition disabled:opacity-50">
-                            {loading ? '설정 중...' : '시작하기'}
+                            {loading ? '설정 중...' : (isNewWorkspace ? '업체 추가' : '시작하기')}
                         </button>
                     </div>
                 </div>
@@ -2144,7 +2310,7 @@
             );
         }
 
-        function TabInvite({ workspaceInfo, setWorkspaceInfo, firebaseUser, pendingEmployees, onApprove, onReject, showAlert, showConfirm }) {
+        function TabInvite({ workspaceInfo, setWorkspaceInfo, firebaseUser, workspaceId, pendingEmployees, onApprove, onReject, showAlert, showConfirm }) {
             const [copying, setCopying] = useState(false);
             const [regenerating, setRegenerating] = useState(false);
 
@@ -2170,7 +2336,7 @@
                 showConfirm('초대코드를 새로 발급하면\n기존 코드는 더 이상 사용할 수 없습니다.\n계속하시겠습니까?', async () => {
                     setRegenerating(true);
                     try {
-                        const newCode = await regenerateInviteCode(firebaseUser.uid, inviteCode, workspaceInfo?.shopName);
+                        const newCode = await regenerateInviteCode(workspaceId || firebaseUser.uid, inviteCode, workspaceInfo?.shopName);
                         setWorkspaceInfo(prev => ({ ...prev, inviteCode: newCode }));
                         showAlert(`새 초대코드: ${newCode}`, '코드 재발급 완료', 'success');
                     } catch(e) {
@@ -4514,7 +4680,7 @@
             );
         }
 
-        function TabSettings({ appPin, setAppPin, showAlert, workspaceInfo, setWorkspaceInfo, firebaseUser }) {
+        function TabSettings({ appPin, setAppPin, showAlert, workspaceInfo, setWorkspaceInfo, firebaseUser, workspaceId }) {
             const [currentPin, setCurrentPin] = useState('');
             const [newPin, setNewPin] = useState('');
             const [confirmPin, setConfirmPin] = useState('');
@@ -4530,7 +4696,7 @@
                 if (!firebaseUser) return;
                 setSavingUnit(true);
                 try {
-                    await fbDb.collection('workspaces').doc(firebaseUser.uid).update({ timeUnit: localTimeUnit });
+                    await fbDb.collection('workspaces').doc(workspaceId || firebaseUser.uid).update({ timeUnit: localTimeUnit });
                     setWorkspaceInfo(prev => ({ ...prev, timeUnit: localTimeUnit }));
                     showAlert('입력 단위가 저장되었습니다.', '저장 완료', 'success');
                 } catch(e) {

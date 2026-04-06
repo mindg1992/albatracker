@@ -68,6 +68,19 @@
             .cal-cell { min-height: 70px !important; padding: 4px !important; }
             .cal-cell-empty { min-height: 70px !important; }
         }
+
+        @media print {
+            body * { visibility: hidden; }
+            #contract-print-area, #contract-print-area * { visibility: visible; }
+            #contract-print-area {
+                position: fixed;
+                top: 0; left: 0;
+                width: 100%;
+                padding: 32px;
+                background: white;
+                box-sizing: border-box;
+            }
+        }
     </style>
 </head>
 <body>
@@ -5406,6 +5419,7 @@
                 try { await onSign(); } catch(e) {}
                 setSigning(false);
             };
+            const handlePrint = () => window.print();
             return (
                 <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-[9998] backdrop-blur-sm">
                     <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg flex flex-col" style={{maxHeight: '92vh'}}>
@@ -5413,7 +5427,7 @@
                             <h2 className="text-lg font-bold text-gray-800">근로계약서</h2>
                             <button onClick={onClose}><X className="w-5 h-5 text-gray-500" /></button>
                         </div>
-                        <div className="overflow-y-auto flex-1 p-5 space-y-4">
+                        <div id="contract-print-area" className="overflow-y-auto flex-1 p-5 space-y-4">
                             <h3 className="text-xl font-bold text-center text-gray-900 border-b pb-3">{contract.title || '근로계약서'}</h3>
                             {(contract.sections || []).map((s, i) => (
                                 <div key={i} className="bg-gray-50 rounded-xl p-4 space-y-2">
@@ -5460,6 +5474,7 @@
                                     {signing ? '처리 중...' : '서명 완료 (계약 확정)'}
                                 </button>
                             )}
+                            <button onClick={handlePrint} className="flex-1 bg-indigo-500 text-white py-3 rounded-xl font-medium hover:bg-indigo-600 transition">PDF 인쇄</button>
                             <button onClick={onClose} className="flex-1 bg-gray-100 text-gray-700 py-3 rounded-xl font-medium hover:bg-gray-200 transition">닫기</button>
                         </div>
                     </div>

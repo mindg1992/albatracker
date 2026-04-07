@@ -635,6 +635,11 @@
             const [empWorkplaceLoading, setEmpWorkplaceLoading] = useState(false);
             const [showEmpJoinScreen, setShowEmpJoinScreen] = useState(false);
 
+            // 알림 배너 dismissed 카운트 (숫자가 올라오면 배너 재표시)
+            const [dismissedRewriteCount, setDismissedRewriteCount] = useState(0);
+            const [dismissedSubmitCount, setDismissedSubmitCount] = useState(0);
+            const [dismissedInviteCount, setDismissedInviteCount] = useState(0);
+
             // 데이터 루프 및 무의미한 저장을 방지하기 위한 기준점
             const lastSyncedDataRef = useRef("");
             // 직원 자체 퇴사 시 applyData 덮어쓰기 방지용
@@ -1556,6 +1561,12 @@
                 e.contractStatus === 'needs_resign' ||
                 e.contractStatus === 'pending_boss'
             ).length;
+            // 계약서 제출 알림 (pending_boss 상태)
+            const contractSubmitRequests = employees.filter(e => e.contractStatus === 'pending_boss');
+            const contractSubmitCount = contractSubmitRequests.length;
+            const contractSubmitBannerMsg = contractSubmitCount === 1
+                ? `${contractSubmitRequests[0].name}님이 근로계약서를 제출했습니다.`
+                : `${contractSubmitRequests[0]?.name}님 외 ${contractSubmitCount - 1}명이 근로계약서를 제출했습니다.`;
 
             // ── 직원 플로우 ──
             if (userRole === 'employee') {
@@ -2016,7 +2027,7 @@
                             >복구</button>
                         </div>
                     )}
-                    {contractRewriteRequestCount > 0 && (
+                    {contractRewriteRequestCount > dismissedRewriteCount && (
                         <div className="bg-orange-50 border-b border-orange-200 px-4 py-3 flex items-center justify-between gap-3">
                             <div className="flex items-center gap-2 min-w-0">
                                 <span className="text-orange-500 text-base flex-shrink-0">📋</span>
@@ -2026,8 +2037,38 @@
                                 </div>
                             </div>
                             <button
-                                onClick={() => handleTabChange('employees')}
+                                onClick={() => { setDismissedRewriteCount(contractRewriteRequestCount); handleTabChange('employees'); }}
                                 className="flex-shrink-0 bg-orange-600 text-white text-xs font-bold px-3 py-2 rounded-xl hover:bg-orange-700 transition"
+                            >확인</button>
+                        </div>
+                    )}
+                    {contractSubmitCount > dismissedSubmitCount && (
+                        <div className="bg-purple-50 border-b border-purple-200 px-4 py-3 flex items-center justify-between gap-3">
+                            <div className="flex items-center gap-2 min-w-0">
+                                <span className="text-purple-500 text-base flex-shrink-0">📄</span>
+                                <div className="min-w-0">
+                                    <p className="text-purple-700 font-bold text-sm">새로운 근로계약서가 도착했습니다</p>
+                                    <p className="text-purple-500 text-xs truncate">{contractSubmitBannerMsg}</p>
+                                </div>
+                            </div>
+                            <button
+                                onClick={() => { setDismissedSubmitCount(contractSubmitCount); handleTabChange('employees'); }}
+                                className="flex-shrink-0 bg-purple-600 text-white text-xs font-bold px-3 py-2 rounded-xl hover:bg-purple-700 transition"
+                            >확인</button>
+                        </div>
+                    )}
+                    {allPendingEmployees.length > dismissedInviteCount && (
+                        <div className="bg-blue-50 border-b border-blue-200 px-4 py-3 flex items-center justify-between gap-3">
+                            <div className="flex items-center gap-2 min-w-0">
+                                <span className="text-blue-500 text-base flex-shrink-0">👤</span>
+                                <div className="min-w-0">
+                                    <p className="text-blue-700 font-bold text-sm">가입 대기 직원 알림</p>
+                                    <p className="text-blue-500 text-xs truncate">가입 대기 직원이 {allPendingEmployees.length}명 있습니다.</p>
+                                </div>
+                            </div>
+                            <button
+                                onClick={() => { setDismissedInviteCount(allPendingEmployees.length); handleTabChange('invite'); }}
+                                className="flex-shrink-0 bg-blue-600 text-white text-xs font-bold px-3 py-2 rounded-xl hover:bg-blue-700 transition"
                             >확인</button>
                         </div>
                     )}

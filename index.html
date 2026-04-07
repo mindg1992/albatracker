@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>알바트래커 v1.8.4</title>
+    <title>알바트래커 v1.8.5</title>
 
     <!-- PWA -->
     <link rel="manifest" href="manifest.json">
@@ -26,6 +26,9 @@
 
     <!-- SheetJS -->
     <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+
+    <!-- html2pdf -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
 
     <!-- Firebase -->
     <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
@@ -5936,6 +5939,62 @@
                 w.focus();
                 setTimeout(() => { w.print(); w.close(); }, 400);
             };
+            const handleSavePDF = () => {
+                const c = contract;
+                const esc = s => String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+                const sigImg = src => src ? `<img src="${src}" style="height:52px;object-fit:contain;border:1px solid #e5e7eb;border-radius:8px;background:#fff;padding:3px;display:block;margin-top:6px;">` : '';
+
+                const sectionsHtml = (c.sections || []).map(s => `
+                    <div style="background:#f9fafb;border-radius:10px;padding:14px;margin-bottom:10px;page-break-inside:avoid;">
+                        <p style="font-size:12.5px;color:#1f2937;white-space:pre-wrap;line-height:1.6;margin:0;">${esc(s.content)}</p>
+                        ${s.instruction ? `<p style="font-size:11px;color:#3b82f6;font-style:italic;margin:5px 0 0;">※ ${esc(s.instruction)}</p>` : ''}
+                        ${s.answer ? `<div style="border-bottom:2px solid #9ca3af;padding-bottom:3px;margin-top:7px;"><p style="font-size:13px;font-weight:600;color:#111;margin:0;">${esc(s.answer)}</p></div>` : ''}
+                    </div>`).join('');
+
+                const ownerHtml = c.ownerInfo ? `
+                    <div style="background:#eff6ff;border-radius:10px;padding:14px;margin-bottom:10px;page-break-inside:avoid;">
+                        <p style="font-size:11px;font-weight:700;color:#1d4ed8;margin:0 0 7px;">사업주</p>
+                        <p style="font-size:12.5px;margin:2px 0;">사업체명: ${esc(c.ownerInfo.shopName)}${c.ownerInfo.phone ? ` (전화: ${esc(c.ownerInfo.phone)})` : ''}</p>
+                        <p style="font-size:12.5px;margin:2px 0;">주소: ${esc(c.ownerInfo.address)}</p>
+                        <p style="font-size:12.5px;margin:2px 0;">대표자: ${esc(c.ownerInfo.representative)}</p>
+                        ${sigImg(c.ownerInfo.signatureData)}
+                    </div>` : '';
+
+                const empHtml = c.employeeInfo ? `
+                    <div style="background:#f0fdf4;border-radius:10px;padding:14px;margin-bottom:10px;page-break-inside:avoid;">
+                        <p style="font-size:11px;font-weight:700;color:#15803d;margin:0 0 7px;">근로자</p>
+                        <p style="font-size:12.5px;margin:2px 0;">주소: ${esc(c.employeeInfo.address)}</p>
+                        <p style="font-size:12.5px;margin:2px 0;">연락처: ${esc(c.employeeInfo.phone)}</p>
+                        <p style="font-size:12.5px;margin:2px 0;">성명: ${esc(c.employeeInfo.name)}</p>
+                        ${sigImg(c.employeeInfo.signatureData)}
+                    </div>` : '';
+
+                const completedHtml = c.status === 'completed' ? `
+                    <div style="background:#dcfce7;border:1px solid #86efac;border-radius:10px;padding:10px;text-align:center;page-break-inside:avoid;">
+                        <p style="color:#15803d;font-weight:700;font-size:13px;margin:0;">✓ 계약 완료</p>
+                    </div>` : '';
+
+                const element = document.createElement('div');
+                element.innerHTML = `
+                    <h2 style="text-align:center;border-bottom:2px solid #e5e7eb;padding-bottom:10px;margin:0 0 18px;font-size:17px;font-family:'Malgun Gothic',sans-serif;">${esc(c.title || '근로계약서')}</h2>
+                    ${sectionsHtml}
+                    <div style="border-top:1px solid #e5e7eb;padding-top:14px;margin-top:6px;font-family:'Malgun Gothic',sans-serif;">
+                        <p style="font-size:12.5px;margin-bottom:14px;">작성일: <strong>${esc(c.date)}</strong></p>
+                        ${ownerHtml}${empHtml}${completedHtml}
+                    </div>`;
+
+                const shopName = (c.ownerInfo && c.ownerInfo.shopName) ? c.ownerInfo.shopName : '';
+                const empName = (c.employeeInfo && c.employeeInfo.name) ? c.employeeInfo.name : '';
+                const fileName = [shopName, c.title || '근로계약서', c.date || '', empName].filter(Boolean).join('_') + '.pdf';
+                const opt = {
+                    margin: [15, 15, 15, 15],
+                    filename: fileName,
+                    image: { type: 'jpeg', quality: 0.98 },
+                    html2canvas: { scale: 2, useCORS: true },
+                    jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
+                };
+                html2pdf().set(opt).from(element).save();
+            };
             return (
                 <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-[9998] backdrop-blur-sm">
                     <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg flex flex-col" style={{maxHeight: '92vh'}}>
@@ -6070,6 +6129,7 @@
                                 </button>
                             )}
                             <button onClick={() => { if (('ontouchstart' in window) || navigator.maxTouchPoints > 0) { alert('PC에서만 사용가능합니다.'); return; } handlePrint(); }} className="flex-1 bg-indigo-500 text-white py-3 rounded-xl font-medium hover:bg-indigo-600 transition">PDF 인쇄</button>
+                            <button onClick={handleSavePDF} className="flex-1 bg-purple-500 text-white py-3 rounded-xl font-medium hover:bg-purple-600 transition">PDF 저장</button>
                             <button onClick={onClose} className="flex-1 bg-gray-100 text-gray-700 py-3 rounded-xl font-medium hover:bg-gray-200 transition">닫기</button>
                         </div>
                     </div>

@@ -3644,9 +3644,14 @@
                 try {
                     const doc = await fbDb.collection('employeeAccounts').doc(emp.empUid)
                         .collection('workplaces').doc(currentWorkspaceId || firebaseUser.uid).get();
-                    const contract = doc.data()?.contract || null;
-                    if (contract) setViewingContract({ contract, empUid: emp.empUid, emp });
-                    else showAlert('저장된 근로계약서가 없습니다.', '안내', 'info');
+                    const data = doc.data();
+                    const contract = data?.contract || null;
+                    if (contract) {
+                        const freshDeleteReq = data?.contractDeleteRequest || null;
+                        const freshEmp = { ...emp, contractDeleteRequest: freshDeleteReq };
+                        setEmployees(prev => prev.map(e => e.empUid === emp.empUid ? { ...e, contractDeleteRequest: freshDeleteReq } : e));
+                        setViewingContract({ contract, empUid: emp.empUid, emp: freshEmp });
+                    } else showAlert('저장된 근로계약서가 없습니다.', '안내', 'info');
                 } catch(e) { showAlert('불러오기 실패: ' + e.message, '오류', 'error'); }
             };
 

@@ -539,7 +539,15 @@
                     contract: firebase.firestore.FieldValue.delete(),
                     contractDeleteRequest: firebase.firestore.FieldValue.delete()
                 });
-                try { await fbDb.collection('empPending').doc(`${empUid}_${bossUid}`).delete(); } catch(e) {}
+                // 근무자가 동의 완료한 경우(boss가 먼저 요청) → 관리자에게 알림
+                if (requester === 'employee') {
+                    await fbDb.collection('empPending').doc(`${empUid}_${bossUid}`).set({
+                        type: 'contract_delete_completed', empUid, bossUid,
+                        createdAt: firebase.firestore.FieldValue.serverTimestamp()
+                    });
+                } else {
+                    try { await fbDb.collection('empPending').doc(`${empUid}_${bossUid}`).delete(); } catch(e) {}
+                }
                 return 'deleted';
             } else {
                 await ref.update({ contractDeleteRequest: requester });
@@ -1217,6 +1225,14 @@
                                     e.empUid === data.empUid ? { ...e, contractDeleteRequest: 'employee' } : e
                                 ));
                                 // empPending은 관리자가 처리할 때까지 유지
+                                return;
+                            }
+                            // 근무자가 재작성 요청에 동의 완료한 경우 (boss가 먼저 요청)
+                            if (data.type === 'contract_delete_completed') {
+                                setEmployees(prev => prev.map(e =>
+                                    e.empUid === data.empUid ? { ...e, contractStatus: 'needs_resign', contract: null, contractDeleteRequest: null } : e
+                                ));
+                                fbDb.collection('empPending').doc(d.id).delete().catch(() => {});
                                 return;
                             }
                             list.push({ uid: data.empUid, isGoogleEmployee: true, ...data });

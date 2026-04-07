@@ -2974,6 +2974,7 @@
             const [timeUnit, setTimeUnit] = useState('hour');
             const [noticePopupQueue, setNoticePopupQueue] = useState([]);
             const [currentNoticePopup, setCurrentNoticePopup] = useState(null);
+            const [rewriteBannerDismissed, setRewriteBannerDismissed] = useState(false);
             const pendingSubmitDateRef = useRef(null);
             const unreadCount = notifications.filter(n => !n.read).length;
             const unreadNoticeCount = (() => {
@@ -3109,7 +3110,7 @@
                         </div>
                     </header>
 
-                    {empAccount?.contractDeleteRequest === 'boss' && (
+                    {empAccount?.contractDeleteRequest === 'boss' && !rewriteBannerDismissed && (
                         <div className="bg-orange-50 border-b border-orange-200 px-4 py-3 flex items-center justify-between gap-3">
                             <div className="flex items-center gap-2 min-w-0">
                                 <span className="text-orange-500 text-base flex-shrink-0">📋</span>
@@ -3119,7 +3120,7 @@
                                 </div>
                             </div>
                             <button
-                                onClick={() => setActiveTab('myinfo')}
+                                onClick={() => { setRewriteBannerDismissed(true); setActiveTab('myinfo'); }}
                                 className="flex-shrink-0 bg-orange-600 text-white text-xs font-bold px-3 py-2 rounded-xl hover:bg-orange-700 transition"
                             >확인</button>
                         </div>

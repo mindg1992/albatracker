@@ -652,13 +652,14 @@
             };
             useEffect(() => {
                 const el = navScrollRef.current;
-                if (!el) { setTimeout(updateNavScroll, 200); return; }
-                updateNavScroll();
-                const ro = new ResizeObserver(updateNavScroll);
+                if (!el) return;
+                // RAF로 브라우저 레이아웃 완료 후 측정
+                const rafId = requestAnimationFrame(updateNavScroll);
+                const ro = new ResizeObserver(() => requestAnimationFrame(updateNavScroll));
                 ro.observe(el);
                 window.addEventListener('resize', updateNavScroll);
-                return () => { ro.disconnect(); window.removeEventListener('resize', updateNavScroll); };
-            }, [currentWorkspaceId]);
+                return () => { cancelAnimationFrame(rafId); ro.disconnect(); window.removeEventListener('resize', updateNavScroll); };
+            }, [currentWorkspaceId, isAuthenticated]);
 
             const showAlert = (message, title = '알림', type = 'info') => {
                 setModalConfig({ type: type, title, message, onConfirm: () => setModalConfig(null) });
@@ -1544,6 +1545,7 @@
             }
 
             const allPendingEmployees = pendingGoogleEmployees;
+            const contractRewriteRequestCount = employees.filter(e => e.contractDeleteRequest === 'employee').length;
 
             // ── 직원 플로우 ──
             if (userRole === 'employee') {
@@ -1966,6 +1968,9 @@
                                         <tab.icon className="w-4 h-4" />
                                         {tab.label}
                                         {isLocked && <Lock className="w-3 h-3 ml-0.5 text-gray-300" />}
+                                        {tab.id === 'employees' && contractRewriteRequestCount > 0 && (
+                                            <span className="absolute top-2 right-1 bg-red-500 text-white text-[10px] rounded-full w-4 h-4 flex items-center justify-center font-bold">{contractRewriteRequestCount}</span>
+                                        )}
                                         {tab.id === 'invite' && allPendingEmployees.length > 0 && (
                                             <span className="absolute top-2 right-1 bg-red-500 text-white text-[10px] rounded-full w-4 h-4 flex items-center justify-center font-bold">{allPendingEmployees.length}</span>
                                         )}
@@ -1999,6 +2004,21 @@
                                 onClick={handleCancelDeleteWorkspace}
                                 className="flex-shrink-0 bg-red-600 text-white text-xs font-bold px-3 py-2 rounded-xl hover:bg-red-700 transition"
                             >복구</button>
+                        </div>
+                    )}
+                    {contractRewriteRequestCount > 0 && (
+                        <div className="bg-orange-50 border-b border-orange-200 px-4 py-3 flex items-center justify-between gap-3">
+                            <div className="flex items-center gap-2 min-w-0">
+                                <span className="text-orange-500 text-base flex-shrink-0">📋</span>
+                                <div className="min-w-0">
+                                    <p className="text-orange-700 font-bold text-sm">근로계약서 재작성 요청 {contractRewriteRequestCount}건</p>
+                                    <p className="text-orange-500 text-xs truncate">근무자가 재작성을 요청했습니다. 확인 후 동의해주세요.</p>
+                                </div>
+                            </div>
+                            <button
+                                onClick={() => handleTabChange('employees')}
+                                className="flex-shrink-0 bg-orange-600 text-white text-xs font-bold px-3 py-2 rounded-xl hover:bg-orange-700 transition"
+                            >확인</button>
                         </div>
                     )}
 
@@ -2111,6 +2131,9 @@
                                 >
                                     <tab.icon className={`w-5 h-5 ${activeTab === tab.id ? 'text-green-600' : isLocked ? 'text-gray-300' : 'text-gray-400'}`} />
                                     {tab.label}
+                                    {tab.id === 'employees' && contractRewriteRequestCount > 0 && (
+                                        <span className="absolute top-1.5 right-2 bg-red-500 text-white text-[9px] rounded-full w-3.5 h-3.5 flex items-center justify-center font-bold">{contractRewriteRequestCount}</span>
+                                    )}
                                     {tab.id === 'invite' && allPendingEmployees.length > 0 && (
                                         <span className="absolute top-1.5 right-2 bg-red-500 text-white text-[9px] rounded-full w-3.5 h-3.5 flex items-center justify-center font-bold">{allPendingEmployees.length}</span>
                                     )}
@@ -2160,7 +2183,7 @@
                 <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-4">
                     <div className="bg-white p-8 rounded-2xl shadow-xl w-full max-w-sm text-center">
                         <ATLogo className="w-16 h-16 mx-auto mb-4 rounded-2xl shadow-md" />
-                        <h2 className="text-2xl font-bold text-gray-800 mb-1">{empName ? `${empName}님` : '알바트래커 v1.8.3'}</h2>
+                        <h2 className="text-2xl font-bold text-gray-800 mb-1">{empName ? `${empName}님` : '알바트래커 v1.8.4'}</h2>
                         <p className="text-gray-500 mb-6 text-sm">
                             {empName ? 'PIN을 입력해주세요.' : (appPin === INITIAL_PIN ? '초기 비밀번호는 "000000"입니다.' : '비밀번호를 입력해주세요.')}
                         </p>
@@ -2205,6 +2228,7 @@
                             <div className="mt-6 text-left border-t border-gray-100 pt-4 space-y-1">
                                 <p className="text-[10px] text-gray-300 leading-relaxed">알바트래커v1.8.2: 근무자 로그인 및 시간입력 등 대규모 개선</p>
                                 <p className="text-[10px] text-gray-300 leading-relaxed">알바트래커v1.8.3: 관리자 전체공지기능 추가</p>
+                                <p className="text-[10px] text-gray-300 leading-relaxed">알바트래커v1.8.4: 근로계약서 재작성 요청 알림 및 탭 뱃지 추가</p>
                             </div>
                         )}
                     </div>
@@ -3034,6 +3058,22 @@
                         </div>
                     </header>
 
+                    {empAccount?.contractDeleteRequest === 'boss' && (
+                        <div className="bg-orange-50 border-b border-orange-200 px-4 py-3 flex items-center justify-between gap-3">
+                            <div className="flex items-center gap-2 min-w-0">
+                                <span className="text-orange-500 text-base flex-shrink-0">📋</span>
+                                <div className="min-w-0">
+                                    <p className="text-orange-700 font-bold text-sm">근로계약서 재작성 요청</p>
+                                    <p className="text-orange-500 text-xs truncate">관리자가 재작성을 요청했습니다. 내 정보 탭에서 확인하세요.</p>
+                                </div>
+                            </div>
+                            <button
+                                onClick={() => setActiveTab('myinfo')}
+                                className="flex-shrink-0 bg-orange-600 text-white text-xs font-bold px-3 py-2 rounded-xl hover:bg-orange-700 transition"
+                            >확인</button>
+                        </div>
+                    )}
+
                     <main className="max-w-lg mx-auto px-3 py-4">
                         {activeTab === 'calendar' && (
                             <div>
@@ -3414,6 +3454,18 @@
                         </div>
                     )}
 
+                    {/* 근로계약서 없는 기존 직원: 작성 안내 */}
+                    {empAccount?.isGoogleEmployee && empAccount?.bossUid && contractStatus === null && !isContractBlocked && (
+                        <div className="bg-blue-50 rounded-xl border border-blue-200 shadow-sm p-5">
+                            <p className="font-bold text-sm text-blue-700 mb-1">📋 근로계약서가 없습니다</p>
+                            <p className="text-xs text-gray-600 mb-3">근로계약서를 작성하면 관리자 서명 후 완료됩니다.</p>
+                            <button onClick={handleStartRewrite}
+                                className="w-full bg-blue-600 text-white py-2.5 rounded-xl font-bold hover:bg-blue-700 transition text-sm">
+                                근로계약서 작성하기
+                            </button>
+                        </div>
+                    )}
+
                     {viewingContract && (
                         <ContractViewModal
                             contract={viewingContract}
@@ -3424,8 +3476,8 @@
                         />
                     )}
 
-                    {/* Google 직원: 퇴사하기 (근로계약서 완료 상태에서만) */}
-                    {empAccount?.isGoogleEmployee && onDisconnectWorkplace && contractStatus === 'completed' && (
+                    {/* Google 직원: 퇴사하기 (근로계약서 완료 또는 미작성 상태에서 허용) */}
+                    {empAccount?.isGoogleEmployee && onDisconnectWorkplace && (contractStatus === 'completed' || contractStatus === null) && (
                         <div className="bg-white rounded-xl border border-red-200 shadow-sm p-6">
                             <h3 className="text-base font-bold text-red-700 mb-2">퇴사하기</h3>
                             <button onClick={onDisconnectWorkplace}

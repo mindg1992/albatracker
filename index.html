@@ -1550,6 +1550,12 @@
             const contractRewriteBannerMsg = contractRewriteRequestCount === 1
                 ? `${contractRewriteRequests[0].name}님이 재작성을 요청했습니다.`
                 : `${contractRewriteRequests[0]?.name}님 외 ${contractRewriteRequestCount - 1}명이 재작성을 요청했습니다.`;
+            // 뱃지: 재작성 요청 ~ 작성 완료 전까지 유지 (동의 대기 + 재작성 대기 + 서명 대기)
+            const contractPendingBadgeCount = employees.filter(e =>
+                e.contractDeleteRequest === 'employee' ||
+                e.contractStatus === 'needs_resign' ||
+                e.contractStatus === 'pending_boss'
+            ).length;
 
             // ── 직원 플로우 ──
             if (userRole === 'employee') {
@@ -1972,8 +1978,8 @@
                                         <tab.icon className="w-4 h-4" />
                                         {tab.label}
                                         {isLocked && <Lock className="w-3 h-3 ml-0.5 text-gray-300" />}
-                                        {tab.id === 'employees' && contractRewriteRequestCount > 0 && (
-                                            <span className="absolute top-2 right-1 bg-red-500 text-white text-[10px] rounded-full w-4 h-4 flex items-center justify-center font-bold">{contractRewriteRequestCount}</span>
+                                        {tab.id === 'employees' && contractPendingBadgeCount > 0 && (
+                                            <span className="absolute top-2 right-1 bg-red-500 text-white text-[10px] rounded-full w-4 h-4 flex items-center justify-center font-bold">{contractPendingBadgeCount}</span>
                                         )}
                                         {tab.id === 'invite' && allPendingEmployees.length > 0 && (
                                             <span className="absolute top-2 right-1 bg-red-500 text-white text-[10px] rounded-full w-4 h-4 flex items-center justify-center font-bold">{allPendingEmployees.length}</span>
@@ -2135,8 +2141,8 @@
                                 >
                                     <tab.icon className={`w-5 h-5 ${activeTab === tab.id ? 'text-green-600' : isLocked ? 'text-gray-300' : 'text-gray-400'}`} />
                                     {tab.label}
-                                    {tab.id === 'employees' && contractRewriteRequestCount > 0 && (
-                                        <span className="absolute top-1.5 right-2 bg-red-500 text-white text-[9px] rounded-full w-3.5 h-3.5 flex items-center justify-center font-bold">{contractRewriteRequestCount}</span>
+                                    {tab.id === 'employees' && contractPendingBadgeCount > 0 && (
+                                        <span className="absolute top-1.5 right-2 bg-red-500 text-white text-[9px] rounded-full w-3.5 h-3.5 flex items-center justify-center font-bold">{contractPendingBadgeCount}</span>
                                     )}
                                     {tab.id === 'invite' && allPendingEmployees.length > 0 && (
                                         <span className="absolute top-1.5 right-2 bg-red-500 text-white text-[9px] rounded-full w-3.5 h-3.5 flex items-center justify-center font-bold">{allPendingEmployees.length}</span>

@@ -617,6 +617,8 @@
             const [monthlyData, setMonthlyData] = useState({});
             const [predictData, setPredictData] = useState({});
             const [globalMinWage, setGlobalMinWage] = useState(''); // 최저시급 기본값 비워둠
+            const [workSubmitBanner, setWorkSubmitBanner] = useState(null); // 근무자 제출 알림 배너
+            const [unseenDates, setUnseenDates] = useState(new Set()); // 관리자가 아직 열어보지 않은 날짜
 
             const [modalConfig, setModalConfig] = useState(null);
 
@@ -1245,6 +1247,7 @@
             // 직원 제출 근무시간 실시간 수신 → 월별 현황 자동 반영 (관리자)
             useEffect(() => {
                 if (!firebaseUser || userRole !== 'boss' || !isAuthenticated || !currentWorkspaceId) return;
+                let initialLoadDone = false;
                 const unsub = fbDb.collection('workspaces').doc(currentWorkspaceId)
                     .collection('submissions')
                     .onSnapshot(snap => {
@@ -1278,7 +1281,13 @@
                                     }}}}
                                 };
                             });
+                            // 초기 로드 이후 새로 추가된 제출만 알림 배너 + 미확인 날짜 추가
+                            if (initialLoadDone && change.type === 'added' && sub.empName) {
+                                setWorkSubmitBanner({ empName: sub.empName, date: sub.date, hours: sub.hours });
+                                setUnseenDates(prev => new Set([...prev, sub.date]));
+                            }
                         });
+                        initialLoadDone = true;
                     }, () => {});
                 return () => unsub();
             }, [firebaseUser, userRole, isAuthenticated, currentWorkspaceId, globalMinWage]);
@@ -2092,6 +2101,28 @@
                         </div>
                     )}
 
+                    {workSubmitBanner && (() => {
+                        const [y, m, d] = workSubmitBanner.date.split('-').map(Number);
+                        const h = Math.floor(workSubmitBanner.hours);
+                        const min = Math.round((workSubmitBanner.hours % 1) * 60);
+                        const timeStr = min > 0 ? `${h}시간 ${min}분` : `${h}시간`;
+                        return (
+                            <div className="bg-green-50 border-b border-green-200 px-4 py-3 flex items-center justify-between gap-3">
+                                <div className="flex items-center gap-2 min-w-0">
+                                    <span className="text-green-500 text-base flex-shrink-0">✅</span>
+                                    <div className="min-w-0">
+                                        <p className="text-green-800 font-bold text-sm">근무 완료 알림</p>
+                                        <p className="text-green-700 text-xs truncate">{workSubmitBanner.empName}님이 {y}년 {m}월 {d}일 {timeStr} 근무를 완료했습니다.</p>
+                                    </div>
+                                </div>
+                                <button
+                                    onClick={() => setWorkSubmitBanner(null)}
+                                    className="flex-shrink-0 text-green-600 hover:text-green-800 p-1"
+                                ><X className="w-4 h-4" /></button>
+                            </div>
+                        );
+                    })()}
+
                     <main className="max-w-7xl mx-auto px-3 md:px-4 py-4 md:py-6">
                         {/* 삭제 예약 중: 설정탭 외 조작 불가 (inert로 클릭/포커스 차단, 스크롤은 허용) */}
                         <div {...(isWorkspaceDeleting && activeTab !== 'settings' ? { inert: '' } : {})}>
@@ -2117,6 +2148,8 @@
                                 monthlyData={monthlyData}
                                 setMonthlyData={setMonthlyData}
                                 showConfirm={showConfirm}
+                                unseenDates={unseenDates}
+                                onMarkSeen={(date) => setUnseenDates(prev => { const next = new Set(prev); next.delete(date); return next; })}
                             />
                         )}
                         {activeTab === 'payroll' && (
@@ -3714,6 +3747,33 @@
             const [modalDeleteReq, setModalDeleteReq] = useState(null);
             const [signingEmpUid, setSigningEmpUid] = useState(null);
 
+            // 팝업 열려있는 동안 해당 직원 workplaces 문서 실시간 감지
+            // → 근무자가 동의하면 즉시 employees 상태 반영 (팝업 닫기 전에도 갱신)
+            useEffect(() => {
+                if (!viewingContract || !firebaseUser || !currentWorkspaceId) return;
+                const empUid = viewingContract.empUid;
+                if (!empUid) return;
+                const unsub = fbDb.collection('employeeAccounts').doc(empUid)
+                    .collection('workplaces').doc(currentWorkspaceId)
+                    .onSnapshot(doc => {
+                        if (!doc.exists) return;
+                        const data = doc.data();
+                        const newDeleteReq = data?.contractDeleteRequest || null;
+                        const newContractStatus = data?.contractStatus || null;
+                        const hasContract = !!data?.contract;
+                        setModalDeleteReq(newDeleteReq);
+                        setEmployees(prev => prev.map(e =>
+                            e.empUid === empUid ? {
+                                ...e,
+                                contractDeleteRequest: newDeleteReq,
+                                contractStatus: newContractStatus,
+                                contract: hasContract ? data.contract : (e.contract || null)
+                            } : e
+                        ));
+                    }, () => {});
+                return () => unsub();
+            }, [viewingContract?.empUid, firebaseUser, currentWorkspaceId]);
+
             const filteredEmployees = useMemo(() => {
                 if (!searchTerm) return employees.sort((a, b) => a.displayId - b.displayId);
                 return employees.filter(emp => emp.name.includes(searchTerm)).sort((a, b) => a.displayId - b.displayId);
@@ -4307,7 +4367,7 @@
             );
         }
 
-        function TabCalendar({ employees, monthlyData, setMonthlyData, showConfirm }) {
+        function TabCalendar({ employees, monthlyData, setMonthlyData, showConfirm, unseenDates, onMarkSeen }) {
             const [currentDate, setCurrentDate] = useState(new Date());
             const [isBulkInputOpen, setIsBulkInputOpen] = useState(false);
             const [editDayModal, setEditDayModal] = useState(null);
@@ -4465,16 +4525,22 @@
                                 const isSunday = idx % 7 === 0;
                                 const sundayKey = isSunday ? `${year}-${month.toString().padStart(2, '0')}-${day.toString().padStart(2, '0')}` : null;
                                 const holidayEntries = sundayKey ? (holidayPayBySunday[sundayKey] || []) : [];
+                                const dateStr = `${year}-${month.toString().padStart(2,'0')}-${day.toString().padStart(2,'0')}`;
+                                const hasUnseen = unseenDates?.has(dateStr);
+                                const handleOpenDay = () => { setEditDayModal(day); onMarkSeen?.(dateStr); };
 
                                 return (
-                                    <div key={`day-${day}`} className="cal-cell min-h-[140px] border-b border-r border-gray-100 p-2 relative group hover:bg-yellow-50/50 transition cursor-pointer md:cursor-default" onClick={() => setEditDayModal(day)}>
+                                    <div key={`day-${day}`} className="cal-cell min-h-[140px] border-b border-r border-gray-100 p-2 relative group hover:bg-yellow-50/50 transition cursor-pointer md:cursor-default" onClick={handleOpenDay}>
                                         <div className="flex justify-between items-start mb-1">
-                                            <span className={`text-sm font-bold w-6 h-6 flex items-center justify-center rounded-full ${idx % 7 === 0 ? 'text-red-500' : idx % 7 === 6 ? 'text-blue-500' : 'text-gray-700'}`}>
-                                                {day}
-                                            </span>
+                                            <div className="relative flex items-center">
+                                                <span className={`text-sm font-bold w-6 h-6 flex items-center justify-center rounded-full ${idx % 7 === 0 ? 'text-red-500' : idx % 7 === 6 ? 'text-blue-500' : 'text-gray-700'}`}>
+                                                    {day}
+                                                </span>
+                                                {hasUnseen && <span className="absolute -top-0.5 -right-1 w-2 h-2 bg-red-500 rounded-full"></span>}
+                                            </div>
                                             {/* PC에서만 마우스 올렸을 때 보이게 처리 */}
                                             <div className="hidden md:flex opacity-0 group-hover:opacity-100 gap-1 transition" onClick={e => e.stopPropagation()}>
-                                                <button onClick={() => setEditDayModal(day)} className="text-xs bg-gray-100 hover:bg-gray-200 text-gray-600 px-2 py-1 rounded shadow-sm">수정</button>
+                                                <button onClick={handleOpenDay} className="text-xs bg-gray-100 hover:bg-gray-200 text-gray-600 px-2 py-1 rounded shadow-sm">수정</button>
                                                 <button onClick={() => handleDeleteDay(day)} className="text-xs bg-red-50 hover:bg-red-100 text-red-500 px-1.5 py-1 rounded flex items-center justify-center shadow-sm" title="삭제">
                                                     <X className="w-3 h-3" />
                                                 </button>

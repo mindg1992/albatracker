@@ -530,9 +530,9 @@
             const existing = doc.data()?.contractDeleteRequest;
             const otherSide = requester === 'boss' ? 'employee' : 'boss';
             if (existing === otherSide) {
-                // 양쪽 동의 → 완전 삭제
+                // 양쪽 동의 → 계약서 삭제 + needs_resign 상태로 전환
                 await ref.update({
-                    contractStatus: null,
+                    contractStatus: 'needs_resign',
                     contract: firebase.firestore.FieldValue.delete(),
                     contractDeleteRequest: firebase.firestore.FieldValue.delete()
                 });
@@ -553,9 +553,7 @@
         async function cancelContractDeleteRequest(empUid, bossUid, requester) {
             await fbDb.collection('employeeAccounts').doc(empUid).collection('workplaces').doc(bossUid)
                 .update({ contractDeleteRequest: firebase.firestore.FieldValue.delete() });
-            if (requester === 'employee') {
-                try { await fbDb.collection('empPending').doc(`${empUid}_${bossUid}`).delete(); } catch(e) {}
-            }
+            try { await fbDb.collection('empPending').doc(`${empUid}_${bossUid}`).delete(); } catch(e) {}
         }
 
         // 직원: 근로계약서 재제출 (boss 알림 포함)
@@ -1787,7 +1785,7 @@
             };
 
             return (
-                <div className="min-h-screen bg-gray-50 text-gray-800 font-sans relative pb-28 md:pb-6">
+                <div className="min-h-screen bg-gray-50 text-gray-800 font-sans relative pb-28 lg:pb-6">
                     <CustomModal config={modalConfig} />
                     {showBossSetup && (
                         <BossSetupModal
@@ -1884,26 +1882,26 @@
                                     </span>
                                 ) : null}
                                 <input type="file" accept=".json" ref={fileInputRef} style={{ display: 'none' }} onChange={handleFileImport} />
-                                <button onClick={handleImportClick} className="flex items-center gap-1 text-sm bg-green-500 hover:bg-green-400 px-2 md:px-3 py-1.5 rounded-md transition" title="데이터 불러오기">
+                                <button onClick={handleImportClick} className="flex items-center gap-1 text-sm bg-green-500 hover:bg-green-400 px-2 lg:px-3 py-1.5 rounded-md transition" title="데이터 불러오기">
                                     <Upload className="w-4 h-4" />
                                     <span className="hidden sm:inline">불러오기</span>
                                 </button>
-                                <button onClick={handleBackup} className="flex items-center gap-1 text-sm bg-green-500 hover:bg-green-400 px-2 md:px-3 py-1.5 rounded-md transition" title="데이터 백업하기">
+                                <button onClick={handleBackup} className="flex items-center gap-1 text-sm bg-green-500 hover:bg-green-400 px-2 lg:px-3 py-1.5 rounded-md transition" title="데이터 백업하기">
                                     <Download className="w-4 h-4" />
                                     <span className="hidden sm:inline">백업하기</span>
                                 </button>
-                                <div className="w-px h-6 bg-green-400 mx-1 hidden md:block"></div>
+                                <div className="w-px h-6 bg-green-400 mx-1 hidden lg:block"></div>
 
                                 {/* 수동 저장 버튼 */}
-                                <button onClick={handleManualSave} className="flex items-center gap-1 text-sm bg-blue-600 hover:bg-blue-700 text-white px-2 md:px-3 py-1.5 rounded-md transition shadow-sm font-bold" title="클라우드 저장">
+                                <button onClick={handleManualSave} className="flex items-center gap-1 text-sm bg-blue-600 hover:bg-blue-700 text-white px-2 lg:px-3 py-1.5 rounded-md transition shadow-sm font-bold" title="클라우드 저장">
                                     <SaveIcon className="w-4 h-4" />
                                     <span className="hidden sm:inline">저장</span>
                                 </button>
-                                <div className="w-px h-6 bg-green-400 mx-1 hidden md:block"></div>
-                                
+                                <div className="w-px h-6 bg-green-400 mx-1 hidden lg:block"></div>
+
                                 {/* 사용자 프로필 표시 (PC 화면) */}
                                 {firebaseUser && (
-                                    <div className="hidden md:flex items-center gap-2 mr-2 bg-green-700/50 px-2 py-1 rounded-full border border-green-500">
+                                    <div className="hidden lg:flex items-center gap-2 mr-2 bg-green-700/50 px-2 py-1 rounded-full border border-green-500">
                                         {firebaseUser.photoURL ? (
                                             <img src={firebaseUser.photoURL} alt="profile" className="w-6 h-6 rounded-full" />
                                         ) : (
@@ -1913,19 +1911,19 @@
                                     </div>
                                 )}
                                 
-                                <button onClick={() => setIsAuthenticated(false)} className="flex items-center gap-1 text-sm bg-green-700 hover:bg-green-800 px-2 md:px-3 py-1.5 rounded-md transition" title="잠금">
+                                <button onClick={() => setIsAuthenticated(false)} className="flex items-center gap-1 text-sm bg-green-700 hover:bg-green-800 px-2 lg:px-3 py-1.5 rounded-md transition" title="잠금">
                                     <Lock className="w-4 h-4" />
-                                    <span className="hidden md:inline">잠금</span>
+                                    <span className="hidden lg:inline">잠금</span>
                                 </button>
-                                <button onClick={handleLogout} className="flex items-center gap-1 text-sm bg-green-700 hover:bg-green-800 px-2 md:px-3 py-1.5 rounded-md transition" title="로그아웃">
+                                <button onClick={handleLogout} className="flex items-center gap-1 text-sm bg-green-700 hover:bg-green-800 px-2 lg:px-3 py-1.5 rounded-md transition" title="로그아웃">
                                     <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" x2="9" y1="12" y2="12"/></svg>
-                                    <span className="hidden md:inline">로그아웃</span>
+                                    <span className="hidden lg:inline">로그아웃</span>
                                 </button>
                             </div>
                         </div>
                     </header>
 
-                    <nav className="hidden md:block bg-white border-b border-gray-200 sticky top-0 z-20 shadow-sm">
+                    <nav className="hidden lg:block bg-white border-b border-gray-200 sticky top-0 z-20 shadow-sm">
                         <div className="max-w-7xl mx-auto px-4 relative flex items-center">
                             {navCanScrollLeft && (
                                 <button
@@ -2090,7 +2088,7 @@
                     </main>
 
                     {/* 모바일 하단 네비게이션 */}
-                    <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 z-40 shadow-[0_-10px_20px_rgba(0,0,0,0.05)] mobile-nav-safe">
+                    <nav className="lg:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 z-40 shadow-[0_-10px_20px_rgba(0,0,0,0.05)] mobile-nav-safe">
                         <div className="flex">
                             {[
                                 { id: 'employees', label: '근무자', icon: Users },
@@ -2615,20 +2613,20 @@
                                             placeholder="홍길동" />
                                     </div>
                                     <div>
-                                        <label className="block text-xs font-bold text-gray-600 mb-1">주소 (선택)</label>
+                                        <label className="block text-xs font-bold text-gray-600 mb-1">주소 *</label>
                                         <input value={profile.address} onChange={e => setProfile(p => ({ ...p, address: e.target.value }))}
                                             className="w-full border-2 border-gray-300 rounded-xl py-2.5 px-4 focus:border-blue-500 outline-none text-sm"
                                             placeholder="서울시 강남구 테헤란로 123" />
                                     </div>
                                     <div>
-                                        <label className="block text-xs font-bold text-gray-600 mb-1">연락처 (선택)</label>
+                                        <label className="block text-xs font-bold text-gray-600 mb-1">연락처 *</label>
                                         <input value={profile.phone}
                                             onChange={e => setProfile(p => ({ ...p, phone: formatPhone(e.target.value) }))}
                                             className="w-full border-2 border-gray-300 rounded-xl py-2.5 px-4 focus:border-blue-500 outline-none text-sm"
                                             placeholder="010-0000-0000" />
                                     </div>
                                     <div>
-                                        <label className="block text-xs font-bold text-gray-600 mb-1">주민번호 (선택)</label>
+                                        <label className="block text-xs font-bold text-gray-600 mb-1">주민번호 *</label>
                                         <input value={profile.residentId}
                                             onChange={e => setProfile(p => ({ ...p, residentId: formatResidentId(e.target.value) }))}
                                             className="w-full border-2 border-gray-300 rounded-xl py-2.5 px-4 focus:border-blue-500 outline-none text-sm font-mono tracking-wider"
@@ -2636,13 +2634,13 @@
                                     </div>
                                     <div className="grid grid-cols-2 gap-2">
                                         <div>
-                                            <label className="block text-xs font-bold text-gray-600 mb-1">은행명 (선택)</label>
+                                            <label className="block text-xs font-bold text-gray-600 mb-1">은행명 *</label>
                                             <input value={profile.bank} onChange={e => setProfile(p => ({ ...p, bank: e.target.value }))}
                                                 className="w-full border-2 border-gray-300 rounded-xl py-2.5 px-3 focus:border-blue-500 outline-none text-sm"
                                                 placeholder="국민은행" />
                                         </div>
                                         <div>
-                                            <label className="block text-xs font-bold text-gray-600 mb-1">계좌번호 (선택)</label>
+                                            <label className="block text-xs font-bold text-gray-600 mb-1">계좌번호 *</label>
                                             <input value={profile.account} onChange={e => setProfile(p => ({ ...p, account: e.target.value }))}
                                                 className="w-full border-2 border-gray-300 rounded-xl py-2.5 px-3 focus:border-blue-500 outline-none text-sm"
                                                 placeholder="123-456-789" />
@@ -2651,7 +2649,15 @@
                                 </div>
                                 {error && <p className="text-red-500 text-sm mb-3">{error}</p>}
                                 {contractTemplate ? (
-                                    <button onClick={() => { if (!name.trim()) { setError('이름을 입력해주세요.'); return; } setError(''); setShowContractWrite(true); }}
+                                    <button onClick={() => {
+                                        if (!name.trim()) { setError('이름을 입력해주세요.'); return; }
+                                        if (!profile.address.trim()) { setError('주소를 입력해주세요.'); return; }
+                                        if (!profile.phone.trim()) { setError('연락처를 입력해주세요.'); return; }
+                                        if (!profile.residentId.trim()) { setError('주민번호를 입력해주세요.'); return; }
+                                        if (!profile.bank.trim()) { setError('은행명을 입력해주세요.'); return; }
+                                        if (!profile.account.trim()) { setError('계좌번호를 입력해주세요.'); return; }
+                                        setError(''); setShowContractWrite(true);
+                                    }}
                                         className="w-full bg-purple-600 text-white py-3 rounded-xl font-bold hover:bg-purple-700 transition">
                                         근로계약서 작성하기
                                     </button>
@@ -3445,8 +3451,8 @@
                         <ContractViewModal contract={viewingContract} onClose={() => setViewingContract(null)} />
                     )}
 
-                    {/* Google 직원: 퇴사하기 */}
-                    {empAccount?.isGoogleEmployee && onDisconnectWorkplace && (
+                    {/* Google 직원: 퇴사하기 (근로계약서 완료 상태에서만) */}
+                    {empAccount?.isGoogleEmployee && onDisconnectWorkplace && contractStatus === 'completed' && (
                         <div className="bg-white rounded-xl border border-red-200 shadow-sm p-6">
                             <h3 className="text-base font-bold text-red-700 mb-2">퇴사하기</h3>
                             <button onClick={onDisconnectWorkplace}
@@ -3684,8 +3690,8 @@
                         const bossUid = currentWorkspaceId || firebaseUser.uid;
                         const result = await requestContractDelete(emp.empUid, bossUid, 'boss');
                         if (result === 'deleted') {
-                            setEmployees(prev => prev.map(e => e.id === emp.id ? { ...e, contractStatus: null, contractDeleteRequest: null } : e));
-                            showAlert('근로계약서가 삭제되었습니다.', '삭제 완료', 'success');
+                            setEmployees(prev => prev.map(e => e.id === emp.id ? { ...e, contractStatus: 'needs_resign', contract: null, contractDeleteRequest: null } : e));
+                            showAlert('근로계약서가 삭제되었습니다.\n근무자가 재작성해야 합니다.', '삭제 완료', 'success');
                         } else {
                             setEmployees(prev => prev.map(e => e.id === emp.id ? { ...e, contractDeleteRequest: 'boss' } : e));
                             showAlert('재작성 요청을 보냈습니다.\n근무자가 동의하면 삭제됩니다.', '요청 완료', 'success');
@@ -3769,7 +3775,7 @@
                                         {isContractBlocked && (
                                             <div className={`mb-2 px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1 ${contractStatus === 'needs_resign' ? 'bg-red-50 text-red-700 border border-red-200' : 'bg-yellow-50 text-yellow-700 border border-yellow-200'}`}>
                                                 <AlertCircle className="w-3.5 h-3.5 flex-shrink-0" />
-                                                {contractStatus === 'needs_resign' ? '! 근로계약서를 작성하세요' : '⏳ 근로계약서 서명 대기 중'}
+                                                {contractStatus === 'needs_resign' ? '⏳ 근로계약서 재작성 대기중' : '⏳ 근로계약서 서명 대기 중'}
                                             </div>
                                         )}
                                         <div className="flex justify-between items-start mb-3">
@@ -5038,7 +5044,7 @@
                             <button onClick={nextMonth} className="p-2 hover:bg-gray-100 rounded-full transition"><ChevronRight className="w-5 h-5 md:w-6 md:h-6" /></button>
                         </div>
                         {payrollList.length > 0 && (
-                            <button onClick={handleExcelDownload} className="hidden md:flex items-center gap-2 text-sm font-bold bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2.5 rounded-xl transition shadow-sm whitespace-nowrap">
+                            <button onClick={() => { if (window.innerWidth < 768) { alert('PC에서만 사용가능합니다.'); return; } handleExcelDownload(); }} className="flex items-center gap-2 text-sm font-bold bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2.5 rounded-xl transition shadow-sm whitespace-nowrap">
                                 <FileSpreadsheet className="w-4 h-4" />
                                 엑셀 다운로드
                             </button>
@@ -5735,8 +5741,11 @@
             return (
                 <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[10000] p-4" onClick={onClose}>
                     <div className="rounded-2xl shadow-2xl w-full max-w-lg" style={{ backgroundColor: 'white', color: '#111' }} onClick={e => e.stopPropagation()}>
-                        <div className="px-5 pt-5 pb-3 flex items-center justify-between">
-                            <h3 className="text-base font-bold" style={{ color: '#1f2937' }}>서명하기</h3>
+                        <div className="px-5 pt-5 pb-2 flex items-center justify-between">
+                            <div>
+                                <h3 className="text-base font-bold" style={{ color: '#1f2937' }}>서명하기</h3>
+                                <p className="text-xs mt-0.5" style={{ color: '#6b7280' }}>이름을 정자로 적어주세요</p>
+                            </div>
                             <button onClick={onClose} className="text-xl leading-none" style={{ color: '#9ca3af' }}>✕</button>
                         </div>
                         <div className="px-5 pb-2 relative">
@@ -5927,7 +5936,7 @@
                                     {signing ? '처리 중...' : '서명 완료 (계약 확정)'}
                                 </button>
                             )}
-                            <button onClick={handlePrint} className="flex-1 bg-indigo-500 text-white py-3 rounded-xl font-medium hover:bg-indigo-600 transition">PDF 인쇄</button>
+                            <button onClick={() => { if (window.innerWidth < 768) { alert('PC에서만 사용가능합니다.'); return; } handlePrint(); }} className="flex-1 bg-indigo-500 text-white py-3 rounded-xl font-medium hover:bg-indigo-600 transition">PDF 인쇄</button>
                             <button onClick={onClose} className="flex-1 bg-gray-100 text-gray-700 py-3 rounded-xl font-medium hover:bg-gray-200 transition">닫기</button>
                         </div>
                     </div>
@@ -6027,7 +6036,7 @@
             );
             const [ownerInfo, setOwnerInfo] = useState(existing?.ownerInfo || { shopName: '', phone: '', address: '', representative: '', signatureData: '' });
             const [saving, setSaving] = useState(false);
-            const [expanded, setExpanded] = useState(!!existing);
+            const [expanded, setExpanded] = useState(false);
 
             const addSection = () => setSections(prev => [...prev, { content: '', instruction: '' }]);
             const removeSection = (i) => { if (sections.length <= 1) return; setSections(prev => prev.filter((_, j) => j !== i)); };

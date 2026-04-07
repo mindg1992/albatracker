@@ -5928,7 +5928,11 @@
                     ${sectionsHtml}
                     <div style="border-top:1px solid #e5e7eb;padding-top:14px;margin-top:6px;">
                         <p style="font-size:12.5px;margin-bottom:14px;">작성일: <strong>${esc(c.date)}</strong></p>
-                        ${ownerHtml}${empHtml}${completedHtml}
+                        <div style="display:flex;gap:12px;align-items:flex-start;">
+                            <div style="flex:1;min-width:0;">${ownerHtml}</div>
+                            <div style="flex:1;min-width:0;">${empHtml}</div>
+                        </div>
+                        ${completedHtml}
                     </div>
                     </body></html>`;
 
@@ -5980,7 +5984,11 @@
                     ${sectionsHtml}
                     <div style="border-top:1px solid #e5e7eb;padding-top:14px;margin-top:6px;font-family:'Malgun Gothic',sans-serif;">
                         <p style="font-size:12.5px;margin-bottom:14px;">작성일: <strong>${esc(c.date)}</strong></p>
-                        ${ownerHtml}${empHtml}${completedHtml}
+                        <div style="display:flex;gap:12px;align-items:flex-start;">
+                            <div style="flex:1;min-width:0;">${ownerHtml}</div>
+                            <div style="flex:1;min-width:0;">${empHtml}</div>
+                        </div>
+                        ${completedHtml}
                     </div>`;
 
                 const shopName = (c.ownerInfo && c.ownerInfo.shopName) ? c.ownerInfo.shopName : '';

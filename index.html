@@ -495,7 +495,7 @@
             // 직원 workplaces 상태를 'resigned_by_emp'로 변경
             batch.update(
                 fbDb.collection('employeeAccounts').doc(empUid).collection('workplaces').doc(bossUid),
-                { status: 'resigned_by_emp', disconnectedAt: firebase.firestore.FieldValue.serverTimestamp() }
+                { status: 'resigned_by_emp', disconnectedAt: firebase.firestore.FieldValue.serverTimestamp(), contractDeleteRequest: firebase.firestore.FieldValue.delete() }
             );
             // 관리자가 감지할 수 있도록 empPending에 퇴사 신호 기록
             const pendingDocId = `${empUid}_${bossUid}`;
@@ -1327,7 +1327,7 @@
                             if (data.type === 'resigned_by_emp') {
                                 resignedEmpUidsRef.current.add(data.empUid);
                                 setEmployees(prev => prev.map(e =>
-                                    e.empUid === data.empUid ? { ...e, status: 'resigned' } : e
+                                    e.empUid === data.empUid ? { ...e, status: 'resigned', contractDeleteRequest: null } : e
                                 ));
                                 fbDb.collection('empPending').doc(d.id).delete().catch(() => {});
                                 return;

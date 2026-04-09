@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>알바트래커 v1.8.5</title>
+    <title>알바트래커 v1.8.6</title>
 
     <!-- PWA -->
     <link rel="manifest" href="manifest.json">
@@ -76,6 +76,19 @@
 </head>
 <body>
     <div id="root"></div>
+
+    <!-- 버전 체크: 앱 버전이 바뀌면 캐시된 구버전을 쓰는 사용자도 강제 새로고침 -->
+    <script>
+        (function() {
+            var APP_VERSION = 'v1.8.6';
+            var KEY = 'at_app_version';
+            var stored = localStorage.getItem(KEY);
+            localStorage.setItem(KEY, APP_VERSION);
+            if (stored && stored !== APP_VERSION) {
+                location.reload(true);
+            }
+        })();
+    </script>
 
     <script type="text/babel">
         const { useState, useEffect, useRef, useMemo } = React;
@@ -1851,6 +1864,13 @@
                                     fbDb.collection('bossWorkspaces').doc(firebaseUser.uid).update({
                                         workspaceIds: firebase.firestore.FieldValue.arrayUnion(bossSetupWorkspaceId)
                                     }).catch(() => {});
+                                    // 기존 업체 데이터가 새 업체에 복사되지 않도록 초기화 후 전환
+                                    setEmployees([]);
+                                    setNextEmpId(1);
+                                    setMonthlyData({});
+                                    setPredictData({});
+                                    setGlobalMinWage('');
+                                    lastSyncedDataRef.current = '';
                                     setCurrentWorkspaceId(bossSetupWorkspaceId);
                                     localStorage.setItem('bossWorkspaceId', bossSetupWorkspaceId);
                                     sessionStorage.setItem('bossWorkspaceSelected', bossSetupWorkspaceId);
@@ -2205,6 +2225,8 @@
                                 deleteScheduledAt={wsDeleteScheduledAt}
                                 onDeleteWorkspace={handleDeleteWorkspace}
                                 onCancelDeleteWorkspace={handleCancelDeleteWorkspace}
+                                employees={employees}
+                                setEmployees={setEmployees}
                             />
                         )}
                         </div>
@@ -2330,8 +2352,8 @@
                         {!empName && (
                             <div className="mt-6 text-left border-t border-gray-100 pt-4 space-y-1">
                                 <p className="text-[10px] text-gray-300 leading-relaxed">알바트래커v1.8.3: 관리자 전체공지기능 추가</p>
-                                <p className="text-[10px] text-gray-300 leading-relaxed">알바트래커v1.8.4: 근로계약서 재작성 요청 알림 및 탭 뱃지 추가</p>
                                 <p className="text-[10px] text-gray-300 leading-relaxed">알바트래커v1.8.5: 근로계약서 PDF 저장 기능 추가</p>
+                                <p className="text-[10px] text-gray-300 leading-relaxed">알바트래커v1.8.6: 시급변경 재작성 알림, PDF 개선, 업체추가 버그 수정</p>
                             </div>
                         )}
                     </div>
@@ -3745,6 +3767,7 @@
             const [editingEmp, setEditingEmp] = useState(null);
             const [viewingContract, setViewingContract] = useState(null); // { contract, empUid }
             const [modalDeleteReq, setModalDeleteReq] = useState(null);
+            const prevMinWageRef = useRef(''); // 최저시급 편집 시작 전 값 저장용
             const [signingEmpUid, setSigningEmpUid] = useState(null);
 
             // 팝업 열려있는 동안 해당 직원 workplaces 문서 실시간 감지
@@ -3794,7 +3817,24 @@
                 if (editingEmp) {
                     const oldStatus = editingEmp.status || (editingEmp.isWorking === false ? 'resigned' : 'working');
                     const newStatus = dataToSave.status;
-                    setEmployees(prev => prev.map(e => e.id === dataToSave.id ? dataToSave : e));
+
+                    // 시급 변경 감지: 계약서가 완료된 근무자의 시급이 바뀌면 재작성 필요
+                    const oldWage = Number(editingEmp.wage) || Number(globalMinWage);
+                    const newWage = Number(dataToSave.wage) || Number(globalMinWage);
+                    const wageChanged = oldWage !== newWage;
+                    let finalData = { ...dataToSave };
+                    if (wageChanged && editingEmp.contractStatus === 'completed' && workspaceInfo?.contractTemplate) {
+                        finalData = { ...finalData, contractStatus: 'needs_resign' };
+                        showAlert('급여가 변경되면 근로계약서를 재작성해야합니다. 템플릿을 수정해주세요.', '계약서 재작성 필요', 'alert');
+                        if (dataToSave.empUid && currentWorkspaceId) {
+                            fbDb.collection('employeeAccounts').doc(dataToSave.empUid)
+                                .collection('workplaces').doc(currentWorkspaceId)
+                                .update({ contractStatus: 'needs_resign' })
+                                .catch(() => {});
+                        }
+                    }
+
+                    setEmployees(prev => prev.map(e => e.id === finalData.id ? finalData : e));
 
                     if (oldStatus !== newStatus) {
                         // Google 직원이면 workplaces 서브컬렉션 workStatus 업데이트 + 알림
@@ -3909,7 +3949,40 @@
                                     className="w-24 border-none focus:ring-0 text-sm text-right outline-none bg-transparent p-0"
                                     value={globalMinWage}
                                     placeholder="입력필수"
+                                    onFocus={() => { prevMinWageRef.current = globalMinWage; }}
                                     onChange={(e) => setGlobalMinWage(e.target.value)}
+                                    onBlur={() => {
+                                        const oldVal = prevMinWageRef.current;
+                                        const newVal = globalMinWage;
+                                        if (newVal === oldVal || !newVal || Number(newVal) <= 0) return;
+                                        if (!workspaceInfo?.contractTemplate) return;
+                                        // 최저시급 적용 중인 근무자(시급 미설정 또는 이전 최저시급과 동일) 중 계약 완료자 찾기
+                                        const affectedEmps = employees.filter(emp => {
+                                            const usesMinWage = !emp.wage || Number(emp.wage) === 0 || Number(emp.wage) === Number(oldVal);
+                                            return usesMinWage && emp.contractStatus === 'completed';
+                                        });
+                                        if (affectedEmps.length > 0) {
+                                            showAlert('급여가 변경되면 근로계약서를 재작성해야합니다. 템플릿을 수정해주세요.', '계약서 재작성 필요', 'alert');
+                                            setEmployees(prev => prev.map(e =>
+                                                affectedEmps.some(a => a.id === e.id)
+                                                    ? { ...e, contractStatus: 'needs_resign' }
+                                                    : e
+                                            ));
+                                            const bossUid = currentWorkspaceId;
+                                            if (bossUid) {
+                                                const batch = fbDb.batch();
+                                                affectedEmps.forEach(emp => {
+                                                    if (emp.empUid) {
+                                                        batch.update(
+                                                            fbDb.collection('employeeAccounts').doc(emp.empUid).collection('workplaces').doc(bossUid),
+                                                            { contractStatus: 'needs_resign' }
+                                                        );
+                                                    }
+                                                });
+                                                batch.commit().catch(() => {});
+                                            }
+                                        }
+                                    }}
                                 />
                                 <span className="text-sm text-gray-500 font-medium whitespace-nowrap">원</span>
                             </div>
@@ -6030,57 +6103,27 @@
                 const esc = s => String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
                 const sigImg = src => src ? `<img src="${src}" style="height:52px;object-fit:contain;border:1px solid #e5e7eb;border-radius:8px;background:#fff;padding:3px;display:block;margin-top:6px;">` : '';
 
-                const sectionsHtml = (c.sections || []).map(s => `
-                    <div style="background:#f9fafb;border-radius:10px;padding:14px;margin-bottom:10px;page-break-inside:avoid;">
-                        <p style="font-size:12.5px;color:#1f2937;white-space:pre-wrap;line-height:1.6;margin:0;">${esc(s.content)}</p>
-                        ${s.instruction ? `<p style="font-size:11px;color:#3b82f6;font-style:italic;margin:5px 0 0;">※ ${esc(s.instruction)}</p>` : ''}
-                        ${s.answer ? `<div style="border-bottom:2px solid #9ca3af;padding-bottom:3px;margin-top:7px;"><p style="font-size:13px;font-weight:600;color:#111;margin:0;">${esc(s.answer)}</p></div>` : ''}
-                    </div>`).join('');
+                // instruction(지시 문구)은 PDF에서 제외
+                const sectionsHtml = (c.sections || []).map(s => `<div style="background:#f9fafb;border-radius:8px;padding:8px 10px;margin-bottom:6px;page-break-inside:avoid;"><p style="font-size:10.5px;color:#1f2937;white-space:pre-wrap;line-height:1.45;margin:0;">${esc(s.content)}</p>${s.answer ? `<div style="border-bottom:2px solid #9ca3af;padding-bottom:2px;margin-top:5px;"><p style="font-size:11px;font-weight:600;color:#111;margin:0;">${esc(s.answer)}</p></div>` : ''}</div>`).join('');
 
-                const ownerHtml = c.ownerInfo ? `
-                    <div style="background:#eff6ff;border-radius:10px;padding:14px;margin-bottom:10px;page-break-inside:avoid;">
-                        <p style="font-size:11px;font-weight:700;color:#1d4ed8;margin:0 0 7px;">사업주</p>
-                        <p style="font-size:12.5px;margin:2px 0;">사업체명: ${esc(c.ownerInfo.shopName)}${c.ownerInfo.phone ? ` (전화: ${esc(c.ownerInfo.phone)})` : ''}</p>
-                        <p style="font-size:12.5px;margin:2px 0;">주소: ${esc(c.ownerInfo.address)}</p>
-                        <p style="font-size:12.5px;margin:2px 0;">대표자: ${esc(c.ownerInfo.representative)}</p>
-                        ${sigImg(c.ownerInfo.signatureData)}
-                    </div>` : '';
+                const ownerHtml = c.ownerInfo ? `<div style="background:#eff6ff;border-radius:8px;padding:8px 10px;margin-bottom:6px;page-break-inside:avoid;"><p style="font-size:9.5px;font-weight:700;color:#1d4ed8;margin:0 0 4px;">사업주</p><p style="font-size:10.5px;margin:1px 0;">사업체명: ${esc(c.ownerInfo.shopName)}${c.ownerInfo.phone ? ` (전화: ${esc(c.ownerInfo.phone)})` : ''}</p><p style="font-size:10.5px;margin:1px 0;">주소: ${esc(c.ownerInfo.address)}</p><p style="font-size:10.5px;margin:1px 0;">대표자: ${esc(c.ownerInfo.representative)}</p>${sigImg(c.ownerInfo.signatureData)}</div>` : '';
 
-                const empHtml = c.employeeInfo ? `
-                    <div style="background:#f0fdf4;border-radius:10px;padding:14px;margin-bottom:10px;page-break-inside:avoid;">
-                        <p style="font-size:11px;font-weight:700;color:#15803d;margin:0 0 7px;">근로자</p>
-                        <p style="font-size:12.5px;margin:2px 0;">주소: ${esc(c.employeeInfo.address)}</p>
-                        <p style="font-size:12.5px;margin:2px 0;">연락처: ${esc(c.employeeInfo.phone)}</p>
-                        <p style="font-size:12.5px;margin:2px 0;">성명: ${esc(c.employeeInfo.name)}</p>
-                        ${sigImg(c.employeeInfo.signatureData)}
-                    </div>` : '';
+                const empHtml = c.employeeInfo ? `<div style="background:#f0fdf4;border-radius:8px;padding:8px 10px;margin-bottom:6px;page-break-inside:avoid;"><p style="font-size:9.5px;font-weight:700;color:#15803d;margin:0 0 4px;">근로자</p><p style="font-size:10.5px;margin:1px 0;">주소: ${esc(c.employeeInfo.address)}</p><p style="font-size:10.5px;margin:1px 0;">연락처: ${esc(c.employeeInfo.phone)}</p><p style="font-size:10.5px;margin:1px 0;">성명: ${esc(c.employeeInfo.name)}</p>${sigImg(c.employeeInfo.signatureData)}</div>` : '';
 
-                const completedHtml = c.status === 'completed' ? `
-                    <div style="background:#dcfce7;border:1px solid #86efac;border-radius:10px;padding:10px;text-align:center;page-break-inside:avoid;">
-                        <p style="color:#15803d;font-weight:700;font-size:13px;margin:0;">✓ 계약 완료</p>
-                    </div>` : '';
+                const completedHtml = c.status === 'completed' ? `<div style="background:#dcfce7;border:1px solid #86efac;border-radius:8px;padding:8px;text-align:center;page-break-inside:avoid;"><p style="color:#15803d;font-weight:700;font-size:11px;margin:0;">✓ 계약 완료</p></div>` : '';
 
                 const element = document.createElement('div');
-                element.innerHTML = `
-                    <h2 style="text-align:center;border-bottom:2px solid #e5e7eb;padding-bottom:10px;margin:0 0 18px;font-size:17px;font-family:'Malgun Gothic',sans-serif;">${esc(c.title || '근로계약서')}</h2>
-                    ${sectionsHtml}
-                    <div style="border-top:1px solid #e5e7eb;padding-top:14px;margin-top:6px;font-family:'Malgun Gothic',sans-serif;">
-                        <p style="font-size:12.5px;margin-bottom:14px;">작성일: <strong>${esc(c.date)}</strong></p>
-                        <div style="display:flex;gap:12px;align-items:flex-start;">
-                            <div style="flex:1;min-width:0;">${ownerHtml}</div>
-                            <div style="flex:1;min-width:0;">${empHtml}</div>
-                        </div>
-                        ${completedHtml}
-                    </div>`;
+                element.style.cssText = 'width:700px;padding:0;margin:0;font-family:"Malgun Gothic",sans-serif;background:#fff;color:#111;box-sizing:border-box;';
+                element.innerHTML = `<h2 style="text-align:center;border-bottom:2px solid #e5e7eb;padding-bottom:8px;margin:0 0 10px;font-size:15px;font-family:'Malgun Gothic',sans-serif;">${esc(c.title || '근로계약서')}</h2>${sectionsHtml}<div style="border-top:1px solid #e5e7eb;padding-top:10px;margin-top:4px;font-family:'Malgun Gothic',sans-serif;"><p style="font-size:10.5px;margin-bottom:8px;">작성일: <strong>${esc(c.date)}</strong></p><div style="display:flex;gap:10px;align-items:flex-start;"><div style="flex:1;min-width:0;">${ownerHtml}</div><div style="flex:1;min-width:0;">${empHtml}</div></div>${completedHtml}</div>`;
 
                 const shopName = (c.ownerInfo && c.ownerInfo.shopName) ? c.ownerInfo.shopName : '';
                 const empName = (c.employeeInfo && c.employeeInfo.name) ? c.employeeInfo.name : '';
                 const fileName = [shopName, c.title || '근로계약서', c.date || '', empName].filter(Boolean).join('_') + '.pdf';
                 const opt = {
-                    margin: [15, 15, 15, 15],
+                    margin: [10, 12, 10, 12],
                     filename: fileName,
                     image: { type: 'jpeg', quality: 0.98 },
-                    html2canvas: { scale: 2, useCORS: true },
+                    html2canvas: { scale: 2, useCORS: true, logging: false },
                     jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
                 };
                 html2pdf().set(opt).from(element).save();
@@ -6311,7 +6354,7 @@
         }
 
         // ─── 관리자: 근로계약서 템플릿 편집기 ───
-        function ContractTemplateEditor({ workspaceInfo, setWorkspaceInfo, workspaceId, firebaseUser, showAlert }) {
+        function ContractTemplateEditor({ workspaceInfo, setWorkspaceInfo, workspaceId, firebaseUser, showAlert, employees, setEmployees }) {
             const existing = workspaceInfo?.contractTemplate;
             const [title, setTitle] = useState(existing?.title || '근로계약서');
             const [sections, setSections] = useState(
@@ -6330,6 +6373,7 @@
                 if (!title.trim()) { showAlert('제목을 입력해주세요.', '입력 오류', 'alert'); return; }
                 const emptySections = sections.some(s => !s.content.trim());
                 if (emptySections) { showAlert('모든 내용칸을 입력해주세요.', '입력 오류', 'alert'); return; }
+                const isFirstSave = !existing;
                 setSaving(true);
                 try {
                     // 서명을 새로 그리지 않았으면 기존 서명 유지
@@ -6339,7 +6383,35 @@
                     const template = { title: title.trim(), sections, ownerInfo: finalOwnerInfo };
                     await saveContractTemplate(workspaceId || firebaseUser.uid, template);
                     setWorkspaceInfo(prev => ({ ...prev, contractTemplate: template }));
-                    showAlert('근로계약서 템플릿이 저장되었습니다.', '저장 완료', 'success');
+
+                    // 템플릿 첫 저장 시: 이미 가입한 근무자(계약서 없는 상태) → 재작성 필요로 전환
+                    if (isFirstSave && employees && setEmployees) {
+                        const bossUid = workspaceId || firebaseUser.uid;
+                        const needsContract = (employees || []).filter(emp =>
+                            emp.empUid && (emp.status === 'working' || !emp.status) &&
+                            (!emp.contractStatus || emp.contractStatus === null)
+                        );
+                        if (needsContract.length > 0) {
+                            setEmployees(prev => prev.map(e =>
+                                needsContract.some(n => n.id === e.id)
+                                    ? { ...e, contractStatus: 'needs_resign' }
+                                    : e
+                            ));
+                            const batch = fbDb.batch();
+                            needsContract.forEach(emp => {
+                                batch.update(
+                                    fbDb.collection('employeeAccounts').doc(emp.empUid).collection('workplaces').doc(bossUid),
+                                    { contractStatus: 'needs_resign' }
+                                );
+                            });
+                            batch.commit().catch(() => {});
+                            showAlert(`근로계약서 템플릿이 저장되었습니다.\n이미 가입한 근무자 ${needsContract.length}명에게 근로계약서 재작성이 요청되었습니다.`, '저장 완료', 'success');
+                        } else {
+                            showAlert('근로계약서 템플릿이 저장되었습니다.', '저장 완료', 'success');
+                        }
+                    } else {
+                        showAlert('근로계약서 템플릿이 저장되었습니다.', '저장 완료', 'success');
+                    }
                 } catch(e) { showAlert('저장 실패: ' + e.message, '오류', 'error'); }
                 setSaving(false);
             };
@@ -6532,7 +6604,7 @@
             );
         }
 
-        function TabSettings({ appPin, setAppPin, showAlert, showConfirm, workspaceInfo, setWorkspaceInfo, firebaseUser, workspaceId, isDeleting, deleteScheduledAt, onDeleteWorkspace, onCancelDeleteWorkspace }) {
+        function TabSettings({ appPin, setAppPin, showAlert, showConfirm, workspaceInfo, setWorkspaceInfo, firebaseUser, workspaceId, isDeleting, deleteScheduledAt, onDeleteWorkspace, onCancelDeleteWorkspace, employees, setEmployees }) {
             const [currentPin, setCurrentPin] = useState('');
             const [newPin, setNewPin] = useState('');
             const [confirmPin, setConfirmPin] = useState('');
@@ -6699,6 +6771,8 @@
                         workspaceId={workspaceId}
                         firebaseUser={firebaseUser}
                         showAlert={showAlert}
+                        employees={employees}
+                        setEmployees={setEmployees}
                     />
                 )}
 

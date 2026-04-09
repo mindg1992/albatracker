@@ -4396,7 +4396,7 @@
                                 <div>
                                     <h2 className="text-base font-bold text-gray-800">{emp.name}님 근로계약서 {reason === 'new_contract' ? '작성 요청' : '재작성 요청'}</h2>
                                     <p className="text-xs text-gray-500">
-                                        {reason === 'new_contract' ? '신규 개인 근로계약서 작성' : reason === 'rewrite_request' ? '관리자 직접 재작성 요청' : '시급 변경으로 인한 개인 계약서 업데이트'}
+                                        {reason === 'new_contract' ? '신규 개인 근로계약서 작성' : (reason === 'rewrite_request' || reason === 'boss_rewrite') ? '관리자 직접 재작성 요청' : '시급 변경으로 인한 개인 계약서 업데이트'}
                                     </p>
                                 </div>
                             </div>
@@ -4411,7 +4411,7 @@
                             <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 text-xs text-blue-700">
                                 {reason === 'new_contract'
                                     ? `${emp.name}님 전용 근로계약서를 새로 작성합니다. 내용 작성 후 저장하면 해당 근무자에게 계약서 작성이 요청됩니다.`
-                                    : reason === 'rewrite_request'
+                                    : (reason === 'rewrite_request' || reason === 'boss_rewrite')
                                     ? `${emp.name}님에게 근로계약서 재작성을 요청합니다. 내용을 수정 후 저장하면 해당 근무자에게 재작성이 요청됩니다.`
                                     : `시급이 변경된 ${emp.name}님 전용 근로계약서입니다. 내용을 수정 후 저장하면 해당 근무자에게 재작성이 요청됩니다.`}
                             </div>
@@ -4713,7 +4713,7 @@
             const [modalDeleteReq, setModalDeleteReq] = useState(null);
             const [signingEmpUid, setSigningEmpUid] = useState(null);
             const [personalTemplateTarget, setPersonalTemplateTarget] = useState(null); // 개인 근로계약서 팝업 대상 근무자
-            const [personalTemplateReason, setPersonalTemplateReason] = useState('wage_change'); // 'wage_change' | 'rewrite_request' | 'new_contract'
+            const [personalTemplateReason, setPersonalTemplateReason] = useState('wage_change'); // 'wage_change' | 'rewrite_request' | 'boss_rewrite' | 'new_contract'
             const [minWageModalOpen, setMinWageModalOpen] = useState(false);
             const [minWageTemplateAfterSave, setMinWageTemplateAfterSave] = useState(null); // { affectedEmps }
 
@@ -5197,7 +5197,7 @@
                                     }
                                     // 관리자가 재작성 시작: 템플릿 편집창 먼저 표시
                                     setViewingContract(null);
-                                    setPersonalTemplateReason('rewrite_request');
+                                    setPersonalTemplateReason('boss_rewrite');
                                     setPersonalTemplateTarget(emp);
                                 } else if (modalDeleteReq === 'employee') {
                                     // 근무자 요청에 동의: contractDeleteRequest 삭제 후 템플릿 편집창 오픈

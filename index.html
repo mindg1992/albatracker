@@ -4645,8 +4645,28 @@
                 setGlobalMinWage(newVal);
                 setMinWageModalOpen(false);
                 const newMin = Number(newVal);
-                // wageBelowMin 플래그 업데이트
-                const nowLowEmps = employees.filter(emp => emp.empUid && emp.wage && Number(emp.wage) > 0 && Number(emp.wage) < newMin);
+
+                // 기존 최저시급과 동일하게 설정된 근무자 시급 자동 업데이트
+                const equalWageEmps = employees.filter(emp => Number(emp.wage) === Number(oldVal) && Number(emp.wage) > 0);
+                if (equalWageEmps.length > 0) {
+                    setEmployees(prev => prev.map(e =>
+                        Number(e.wage) === Number(oldVal) && Number(e.wage) > 0 ? { ...e, wage: newMin } : e
+                    ));
+                    if (currentWorkspaceId) {
+                        equalWageEmps.forEach(emp => {
+                            if (emp.empUid) {
+                                sendWageChangeNotification(emp.empUid, Number(oldVal), newMin).catch(() => {});
+                                fbDb.collection('employeeAccounts').doc(emp.empUid)
+                                    .collection('workplaces').doc(currentWorkspaceId)
+                                    .update({ wageBelowMin: firebase.firestore.FieldValue.delete() })
+                                    .catch(() => {});
+                            }
+                        });
+                    }
+                }
+
+                // wageBelowMin 플래그 업데이트 (시급이 최저시급과 다른 근무자 대상)
+                const nowLowEmps = employees.filter(emp => emp.empUid && emp.wage && Number(emp.wage) > 0 && Number(emp.wage) < newMin && Number(emp.wage) !== Number(oldVal));
                 const noLongerLowEmps = employees.filter(emp => emp.empUid && emp.wage && Number(emp.wage) > 0 && Number(emp.wage) >= newMin && Number(emp.wage) < Number(oldVal));
                 if (currentWorkspaceId && (nowLowEmps.length > 0 || noLongerLowEmps.length > 0)) {
                     const batch = fbDb.batch();

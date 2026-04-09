@@ -4787,7 +4787,18 @@
                             onClose={() => setViewingContract(null)}
                             viewerRole="boss"
                             contractDeleteRequest={modalDeleteReq}
-                            onRequestDelete={() => { handleDeleteContract(viewingContract.emp); }}
+                            onRequestDelete={() => {
+                                if (modalDeleteReq === null) {
+                                    // 관리자가 재작성 시작: 템플릿 편집창 먼저 표시
+                                    const emp = viewingContract.emp;
+                                    setViewingContract(null);
+                                    setPersonalTemplateReason('rewrite_request');
+                                    setPersonalTemplateTarget(emp);
+                                } else {
+                                    // 근무자가 먼저 요청한 경우: 동의하여 즉시 삭제
+                                    handleDeleteContract(viewingContract.emp);
+                                }
+                            }}
                             onCancelDelete={() => { handleCancelDeleteContract(viewingContract.emp); }}
                         />
                     )}

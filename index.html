@@ -4366,7 +4366,10 @@
                     const oldWage = Number(editingEmp.wage) || Number(globalMinWage);
                     const newWage = Number(dataToSave.wage) || Number(globalMinWage);
                     const wageChanged = oldWage !== newWage;
-                    let finalData = { ...dataToSave };
+                    const resolvedWage = (dataToSave.wage && Number(dataToSave.wage) > 0)
+                        ? dataToSave.wage
+                        : (Number(globalMinWage) > 0 ? Number(globalMinWage) : '');
+                    let finalData = { ...dataToSave, wage: resolvedWage };
                     if (wageChanged && (editingEmp.contractStatus === 'completed' || editingEmp.contractStatus === 'needs_resign')) {
                         const hadPersonalWage = editingEmp.wage && Number(editingEmp.wage) > 0;
                         const hasPersonalWage = dataToSave.wage && Number(dataToSave.wage) > 0;
@@ -4439,7 +4442,10 @@
                         }
                     }
                 } else {
-                    setEmployees(prev => [...prev, dataToSave]);
+                    const newEmpWage = (dataToSave.wage && Number(dataToSave.wage) > 0)
+                        ? dataToSave.wage
+                        : (Number(globalMinWage) > 0 ? Number(globalMinWage) : '');
+                    setEmployees(prev => [...prev, { ...dataToSave, wage: newEmpWage }]);
                     setNextEmpId(prev => prev + 1);
                 }
                 setIsModalOpen(false);

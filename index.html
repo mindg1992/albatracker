@@ -3987,6 +3987,7 @@
             const [showContractWrite, setShowContractWrite] = useState(false);
             const [contractTemplate, setContractTemplate] = useState(null);
             const [liveDeleteReq, setLiveDeleteReq] = useState(empAccount?.contractDeleteRequest || null);
+            const [infoExpanded, setInfoExpanded] = useState(false);
 
             const contractStatus = empAccount?.contractStatus || null;
             const isContractBlocked = contractStatus === 'needs_resign' || contractStatus === 'pending_boss';
@@ -4128,53 +4129,63 @@
                         </div>
                     )}
 
-                    <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6">
-                        <h2 className="text-lg font-bold text-gray-800 mb-1">내 정보</h2>
-                        <p className="text-sm text-gray-500 mb-5">입력한 정보는 관리자에게만 공유됩니다.</p>
-                        <div className="space-y-4">
+                    <div className="bg-white rounded-xl border border-gray-200 shadow-sm">
+                        <button onClick={() => setInfoExpanded(p => !p)} className="w-full flex items-center justify-between p-6 text-left">
                             <div>
-                                <label className="block text-sm font-bold text-gray-700 mb-1">이름</label>
-                                <p className="border border-gray-200 rounded-xl py-3 px-4 text-gray-700 bg-gray-50">{empAccount?.name}</p>
+                                <h2 className="text-lg font-bold text-gray-800">내 정보</h2>
+                                {!infoExpanded && <p className="text-sm text-gray-400 mt-0.5">탭하여 정보 입력/수정</p>}
                             </div>
-                            <div>
-                                <label className="block text-sm font-bold text-gray-700 mb-1">주소</label>
-                                <input value={formData.address}
-                                    onChange={e => setFormData(p => ({ ...p, address: e.target.value }))}
-                                    className="w-full border-2 border-gray-300 rounded-xl py-3 px-4 focus:border-blue-500 outline-none"
-                                    placeholder="서울시 강남구 테헤란로 123" />
-                            </div>
-                            <div>
-                                <label className="block text-sm font-bold text-gray-700 mb-1">연락처</label>
-                                <input value={formData.phone}
-                                    onChange={e => setFormData(p => ({ ...p, phone: formatPhone(e.target.value) }))}
-                                    className="w-full border-2 border-gray-300 rounded-xl py-3 px-4 focus:border-blue-500 outline-none"
-                                    placeholder="010-0000-0000" />
-                            </div>
-                            <div>
-                                <label className="block text-sm font-bold text-gray-700 mb-1">주민번호</label>
-                                <input value={formData.residentId}
-                                    onChange={e => setFormData(p => ({ ...p, residentId: formatResidentId(e.target.value) }))}
-                                    className="w-full border-2 border-gray-300 rounded-xl py-3 px-4 focus:border-blue-500 outline-none font-mono tracking-wider"
-                                    placeholder="000000-0000000" />
-                            </div>
-                            <div>
-                                <label className="block text-sm font-bold text-gray-700 mb-1">은행명</label>
-                                <input value={formData.bank}
-                                    onChange={e => setFormData(p => ({ ...p, bank: e.target.value }))}
-                                    className="w-full border-2 border-gray-300 rounded-xl py-3 px-4 focus:border-blue-500 outline-none"
-                                    placeholder="예: 국민은행" />
-                            </div>
-                            <div>
-                                <label className="block text-sm font-bold text-gray-700 mb-1">계좌번호</label>
-                                <input value={formData.account}
-                                    onChange={e => setFormData(p => ({ ...p, account: e.target.value }))}
-                                    className="w-full border-2 border-gray-300 rounded-xl py-3 px-4 focus:border-blue-500 outline-none"
-                                    placeholder="예: 123-456-789012" />
-                            </div>
-                        </div>
-                        <button onClick={handleSave} disabled={saving} className="w-full mt-6 bg-blue-600 text-white py-3 rounded-xl font-bold hover:bg-blue-700 transition disabled:opacity-50">
-                            {saving ? '저장 중...' : '저장하기'}
+                            <ChevronDown className={`w-5 h-5 text-gray-400 transition-transform ${infoExpanded ? 'rotate-180' : ''}`} />
                         </button>
+                        {infoExpanded && (
+                            <div className="px-6 pb-6">
+                                <p className="text-sm text-gray-500 mb-5">입력한 정보는 관리자에게만 공유됩니다.</p>
+                                <div className="space-y-4">
+                                    <div>
+                                        <label className="block text-sm font-bold text-gray-700 mb-1">이름</label>
+                                        <p className="border border-gray-200 rounded-xl py-3 px-4 text-gray-700 bg-gray-50">{empAccount?.name}</p>
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-bold text-gray-700 mb-1">주소</label>
+                                        <input value={formData.address}
+                                            onChange={e => setFormData(p => ({ ...p, address: e.target.value }))}
+                                            className="w-full border-2 border-gray-300 rounded-xl py-3 px-4 focus:border-blue-500 outline-none"
+                                            placeholder="서울시 강남구 테헤란로 123" />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-bold text-gray-700 mb-1">연락처</label>
+                                        <input value={formData.phone}
+                                            onChange={e => setFormData(p => ({ ...p, phone: formatPhone(e.target.value) }))}
+                                            className="w-full border-2 border-gray-300 rounded-xl py-3 px-4 focus:border-blue-500 outline-none"
+                                            placeholder="010-0000-0000" />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-bold text-gray-700 mb-1">주민번호</label>
+                                        <input value={formData.residentId}
+                                            onChange={e => setFormData(p => ({ ...p, residentId: formatResidentId(e.target.value) }))}
+                                            className="w-full border-2 border-gray-300 rounded-xl py-3 px-4 focus:border-blue-500 outline-none font-mono tracking-wider"
+                                            placeholder="000000-0000000" />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-bold text-gray-700 mb-1">은행명</label>
+                                        <input value={formData.bank}
+                                            onChange={e => setFormData(p => ({ ...p, bank: e.target.value }))}
+                                            className="w-full border-2 border-gray-300 rounded-xl py-3 px-4 focus:border-blue-500 outline-none"
+                                            placeholder="예: 국민은행" />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-bold text-gray-700 mb-1">계좌번호</label>
+                                        <input value={formData.account}
+                                            onChange={e => setFormData(p => ({ ...p, account: e.target.value }))}
+                                            className="w-full border-2 border-gray-300 rounded-xl py-3 px-4 focus:border-blue-500 outline-none"
+                                            placeholder="예: 123-456-789012" />
+                                    </div>
+                                </div>
+                                <button onClick={handleSave} disabled={saving} className="w-full mt-6 bg-blue-600 text-white py-3 rounded-xl font-bold hover:bg-blue-700 transition disabled:opacity-50">
+                                    {saving ? '저장 중...' : '저장하기'}
+                                </button>
+                            </div>
+                        )}
                     </div>
 
                     {/* 근로계약서 보기 */}
@@ -6396,6 +6407,15 @@
                 return () => window.removeEventListener('keydown', handleKeyDown);
             }, [year, month]);
 
+            const payrollTouchStartX = useRef(null);
+            const handlePayrollTouchStart = (e) => { payrollTouchStartX.current = e.touches[0].clientX; };
+            const handlePayrollTouchEnd = (e) => {
+                if (payrollTouchStartX.current === null) return;
+                const dx = e.changedTouches[0].clientX - payrollTouchStartX.current;
+                if (Math.abs(dx) > 50) { dx < 0 ? nextMonth() : prevMonth(); }
+                payrollTouchStartX.current = null;
+            };
+
             const payrollList = useMemo(() => {
                 const list = {};
                 const monthData = monthlyData[monthKey]?.days || {};
@@ -6539,7 +6559,7 @@
                         )}
                     </div>
 
-                    <div className="md:hidden space-y-3">
+                    <div className="md:hidden space-y-3" onTouchStart={handlePayrollTouchStart} onTouchEnd={handlePayrollTouchEnd}>
                         {payrollList.length === 0 ? (
                             <div className="bg-white rounded-2xl border border-gray-200 p-8 text-center text-gray-500">해당 월의 인건비 지급 내역이 없습니다.</div>
                         ) : (
@@ -6909,14 +6929,14 @@
             return (
                 <div className="bg-white p-6 md:p-8 rounded-2xl shadow-sm border border-gray-200 max-w-5xl mx-auto space-y-10">
                     <div>
-                        <div className="flex justify-between items-center mb-8">
-                            <h2 className="text-lg md:text-xl font-bold text-gray-800 flex items-center gap-2">
-                                <BarChart3 className="text-green-600" /> 월별 매출 및 인건비 추이
+                        <div className="flex justify-between items-center mb-8 gap-3">
+                            <h2 className="text-lg md:text-xl font-bold text-gray-800 flex items-center gap-2 whitespace-nowrap">
+                                <BarChart3 className="text-green-600 flex-shrink-0" /> 월별 매출 및 인건비 추이
                             </h2>
-                            <select 
-                                value={selectedYear} 
+                            <select
+                                value={selectedYear}
                                 onChange={e => setSelectedYear(parseInt(e.target.value))}
-                                className="border border-gray-200 rounded-xl px-4 py-2 font-bold bg-gray-50 focus:ring-2 focus:ring-green-500 outline-none transition"
+                                className="border border-gray-200 rounded-xl px-4 py-2 font-bold bg-gray-50 focus:ring-2 focus:ring-green-500 outline-none transition flex-shrink-0"
                             >
                                 {availableYears.map(y => <option key={y} value={y}>{y}년</option>)}
                             </select>
@@ -6928,22 +6948,25 @@
                             <div className="flex items-center gap-2"><div className="w-3.5 h-3.5 bg-blue-400 rounded-full shadow-sm"></div>주휴수당 (스택)</div>
                         </div>
 
-                        {/* 모바일에서 x축이 넘치면 가로 스크롤 허용 */}
-                        <div className="overflow-x-auto no-scrollbar pb-8">
-                            <div className="relative h-[300px] min-w-[600px] mt-4">
-                                <div className="absolute inset-0 flex flex-col justify-between pointer-events-none pr-4">
-                                    {yTicks.slice().reverse().map((tick, i) => (
-                                        <div key={i} className="flex items-center text-xs text-gray-400 font-medium w-full">
-                                            <span className="w-16 md:w-20 text-right mr-3">{Math.round(tick).toLocaleString()}만원</span>
-                                            <div className="flex-1 border-t border-gray-100 border-dashed"></div>
-                                        </div>
-                                    ))}
-                                </div>
-
-                                <div className="absolute inset-0 ml-20 md:ml-24 flex items-end justify-around">
-                                    {chartData.map((d) => (
-                                        <BarColumn key={d.month} d={d} maxValue={maxValue} />
-                                    ))}
+                        {/* Y축 고정 + 막대 가로 스크롤 */}
+                        <div className="flex mt-4">
+                            <div className="flex flex-col justify-between h-[300px] w-16 md:w-20 flex-shrink-0 pb-8">
+                                {yTicks.slice().reverse().map((tick, i) => (
+                                    <span key={i} className="text-xs text-gray-400 font-medium text-right block pr-2 leading-none">{Math.round(tick).toLocaleString()}만원</span>
+                                ))}
+                            </div>
+                            <div className="overflow-x-auto no-scrollbar pb-8 flex-1">
+                                <div className="relative h-[300px] min-w-[480px]">
+                                    <div className="absolute inset-0 flex flex-col justify-between pointer-events-none">
+                                        {yTicks.slice().reverse().map((tick, i) => (
+                                            <div key={i} className="border-t border-gray-100 border-dashed w-full"></div>
+                                        ))}
+                                    </div>
+                                    <div className="absolute inset-0 flex items-end justify-around">
+                                        {chartData.map((d) => (
+                                            <BarColumn key={d.month} d={d} maxValue={maxValue} />
+                                        ))}
+                                    </div>
                                 </div>
                             </div>
                         </div>

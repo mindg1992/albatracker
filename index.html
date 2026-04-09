@@ -4341,16 +4341,209 @@
             );
         }
 
+        // ─── 최저시급 변경 모달 ───
+        function MinWageChangeModal({ currentMinWage, onClose, onSave }) {
+            const [inputVal, setInputVal] = useState(String(currentMinWage || ''));
+            const isValid = inputVal && Number(inputVal) > 0;
+            const handleSave = () => {
+                if (!isValid) return;
+                if (Number(inputVal) === Number(currentMinWage)) { onClose(); return; }
+                onSave(Number(inputVal));
+            };
+            return (
+                <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+                    <div className="bg-white rounded-2xl w-full max-w-sm">
+                        <div className="flex items-center justify-between p-5 border-b border-gray-100">
+                            <h2 className="text-base font-bold text-gray-800">최저시급 변경</h2>
+                            <button onClick={onClose} className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition"><X className="w-5 h-5" /></button>
+                        </div>
+                        <div className="p-5 space-y-4">
+                            <div>
+                                <label className="block text-sm font-bold text-gray-700 mb-1">새 최저시급</label>
+                                <div className="flex items-center gap-2">
+                                    <input type="number" value={inputVal} onChange={e => setInputVal(e.target.value)}
+                                        className="flex-1 border-2 border-gray-300 rounded-xl py-2.5 px-4 focus:border-blue-500 outline-none text-sm text-right"
+                                        placeholder="0" autoFocus onKeyDown={e => e.key === 'Enter' && handleSave()} />
+                                    <span className="text-sm text-gray-600 font-medium">원</span>
+                                </div>
+                                {currentMinWage && <p className="text-xs text-gray-400 mt-1">현재: {Number(currentMinWage).toLocaleString()}원</p>}
+                            </div>
+                            <div className="flex gap-2 pt-1">
+                                <button onClick={onClose} className="flex-1 bg-gray-100 text-gray-600 py-2.5 rounded-xl font-medium hover:bg-gray-200 transition text-sm">취소</button>
+                                <button onClick={handleSave} disabled={!isValid} className="flex-1 bg-blue-600 text-white py-2.5 rounded-xl font-bold hover:bg-blue-700 transition text-sm disabled:opacity-50">저장</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        // ─── 최저시급 변경 후 계약서 일괄 재작성 모달 ───
+        function MinWageContractTemplateModal({ globalTemplate, workspaceId, firebaseUser, setEmployees, showAlert, affectedEmps, onClose }) {
+            const baseTemplate = globalTemplate || {};
+            const [title, setTitle] = useState(baseTemplate?.title || '근로계약서');
+            const [sections, setSections] = useState(
+                baseTemplate?.sections?.length >= 1
+                    ? baseTemplate.sections.map(s => ({ ...s }))
+                    : [{ content: '', instruction: '' }]
+            );
+            const [ownerInfo, setOwnerInfo] = useState(
+                baseTemplate?.ownerInfo
+                    ? { ...baseTemplate.ownerInfo, signatureData: '' }
+                    : { shopName: '', phone: '', address: '', representative: '', signatureData: '' }
+            );
+            const [saving, setSaving] = useState(false);
+            const addSection = () => setSections(prev => [...prev, { content: '', instruction: '' }]);
+            const removeSection = (i) => { if (sections.length <= 1) return; setSections(prev => prev.filter((_, j) => j !== i)); };
+            const updateSection = (i, key, val) => setSections(prev => prev.map((s, j) => j === i ? { ...s, [key]: val } : s));
+            const handleSave = async () => {
+                if (!title.trim()) { showAlert('제목을 입력해주세요.', '입력 오류', 'alert'); return; }
+                if (sections.some(s => !s.content.trim())) { showAlert('모든 내용칸을 입력해주세요.', '입력 오류', 'alert'); return; }
+                setSaving(true);
+                try {
+                    const finalOwnerInfo = ownerInfo.signatureData
+                        ? ownerInfo
+                        : { ...ownerInfo, signatureData: globalTemplate?.ownerInfo?.signatureData || '' };
+                    const template = { title: title.trim(), sections, ownerInfo: finalOwnerInfo };
+                    const bossUid = workspaceId || firebaseUser.uid;
+                    const empsWithUid = affectedEmps.filter(emp => emp.empUid);
+                    if (empsWithUid.length > 0) {
+                        const batch = fbDb.batch();
+                        empsWithUid.forEach(emp => {
+                            batch.update(
+                                fbDb.collection('employeeAccounts').doc(emp.empUid).collection('workplaces').doc(bossUid),
+                                { contractTemplate: template, contractStatus: 'needs_resign', contractDeleteRequest: firebase.firestore.FieldValue.delete() }
+                            );
+                        });
+                        await batch.commit();
+                        setEmployees(prev => prev.map(e =>
+                            empsWithUid.some(a => a.id === e.id)
+                                ? { ...e, contractStatus: 'needs_resign', contractDeleteRequest: null }
+                                : e
+                        ));
+                        const names = empsWithUid.map(e => e.name).join(', ');
+                        showAlert(`${names}님에게 근로계약서 재작성이 요청되었습니다.`, '요청 완료', 'success');
+                    } else {
+                        showAlert('연동된 계정이 있는 근무자가 없어 재작성 요청을 보내지 않았습니다.', '안내');
+                    }
+                    onClose();
+                } catch(e) { showAlert('저장 실패: ' + e.message, '오류', 'error'); }
+                setSaving(false);
+            };
+            const hasEmpUid = affectedEmps.some(e => e.empUid);
+            return (
+                <div className="fixed inset-0 bg-black/50 z-50 flex items-start justify-center overflow-y-auto p-4">
+                    <div className="bg-white rounded-2xl w-full max-w-lg my-4">
+                        <div className="flex items-center justify-between p-5 border-b border-gray-100">
+                            <div className="flex items-center gap-3">
+                                <div className="bg-blue-100 p-2 rounded-xl">
+                                    <svg className="w-5 h-5 text-blue-700" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" x2="8" y1="13" y2="13"/><line x1="16" x2="8" y1="17" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+                                </div>
+                                <div>
+                                    <h2 className="text-base font-bold text-gray-800">최저시급 변경 — 계약서 재작성 요청</h2>
+                                    <p className="text-xs text-gray-500">대상: {affectedEmps.map(e => e.name).join(', ')} ({affectedEmps.length}명)</p>
+                                </div>
+                            </div>
+                            <button onClick={onClose} className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition"><X className="w-5 h-5" /></button>
+                        </div>
+                        <div className="p-5 space-y-4 max-h-[65vh] overflow-y-auto">
+                            <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 text-xs text-blue-700">
+                                최저시급이 변경된 근무자 {affectedEmps.length}명에게 근로계약서 재작성을 요청합니다. 내용을 수정 후 저장하면 해당 근무자에게 재작성이 요청됩니다.
+                            </div>
+                            <div>
+                                <label className="block text-sm font-bold text-gray-700 mb-1">계약서 제목</label>
+                                <input value={title} onChange={e => setTitle(e.target.value)}
+                                    className="w-full border-2 border-gray-300 rounded-xl py-2.5 px-4 focus:border-blue-500 outline-none text-sm"
+                                    placeholder="근로계약서" />
+                            </div>
+                            {sections.map((s, i) => (
+                                <div key={i} className="border-2 border-gray-200 rounded-xl p-4 space-y-3 relative">
+                                    <div className="flex items-center justify-between mb-1">
+                                        <span className="text-xs font-bold text-gray-500">항목 {i + 1}</span>
+                                        {sections.length > 1 && (<button onClick={() => removeSection(i)} className="text-red-400 hover:text-red-600 text-xs">삭제</button>)}
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs font-bold text-gray-600 mb-1">내용 (관리자 작성)</label>
+                                        <textarea value={s.content} onChange={e => updateSection(i, 'content', e.target.value)} rows={3}
+                                            className="w-full border-2 border-gray-200 rounded-xl py-2 px-3 text-sm focus:border-purple-400 outline-none resize-none"
+                                            placeholder="예: 업무내용, 소정근로시간, 임금 등" />
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs font-bold text-gray-600 mb-1">지시 (근무자에게 어떻게 작성하게 할지)</label>
+                                        <input value={s.instruction} onChange={e => updateSection(i, 'instruction', e.target.value)}
+                                            className="w-full border-2 border-gray-200 rounded-xl py-2 px-3 text-sm focus:border-blue-400 outline-none"
+                                            placeholder='예: "위 내용에 동의합니다"라고 적으세요' />
+                                    </div>
+                                </div>
+                            ))}
+                            <button onClick={addSection} className="w-full border-2 border-dashed border-gray-300 text-gray-500 py-2.5 rounded-xl text-sm hover:border-purple-400 hover:text-purple-600 transition">+ 내용 추가하기</button>
+                            <div className="border-2 border-blue-200 rounded-xl p-4 space-y-3 bg-blue-50">
+                                <p className="text-xs font-bold text-blue-700">사업주 정보 (항상 최하단 고정)</p>
+                                <div>
+                                    <label className="block text-xs font-bold text-gray-600 mb-1">사업체명</label>
+                                    <input value={ownerInfo.shopName} onChange={e => setOwnerInfo(p => ({...p, shopName: e.target.value}))}
+                                        className="w-full border-2 border-gray-200 rounded-xl py-2 px-3 text-sm focus:border-blue-400 outline-none bg-white" placeholder="예: 홍길동 카페" />
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-bold text-gray-600 mb-1">전화번호</label>
+                                    <input value={ownerInfo.phone} onChange={e => setOwnerInfo(p => ({...p, phone: e.target.value}))}
+                                        className="w-full border-2 border-gray-200 rounded-xl py-2 px-3 text-sm focus:border-blue-400 outline-none bg-white" placeholder="010-0000-0000" />
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-bold text-gray-600 mb-1">주소</label>
+                                    <input value={ownerInfo.address} onChange={e => setOwnerInfo(p => ({...p, address: e.target.value}))}
+                                        className="w-full border-2 border-gray-200 rounded-xl py-2 px-3 text-sm focus:border-blue-400 outline-none bg-white" placeholder="서울시 강남구 테헤란로 123" />
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-bold text-gray-600 mb-1">대표자</label>
+                                    <input value={ownerInfo.representative} onChange={e => setOwnerInfo(p => ({...p, representative: e.target.value}))}
+                                        className="w-full border-2 border-gray-200 rounded-xl py-2 px-3 text-sm focus:border-blue-400 outline-none bg-white" placeholder="홍길동" />
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-bold text-gray-600 mb-1">대표자 서명 (새로 그리기)</label>
+                                    {globalTemplate?.ownerInfo?.signatureData && !ownerInfo.signatureData && (
+                                        <div className="mb-2 p-2 border border-gray-200 rounded-xl bg-white">
+                                            <p className="text-xs text-gray-400 mb-1">기본 템플릿 서명 (새로 그리지 않으면 유지됩니다)</p>
+                                            <img src={globalTemplate.ownerInfo.signatureData} alt="기존서명" className="h-12 object-contain" />
+                                        </div>
+                                    )}
+                                    <SignatureCanvas onSave={sig => setOwnerInfo(p => ({...p, signatureData: sig}))} width={360} height={100} />
+                                    {ownerInfo.signatureData && (
+                                        <div className="mt-2">
+                                            <p className="text-xs text-gray-500 mb-1">새 서명 미리보기:</p>
+                                            <img src={ownerInfo.signatureData} alt="서명" className="h-12 border rounded-lg bg-white p-1 object-contain" />
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+                        <div className="p-5 border-t border-gray-100 space-y-2">
+                            {!hasEmpUid && (
+                                <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-3 text-xs text-yellow-700">앱에 연동된 근무자가 없어 재작성 요청을 보낼 수 없습니다.</div>
+                            )}
+                            <button onClick={handleSave} disabled={saving || !hasEmpUid}
+                                className="w-full bg-blue-600 text-white py-3 rounded-xl font-bold hover:bg-blue-700 transition disabled:opacity-50 text-sm">
+                                {saving ? '요청 중...' : `저장 및 재작성 요청 (${affectedEmps.filter(e => e.empUid).length}명)`}
+                            </button>
+                            <button onClick={onClose} disabled={saving}
+                                className="w-full bg-gray-100 text-gray-600 py-2.5 rounded-xl font-medium hover:bg-gray-200 transition text-sm disabled:opacity-50">닫기</button>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
         function TabEmployees({ employees, setEmployees, nextEmpId, setNextEmpId, getEmployeeStats, globalMinWage, setGlobalMinWage, showAlert, showConfirm, firebaseUser, currentWorkspaceId, workspaceInfo, setActiveTab }) {
             const [searchTerm, setSearchTerm] = useState('');
             const [isModalOpen, setIsModalOpen] = useState(false);
             const [editingEmp, setEditingEmp] = useState(null);
             const [viewingContract, setViewingContract] = useState(null); // { contract, empUid }
             const [modalDeleteReq, setModalDeleteReq] = useState(null);
-            const prevMinWageRef = useRef(''); // 최저시급 편집 시작 전 값 저장용
             const [signingEmpUid, setSigningEmpUid] = useState(null);
             const [personalTemplateTarget, setPersonalTemplateTarget] = useState(null); // 개인 근로계약서 팝업 대상 근무자
             const [personalTemplateReason, setPersonalTemplateReason] = useState('wage_change'); // 'wage_change' | 'rewrite_request' | 'new_contract'
+            const [minWageModalOpen, setMinWageModalOpen] = useState(false);
+            const [minWageTemplateAfterSave, setMinWageTemplateAfterSave] = useState(null); // { affectedEmps }
 
             // 팝업 열려있는 동안 해당 직원 workplaces 문서 실시간 감지
             // → 근무자가 동의하면 즉시 employees 상태 반영 (팝업 닫기 전에도 갱신)
@@ -4390,6 +4583,35 @@
                     return a.displayId - b.displayId;
                 });
             }, [employees, searchTerm, globalMinWage]);
+
+            const handleMinWageSave = (newVal) => {
+                const oldVal = globalMinWage;
+                setGlobalMinWage(newVal);
+                setMinWageModalOpen(false);
+                const newMin = Number(newVal);
+                // wageBelowMin 플래그 업데이트
+                const nowLowEmps = employees.filter(emp => emp.empUid && emp.wage && Number(emp.wage) > 0 && Number(emp.wage) < newMin);
+                const noLongerLowEmps = employees.filter(emp => emp.empUid && emp.wage && Number(emp.wage) > 0 && Number(emp.wage) >= newMin && Number(emp.wage) < Number(oldVal));
+                if (currentWorkspaceId && (nowLowEmps.length > 0 || noLongerLowEmps.length > 0)) {
+                    const batch = fbDb.batch();
+                    nowLowEmps.forEach(emp => {
+                        batch.update(fbDb.collection('employeeAccounts').doc(emp.empUid).collection('workplaces').doc(currentWorkspaceId), { wageBelowMin: true });
+                    });
+                    noLongerLowEmps.forEach(emp => {
+                        batch.update(fbDb.collection('employeeAccounts').doc(emp.empUid).collection('workplaces').doc(currentWorkspaceId), { wageBelowMin: firebase.firestore.FieldValue.delete() });
+                    });
+                    batch.commit().catch(() => {});
+                }
+                if (!workspaceInfo?.contractTemplate) return;
+                // 최저시급 적용 중인 근무자(시급 미설정 또는 이전 최저시급과 동일) 중 계약 완료자만
+                const affectedEmps = employees.filter(emp => {
+                    const usesMinWage = !emp.wage || Number(emp.wage) === 0 || Number(emp.wage) === Number(oldVal);
+                    return usesMinWage && emp.contractStatus === 'completed';
+                });
+                if (affectedEmps.length > 0) {
+                    setMinWageTemplateAfterSave({ affectedEmps });
+                }
+            };
 
             const handleAddClick = () => {
                 if (globalMinWage === '' || Number(globalMinWage) <= 0) {
@@ -4576,64 +4798,16 @@
                                     onChange={(e) => setSearchTerm(e.target.value)}
                                 />
                             </div>
-                            <div className="flex items-center gap-2 bg-white border border-gray-300 rounded-lg px-3 py-2 w-full sm:w-auto shadow-sm">
-                                <label className="text-sm font-medium text-gray-700 whitespace-nowrap">현재 최저시급:</label>
-                                <input
-                                    type="number"
-                                    className="w-24 border-none focus:ring-0 text-sm text-right outline-none bg-transparent p-0"
-                                    value={globalMinWage}
-                                    placeholder="입력필수"
-                                    onFocus={() => { prevMinWageRef.current = globalMinWage; }}
-                                    onChange={(e) => setGlobalMinWage(e.target.value)}
-                                    onBlur={() => {
-                                        const oldVal = prevMinWageRef.current;
-                                        const newVal = globalMinWage;
-                                        if (newVal === oldVal || !newVal || Number(newVal) <= 0) return;
-                                        const newMin = Number(newVal);
-                                        // 개별 시급이 새 최저시급보다 낮아진 근무자 wageBelowMin 플래그 업데이트
-                                        const nowLowEmps = employees.filter(emp => emp.empUid && emp.wage && Number(emp.wage) > 0 && Number(emp.wage) < newMin);
-                                        const noLongerLowEmps = employees.filter(emp => emp.empUid && emp.wage && Number(emp.wage) > 0 && Number(emp.wage) >= newMin && Number(emp.wage) < Number(oldVal));
-                                        if (currentWorkspaceId && (nowLowEmps.length > 0 || noLongerLowEmps.length > 0)) {
-                                            const batch = fbDb.batch();
-                                            nowLowEmps.forEach(emp => {
-                                                batch.update(fbDb.collection('employeeAccounts').doc(emp.empUid).collection('workplaces').doc(currentWorkspaceId), { wageBelowMin: true });
-                                            });
-                                            noLongerLowEmps.forEach(emp => {
-                                                batch.update(fbDb.collection('employeeAccounts').doc(emp.empUid).collection('workplaces').doc(currentWorkspaceId), { wageBelowMin: firebase.firestore.FieldValue.delete() });
-                                            });
-                                            batch.commit().catch(() => {});
-                                        }
-                                        if (!workspaceInfo?.contractTemplate) return;
-                                        // 최저시급 적용 중인 근무자(시급 미설정 또는 이전 최저시급과 동일) 중 계약 완료자 찾기
-                                        const affectedEmps = employees.filter(emp => {
-                                            const usesMinWage = !emp.wage || Number(emp.wage) === 0 || Number(emp.wage) === Number(oldVal);
-                                            return usesMinWage && emp.contractStatus === 'completed';
-                                        });
-                                        if (affectedEmps.length > 0) {
-                                            showAlert('최저시급이 변경되었습니다.\n\n근로계약서 템플릿에 기재된 시급 항목을 새 최저시급으로 수정해야 근무자에게 계약서 재작성이 요청됩니다.\n\n확인을 누르면 템플릿 수정 화면으로 이동합니다.', '계약서 재작성 필요', 'alert', () => setActiveTab('settings'));
-                                            setEmployees(prev => prev.map(e =>
-                                                affectedEmps.some(a => a.id === e.id)
-                                                    ? { ...e, contractStatus: 'needs_resign' }
-                                                    : e
-                                            ));
-                                            const bossUid = currentWorkspaceId;
-                                            if (bossUid) {
-                                                const batch = fbDb.batch();
-                                                affectedEmps.forEach(emp => {
-                                                    if (emp.empUid) {
-                                                        batch.update(
-                                                            fbDb.collection('employeeAccounts').doc(emp.empUid).collection('workplaces').doc(bossUid),
-                                                            { contractStatus: 'needs_resign' }
-                                                        );
-                                                    }
-                                                });
-                                                batch.commit().catch(() => {});
-                                            }
-                                        }
-                                    }}
-                                />
+                            <button
+                                onClick={() => setMinWageModalOpen(true)}
+                                className="flex items-center gap-2 bg-white border border-gray-300 rounded-lg px-3 py-2 w-full sm:w-auto shadow-sm hover:border-blue-400 hover:bg-blue-50 transition"
+                            >
+                                <span className="text-sm font-medium text-gray-700 whitespace-nowrap">현재 최저시급:</span>
+                                <span className="w-24 text-sm text-right font-semibold text-gray-800">
+                                    {globalMinWage ? Number(globalMinWage).toLocaleString() : '미설정'}
+                                </span>
                                 <span className="text-sm text-gray-500 font-medium whitespace-nowrap">원</span>
-                            </div>
+                            </button>
                         </div>
                         <button
                             onClick={handleAddClick}
@@ -4812,6 +4986,24 @@
                             showAlert={showAlert}
                             reason={personalTemplateReason}
                             onClose={() => setPersonalTemplateTarget(null)}
+                        />
+                    )}
+                    {minWageModalOpen && (
+                        <MinWageChangeModal
+                            currentMinWage={globalMinWage}
+                            onClose={() => setMinWageModalOpen(false)}
+                            onSave={handleMinWageSave}
+                        />
+                    )}
+                    {minWageTemplateAfterSave && (
+                        <MinWageContractTemplateModal
+                            globalTemplate={workspaceInfo?.contractTemplate}
+                            workspaceId={currentWorkspaceId}
+                            firebaseUser={firebaseUser}
+                            setEmployees={setEmployees}
+                            showAlert={showAlert}
+                            affectedEmps={minWageTemplateAfterSave.affectedEmps}
+                            onClose={() => setMinWageTemplateAfterSave(null)}
                         />
                     )}
                 </div>

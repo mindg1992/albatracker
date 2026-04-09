@@ -3599,16 +3599,16 @@
                     )}
 
                     {empAccount?.pendingRewrite && (
-                        <div className="bg-blue-50 border-b border-blue-200 px-4 py-3 flex items-center justify-between gap-3">
+                        <div className="bg-red-50 border-b border-red-300 px-4 py-3 flex items-center justify-between gap-3">
                             <div className="flex items-center gap-2 min-w-0">
-                                <span className="text-blue-500 text-base flex-shrink-0">📋</span>
+                                <AlertCircle className="w-5 h-5 text-red-500 flex-shrink-0" />
                                 <div className="min-w-0">
-                                    <p className="text-blue-700 font-bold text-sm">근로계약서 재작성 필요</p>
-                                    <p className="text-blue-500 text-xs">기존 계약서는 계속 열람할 수 있습니다.</p>
+                                    <p className="text-red-700 font-bold text-sm">근로계약서를 작성해주세요.</p>
+                                    <p className="text-red-500 text-xs">근로계약서 재작성 및 관리자 서명까지 앱 기능이 제한됩니다.</p>
                                 </div>
                             </div>
                             <button onClick={handleOpenTopRewrite}
-                                className="flex-shrink-0 bg-blue-600 text-white text-xs font-bold py-2 px-3 rounded-xl hover:bg-blue-700 transition whitespace-nowrap">
+                                className="flex-shrink-0 bg-red-600 text-white text-xs font-bold py-2 px-3 rounded-xl hover:bg-red-700 transition whitespace-nowrap">
                                 재작성하기
                             </button>
                         </div>
@@ -3935,7 +3935,7 @@
             return (
                 <div className="max-w-lg mx-auto space-y-4">
                     {/* 근로계약서 상태 배너 */}
-                    {isContractBlocked && (
+                    {isContractBlocked && !empAccount?.pendingRewrite && (
                         <div className={`rounded-xl p-4 border ${contractStatus === 'needs_resign' ? 'bg-red-50 border-red-200' : 'bg-yellow-50 border-yellow-200'}`}>
                             <p className={`font-bold text-sm ${contractStatus === 'needs_resign' ? 'text-red-700' : 'text-yellow-700'}`}>
                                 {contractStatus === 'needs_resign' ? '⚠️ 근로계약서를 작성해주세요' : '⏳ 관리자 서명 대기 중'}
@@ -4002,7 +4002,7 @@
                     </div>
 
                     {/* 근로계약서 보기 */}
-                    {empAccount?.isGoogleEmployee && empAccount?.bossUid && contractStatus === 'completed' && (
+                    {empAccount?.isGoogleEmployee && empAccount?.bossUid && contractStatus !== null && (
                         <div className="bg-white rounded-xl border border-purple-200 shadow-sm p-6">
                             <h3 className="text-base font-bold text-purple-700 mb-3">근로계약서</h3>
                             <button onClick={handleViewContract}

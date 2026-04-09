@@ -6735,6 +6735,8 @@
                                     <span className="text-xl font-black text-blue-500 leading-tight mt-0.5">{holRatio.toFixed(1)}%</span>
                                     <span className="text-[10px] text-gray-400 leading-tight mt-0.5">매출 대비</span>
                                 </>
+                            ) : revenue === 0 ? (
+                                <span className="text-[11px] font-bold text-gray-400 text-center leading-snug px-1">매출을<br/>입력하세요</span>
                             ) : (
                                 <>
                                     <span className="text-2xl font-black text-gray-800">{ratio.toFixed(1)}%</span>

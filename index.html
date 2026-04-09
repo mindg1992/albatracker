@@ -2259,6 +2259,7 @@
                                 unseenDates={unseenDates}
                                 onMarkSeen={(date) => setUnseenDates(prev => { const next = new Set(prev); next.delete(date); return next; })}
                                 globalMinWage={globalMinWage}
+                                workspaceId={currentWorkspaceId}
                             />
                         )}
                         {activeTab === 'payroll' && (
@@ -5391,7 +5392,7 @@
             );
         }
 
-        function TabCalendar({ employees, monthlyData, setMonthlyData, showConfirm, unseenDates, onMarkSeen, globalMinWage }) {
+        function TabCalendar({ employees, monthlyData, setMonthlyData, showConfirm, unseenDates, onMarkSeen, globalMinWage, workspaceId }) {
             const [currentDate, setCurrentDate] = useState(new Date());
             const [isBulkInputOpen, setIsBulkInputOpen] = useState(false);
             const [editDayModal, setEditDayModal] = useState(null);
@@ -5623,6 +5624,7 @@
                             activeEmployees={activeEmployees} allEmployees={employees} monthlyData={monthlyData} setMonthlyData={setMonthlyData}
                             onClose={() => setEditDayModal(null)}
                             onDelete={() => handleDeleteDay(editDayModal)}
+                            workspaceId={workspaceId}
                         />
                     )}
 
@@ -5844,7 +5846,7 @@
             );
         }
 
-        function DailyEditModal({ year, month, day, monthKey, activeEmployees, allEmployees, monthlyData, setMonthlyData, onClose, onDelete }) {
+        function DailyEditModal({ year, month, day, monthKey, activeEmployees, allEmployees, monthlyData, setMonthlyData, onClose, onDelete, workspaceId }) {
             const currentDayData = monthlyData[monthKey]?.days[day] || { revenue: 0, entries: {} };
 
             const combinedEmployees = useMemo(() => {
@@ -5912,6 +5914,18 @@
 
             const handleSave = () => {
                 const dateStr = `${year}-${String(month).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+
+                // 직원 제출 기록이 있는 항목의 Firestore submissions 동기화용 목록
+                const submissionUpdates = [];
+                combinedEmployees.forEach(emp => {
+                    const existingEntry = currentDayData.entries[emp.id];
+                    if (existingEntry?.submittedByEmp && existingEntry?.empUid) {
+                        const h = Number(hoursData[emp.id]) || 0;
+                        const m = Number(minsData[emp.id]) || 0;
+                        submissionUpdates.push({ empUid: existingEntry.empUid, hours: h + m / 60 });
+                    }
+                });
+
                 setMonthlyData(prev => {
                     const newData = { ...prev };
                     if (!newData[monthKey]) newData[monthKey] = { days: {} };
@@ -5949,6 +5963,22 @@
                     });
                     return newData;
                 });
+
+                // 근무자 달력에도 반영: submissions 컬렉션 hours 동기화
+                if (workspaceId && submissionUpdates.length > 0) {
+                    submissionUpdates.forEach(({ empUid, hours }) => {
+                        fbDb.collection('workspaces').doc(workspaceId)
+                            .collection('submissions')
+                            .where('date', '==', dateStr)
+                            .where('empUid', '==', empUid)
+                            .get()
+                            .then(snap => {
+                                snap.forEach(doc => doc.ref.update({ hours }).catch(() => {}));
+                            })
+                            .catch(() => {});
+                    });
+                }
+
                 onClose();
             };
 

@@ -3733,6 +3733,7 @@
                         {activeTab === 'myinfo' && (
                             <EmpProfileTab
                                 empAccount={empAccount}
+                                onSetEmpAccount={onSetEmpAccount}
                                 firebaseUser={firebaseUser}
                                 showAlert={showAlert}
                                 showConfirm={showConfirm}
@@ -3799,7 +3800,7 @@
         }
 
         // 직원 내 정보 탭
-        function EmpProfileTab({ empAccount, firebaseUser, showAlert, showConfirm, onDisconnectWorkplace }) {
+        function EmpProfileTab({ empAccount, onSetEmpAccount, firebaseUser, showAlert, showConfirm, onDisconnectWorkplace }) {
             const [formData, setFormData] = useState({
                 residentId: empAccount?.residentId || '',
                 bank: empAccount?.bank || '',
@@ -3916,6 +3917,10 @@
 
             const handleResubmit = async (contractData) => {
                 await resubmitEmpContract(firebaseUser.uid, empAccount.bossUid, contractData);
+                await fbDb.collection('employeeAccounts').doc(firebaseUser.uid)
+                    .collection('workplaces').doc(empAccount.bossUid)
+                    .update({ pendingRewrite: firebase.firestore.FieldValue.delete() });
+                onSetEmpAccount?.(prev => ({ ...prev, pendingRewrite: false, contractStatus: 'pending_boss' }));
                 setLiveDeleteReq(null);
                 setShowContractWrite(false);
                 showAlert('근로계약서가 제출되었습니다.\n관리자 서명을 기다려주세요.', '제출 완료', 'success');

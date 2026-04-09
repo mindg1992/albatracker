@@ -3404,7 +3404,8 @@
             const contractStatus = empAccount?.contractStatus || null;
             const isContractBlocked = contractStatus === 'needs_resign' || contractStatus === 'pending_boss';
             const isWageBlocked = !!empAccount?.wageBelowMin;
-            const isFullyBlocked = isBlocked || isContractBlocked || isWageBlocked;
+            const isPendingRewrite = !!empAccount?.pendingRewrite;
+            const isFullyBlocked = isBlocked || isContractBlocked || isWageBlocked || isPendingRewrite;
 
             const handlePlusClick = (dateStr) => {
                 const confirmedKey = `confirmedNotices_${empAccount?.bossUid}`;
@@ -3591,7 +3592,7 @@
                     <main className="max-w-lg mx-auto px-3 py-4">
                         {activeTab === 'calendar' && (
                             <div>
-                                {isFullyBlocked && !isWageBlocked && (
+                                {isFullyBlocked && !isWageBlocked && !isPendingRewrite && (
                                     <div className={`mb-4 p-3 rounded-xl text-sm font-medium flex items-center gap-2 ${(workStatus === 'resigned' || contractStatus === 'needs_resign') ? 'bg-red-50 text-red-700 border border-red-200' : 'bg-yellow-50 text-yellow-700 border border-yellow-200'}`}>
                                         <AlertCircle className="w-4 h-4 flex-shrink-0"/>
                                         {isWageBlocked

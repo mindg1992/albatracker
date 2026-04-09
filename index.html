@@ -3484,15 +3484,13 @@
             };
 
             const handleTopResubmit = async (contractData) => {
-                try {
-                    await resubmitEmpContract(firebaseUser.uid, empAccount.bossUid, contractData);
-                    await fbDb.collection('employeeAccounts').doc(firebaseUser.uid)
-                        .collection('workplaces').doc(empAccount.bossUid)
-                        .update({ pendingRewrite: firebase.firestore.FieldValue.delete() });
-                    setEmpAccount(prev => ({ ...prev, pendingRewrite: false }));
-                    setShowTopRewrite(false);
-                    showAlert('근로계약서가 제출되었습니다.\n관리자 서명을 기다려주세요.', '제출 완료', 'success');
-                } catch(e) { showAlert('제출 실패: ' + e.message, '오류', 'error'); }
+                await resubmitEmpContract(firebaseUser.uid, empAccount.bossUid, contractData);
+                await fbDb.collection('employeeAccounts').doc(firebaseUser.uid)
+                    .collection('workplaces').doc(empAccount.bossUid)
+                    .update({ pendingRewrite: firebase.firestore.FieldValue.delete() });
+                setEmpAccount(prev => ({ ...prev, pendingRewrite: false, contractStatus: 'pending_boss' }));
+                setShowTopRewrite(false);
+                showAlert('근로계약서가 제출되었습니다.\n관리자 서명을 기다려주세요.', '제출 완료', 'success');
             };
 
 
@@ -4218,15 +4216,17 @@
                     const template = { title: title.trim(), sections, ownerInfo: finalOwnerInfo };
                     const bossUid = workspaceId || firebaseUser.uid;
                     if (emp.empUid) {
-                        // 모든 경로 통일: pendingRewrite=true로 재작성 요청 (동의/거부 없음)
+                        // 모든 경로 통일: pendingRewrite=true + needs_resign으로 재작성 요청
+                        // needs_resign은 Firestore 규칙 호환성 및 재제출 흐름 보장용
                         await fbDb.collection('employeeAccounts').doc(emp.empUid)
                             .collection('workplaces').doc(bossUid)
                             .update({
                                 contractTemplate: template,
+                                contractStatus: 'needs_resign',
                                 pendingRewrite: true,
                                 contractDeleteRequest: firebase.firestore.FieldValue.delete()
                             });
-                        setEmployees(prev => prev.map(e => e.id === emp.id ? { ...emp, pendingRewrite: true, contractDeleteRequest: null } : e));
+                        setEmployees(prev => prev.map(e => e.id === emp.id ? { ...emp, contractStatus: 'needs_resign', pendingRewrite: true, contractDeleteRequest: null } : e));
                         showAlert(`${emp.name}님에게 근로계약서 재작성이 요청되었습니다.`, '요청 완료', 'success');
                     }
                     onClose();
@@ -4442,13 +4442,13 @@
                         empsWithUid.forEach(emp => {
                             batch.update(
                                 fbDb.collection('employeeAccounts').doc(emp.empUid).collection('workplaces').doc(bossUid),
-                                { contractTemplate: template, pendingRewrite: true, contractDeleteRequest: firebase.firestore.FieldValue.delete() }
+                                { contractTemplate: template, contractStatus: 'needs_resign', pendingRewrite: true, contractDeleteRequest: firebase.firestore.FieldValue.delete() }
                             );
                         });
                         await batch.commit();
                         setEmployees(prev => prev.map(e =>
                             empsWithUid.some(a => a.id === e.id)
-                                ? { ...e, pendingRewrite: true, contractDeleteRequest: null }
+                                ? { ...e, contractStatus: 'needs_resign', pendingRewrite: true, contractDeleteRequest: null }
                                 : e
                         ));
                         const names = empsWithUid.map(e => e.name).join(', ');
@@ -4708,23 +4708,23 @@
                             }
                             return;
                         } else if (hadPersonalWage && !hasPersonalWage) {
-                            // 개별 시급 → 공란(최저시급) 전환: pendingRewrite로 재작성 요청
-                            finalData = { ...finalData, pendingRewrite: true };
+                            // 개별 시급 → 공란(최저시급) 전환: pendingRewrite + needs_resign으로 재작성 요청
+                            finalData = { ...finalData, contractStatus: 'needs_resign', pendingRewrite: true };
                             if (dataToSave.empUid && currentWorkspaceId) {
                                 fbDb.collection('employeeAccounts').doc(dataToSave.empUid)
                                     .collection('workplaces').doc(currentWorkspaceId)
-                                    .update({ pendingRewrite: true })
+                                    .update({ contractStatus: 'needs_resign', pendingRewrite: true })
                                     .catch(() => {});
                             }
                             showAlert('시급이 최저시급으로 변경되었습니다.\n근무자에게 계약서 재작성이 요청됩니다.', '변경 완료', 'success');
                         } else if (workspaceInfo?.contractTemplate) {
-                            // 최저시급 근무자: pendingRewrite로 재작성 요청 (글로벌 템플릿 수정 안내)
-                            finalData = { ...finalData, pendingRewrite: true };
+                            // 최저시급 근무자: pendingRewrite + needs_resign으로 재작성 요청 (글로벌 템플릿 수정 안내)
+                            finalData = { ...finalData, contractStatus: 'needs_resign', pendingRewrite: true };
                             showAlert('시급이 변경되었습니다.\n\n근로계약서 템플릿에 기재된 시급 항목을 새 시급으로 수정해야 근무자에게 계약서 재작성이 요청됩니다.\n\n확인을 누르면 템플릿 수정 화면으로 이동합니다.', '계약서 재작성 필요', 'alert', () => setActiveTab('settings'));
                             if (dataToSave.empUid && currentWorkspaceId) {
                                 fbDb.collection('employeeAccounts').doc(dataToSave.empUid)
                                     .collection('workplaces').doc(currentWorkspaceId)
-                                    .update({ pendingRewrite: true })
+                                    .update({ contractStatus: 'needs_resign', pendingRewrite: true })
                                     .catch(() => {});
                             }
                         }

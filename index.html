@@ -1785,8 +1785,8 @@
                         );
                     }
 
-                    // 업체 선택 화면 — 항상 먼저 보여줌 (업체 없어도 여기서 등록 버튼 제공)
-                    if (!selectedEmpBossUid || !selectedWorkplace || selectedWorkplace.status !== 'approved') {
+                    // 업체 선택 화면 — pending 업체가 선택된 경우는 PendingApprovalScreen으로 넘김
+                    if (!selectedEmpBossUid || !selectedWorkplace || (selectedWorkplace.status !== 'approved' && selectedWorkplace.status !== 'pending')) {
                         return (
                             <>
                                 <CustomModal config={modalConfig} />
@@ -2736,11 +2736,20 @@
                                 <div>
                                     <p className="text-xs font-bold text-gray-400 mb-2">승인 대기 중</p>
                                     {pending.map(wp => (
-                                        <button key={wp.bossUid} onClick={() => onSelect(wp.bossUid)}
-                                            className="w-full text-left p-4 rounded-xl border border-yellow-200 bg-yellow-50 hover:bg-yellow-100 transition mb-2">
+                                        <div key={wp.bossUid} className="w-full p-4 rounded-xl border border-yellow-200 bg-yellow-50 mb-2">
                                             <p className="font-bold text-gray-700">{wp.shopName || '업체명 없음'}</p>
-                                            <p className="text-xs text-yellow-600 mt-0.5">관리자 승인을 기다리고 있습니다</p>
-                                        </button>
+                                            {wp.contractRejected ? (
+                                                <>
+                                                    <p className="text-xs text-orange-600 mt-0.5 mb-2">관리자가 근로계약서 재작성을 요청했습니다</p>
+                                                    <button onClick={() => onSelect(wp.bossUid)}
+                                                        className="w-full bg-purple-600 text-white py-2 rounded-lg text-sm font-bold hover:bg-purple-700 transition">
+                                                        근로계약서 재작성하기
+                                                    </button>
+                                                </>
+                                            ) : (
+                                                <p className="text-xs text-yellow-600 mt-0.5">관리자 승인을 기다리고 있습니다</p>
+                                            )}
+                                        </div>
                                     ))}
                                 </div>
                             )}

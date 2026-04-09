@@ -3452,7 +3452,7 @@
 
             const handleRequestDeleteContract = () => {
                 if (!showConfirm) return;
-                showConfirm('재작성을 요청하시겠습니까?', async () => {
+                showConfirm('근로계약서를 재작성하시겠습니까?', async () => {
                     try {
                         const result = await requestContractDelete(firebaseUser.uid, empAccount.bossUid, 'employee');
                         if (result === 'deleted') {
@@ -3887,7 +3887,7 @@
 
             const handleDeleteContract = (emp) => {
                 if (!emp.empUid) return;
-                showConfirm('재작성을 요청하시겠습니까?', async () => {
+                showConfirm('근로계약서를 재작성하시겠습니까?', async () => {
                     try {
                         const bossUid = currentWorkspaceId || firebaseUser.uid;
                         const result = await requestContractDelete(emp.empUid, bossUid, 'boss');

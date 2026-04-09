@@ -3437,6 +3437,24 @@
                 if (activeTab === 'notifications' && unreadCount > 0) markAllRead();
             }, [activeTab]);
 
+            const handleAgreeRewriteRequest = () => {
+                showConfirm('관리자의 재작성 요청에 동의하시겠습니까?\n동의하면 기존 근로계약서가 삭제되고 재작성이 시작됩니다.', async () => {
+                    try {
+                        const result = await requestContractDelete(firebaseUser.uid, empAccount.bossUid, 'employee');
+                        if (result === 'deleted') {
+                            showAlert('근로계약서가 삭제되었습니다.\n재작성이 필요합니다.', '동의 완료', 'success');
+                        }
+                    } catch(e) { showAlert('처리 실패: ' + e.message, '오류', 'error'); }
+                }, '재작성 동의');
+            };
+
+            const handleRejectRewriteRequest = async () => {
+                try {
+                    await cancelContractDeleteRequest(firebaseUser.uid, empAccount.bossUid, 'employee');
+                    showAlert('재작성 요청을 거부했습니다.', '거부 완료', 'success');
+                } catch(e) { showAlert('처리 실패: ' + e.message, '오류', 'error'); }
+            };
+
             return (
                 <div className="min-h-screen bg-gray-50 text-gray-800 font-sans relative pb-24">
                     <CustomModal config={modalConfig} />
@@ -3804,24 +3822,6 @@
                     await cancelContractDeleteRequest(firebaseUser.uid, empAccount.bossUid, 'employee');
                     setLiveDeleteReq(null);
                     showAlert('삭제 요청이 취소되었습니다.', '취소 완료', 'success');
-                } catch(e) { showAlert('처리 실패: ' + e.message, '오류', 'error'); }
-            };
-
-            const handleAgreeRewriteRequest = () => {
-                showConfirm('관리자의 재작성 요청에 동의하시겠습니까?\n동의하면 기존 근로계약서가 삭제되고 재작성이 시작됩니다.', async () => {
-                    try {
-                        const result = await requestContractDelete(firebaseUser.uid, empAccount.bossUid, 'employee');
-                        if (result === 'deleted') {
-                            showAlert('근로계약서가 삭제되었습니다.\n재작성이 필요합니다.', '동의 완료', 'success');
-                        }
-                    } catch(e) { showAlert('처리 실패: ' + e.message, '오류', 'error'); }
-                }, '재작성 동의');
-            };
-
-            const handleRejectRewriteRequest = async () => {
-                try {
-                    await cancelContractDeleteRequest(firebaseUser.uid, empAccount.bossUid, 'employee');
-                    showAlert('재작성 요청을 거부했습니다.', '거부 완료', 'success');
                 } catch(e) { showAlert('처리 실패: ' + e.message, '오류', 'error'); }
             };
 

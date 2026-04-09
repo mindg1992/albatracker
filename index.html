@@ -4180,7 +4180,7 @@
         }
 
         // ─── 관리자: 개인 근로계약서 템플릿 편집 팝업 ───
-        function PersonalContractTemplateModal({ emp, globalTemplate, workspaceId, firebaseUser, setEmployees, showAlert, onClose, reason }) {
+        function PersonalContractTemplateModal({ emp, globalTemplate, workspaceId, firebaseUser, setEmployees, showAlert, onClose, onSaveComplete, reason }) {
             const baseTemplate = globalTemplate || {};
             const [title, setTitle] = useState(baseTemplate?.title || '근로계약서');
             const [sections, setSections] = useState(
@@ -4242,7 +4242,7 @@
                         setEmployees(prev => prev.map(e => e.id === emp.id ? { ...emp, contractStatus: 'needs_resign', pendingRewrite: true, contractDeleteRequest: null } : e));
                         showAlert(`${emp.name}님에게 근로계약서 재작성이 요청되었습니다.`, '요청 완료', 'success');
                     }
-                    onClose();
+                    (onSaveComplete || onClose)();
                 } catch(e) { showAlert('저장 실패: ' + e.message, '오류', 'error'); }
                 setSaving(false);
             };
@@ -5073,7 +5073,20 @@
                             setEmployees={setEmployees}
                             showAlert={showAlert}
                             reason={personalTemplateReason}
-                            onClose={() => setPersonalTemplateTarget(null)}
+                            onSaveComplete={() => setPersonalTemplateTarget(null)}
+                            onClose={() => {
+                                // 근무자 재작성 요청에 동의 후 취소(X)한 경우 → contractDeleteRequest 복원
+                                if (personalTemplateReason === 'rewrite_request' && personalTemplateTarget?.empUid) {
+                                    const bossUid = currentWorkspaceId || firebaseUser.uid;
+                                    const emp = personalTemplateTarget;
+                                    fbDb.collection('employeeAccounts').doc(emp.empUid)
+                                        .collection('workplaces').doc(bossUid)
+                                        .update({ contractDeleteRequest: 'employee' })
+                                        .catch(() => {});
+                                    setEmployees(prev => prev.map(e => e.id === emp.id ? { ...e, contractDeleteRequest: 'employee' } : e));
+                                }
+                                setPersonalTemplateTarget(null);
+                            }}
                         />
                     )}
                     {minWageModalOpen && (

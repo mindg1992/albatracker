@@ -872,7 +872,17 @@
                     docRef.get().then(doc => {
                         if (cancelled) return;
                         if (doc.exists) {
-                            const d = doc.data();
+                            let d = doc.data();
+                            // 로컬에서 삭제한 월 데이터가 Firestore에 아직 반영 안 됐을 경우 방어
+                            try {
+                                const pdelKey = 'at_pdel_' + currentWorkspaceId;
+                                const pendingDeletes = JSON.parse(localStorage.getItem(pdelKey) || '[]');
+                                if (pendingDeletes.length > 0 && d.monthlyData) {
+                                    const fixed = { ...d.monthlyData };
+                                    pendingDeletes.forEach(k => { delete fixed[k]; });
+                                    d = { ...d, monthlyData: fixed };
+                                }
+                            } catch(_) {}
                             const serverStr = JSON.stringify({
                                 appPin:        d.appPin        !== undefined ? d.appPin        : INITIAL_PIN,
                                 employees:     d.employees     !== undefined ? d.employees     : [],
@@ -934,6 +944,7 @@
                     fsSet(fbDb.collection('users').doc(currentWorkspaceId), currentData)
                         .then(() => {
                             lastSyncedDataRef.current = currentDataStr;
+                            try { localStorage.removeItem('at_pdel_' + currentWorkspaceId); } catch(_) {}
                             setIsSyncing(false);
                             setSaveSuccess(true);
                             clearTimeout(saveSuccessTimerRef.current);
@@ -990,7 +1001,9 @@
                 if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
                 localStorage.setItem('at_cache_' + wsId, JSON.stringify(currentData));
                 lastSyncedDataRef.current = JSON.stringify(currentData);
-                fsSet(fbDb.collection('users').doc(wsId), currentData).catch(() => {});
+                fsSet(fbDb.collection('users').doc(wsId), currentData)
+                    .then(() => { try { localStorage.removeItem('at_pdel_' + wsId); } catch(_) {} })
+                    .catch(() => {});
             };
 
             const checkInAppBrowser = () => {
@@ -4811,7 +4824,7 @@
                     await cancelContractDeleteRequest(emp.empUid, bossUid, 'boss');
                     setModalDeleteReq(null);
                     setEmployees(prev => prev.map(e => e.id === emp.id ? { ...e, contractDeleteRequest: null } : e));
-                    showAlert('삭제 요청이 취소되었습니다.', '취소 완료', 'success');
+                    showAlert('재작성 요청이 취소되었습니다.', '취소 완료', 'success');
                 } catch(e) { showAlert('처리 실패: ' + e.message, '오류', 'error'); }
             };
 
@@ -5628,6 +5641,14 @@
                                     setMonthlyData(prev => {
                                         const newData = { ...prev };
                                         delete newData[monthKey];
+                                        // Firestore 동기화 전 새로고침 시 데이터 복원 방지
+                                        if (workspaceId) {
+                                            try {
+                                                const pKey = 'at_pdel_' + workspaceId;
+                                                const list = JSON.parse(localStorage.getItem(pKey) || '[]');
+                                                if (!list.includes(monthKey)) localStorage.setItem(pKey, JSON.stringify([...list, monthKey]));
+                                            } catch(_) {}
+                                        }
                                         onImmediateSaveMonthly?.(newData);
                                         return newData;
                                     });

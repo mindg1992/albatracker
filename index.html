@@ -1841,7 +1841,14 @@
                             <CustomModal config={modalConfig} />
                             <EmployeeApp
                                 empAccount={{ ...empAccount, ...selectedWorkplace }}
-                                onSetEmpAccount={setEmpAccount}
+                                onSetEmpAccount={(updater) => {
+                                    setEmpAccount(updater);
+                                    setEmpGoogleWorkplaces(prev => prev.map(w =>
+                                        w.bossUid === selectedEmpBossUid
+                                            ? (typeof updater === 'function' ? updater(w) : { ...w, ...updater })
+                                            : w
+                                    ));
+                                }}
                                 firebaseUser={firebaseUser}
                                 mySubmissions={mySubmissions}
                                 notifications={empNotifications}

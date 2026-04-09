@@ -6996,6 +6996,15 @@
                 return () => window.removeEventListener('keydown', handleKeyDown);
             }, [year, month, isBulkInputOpen, editDayModal]);
 
+            const touchStartX = useRef(null);
+            const handleTouchStart = (e) => { touchStartX.current = e.touches[0].clientX; };
+            const handleTouchEnd = (e) => {
+                if (touchStartX.current === null || isBulkInputOpen || editDayModal) return;
+                const dx = e.changedTouches[0].clientX - touchStartX.current;
+                if (Math.abs(dx) > 50) { dx < 0 ? nextMonth() : prevMonth(); }
+                touchStartX.current = null;
+            };
+
             const handleDeleteDay = (dayToDel) => {
                 showConfirm(`${year}년 ${month}월 ${dayToDel}일의 예측 정보를 정말 삭제하시겠습니까?`, () => {
                     setPredictData(prev => {
@@ -7063,7 +7072,7 @@
                         </div>
                     </div>
 
-                    <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
+                    <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden" onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
                         <div className="grid grid-cols-7 bg-gray-50 border-b border-gray-200">
                             {['일', '월', '화', '수', '목', '금', '토'].map((day, i) => (
                                 <div key={day} className={`text-center py-3 text-sm font-bold ${i === 0 ? 'text-red-500' : i === 6 ? 'text-blue-500' : 'text-gray-600'}`}>

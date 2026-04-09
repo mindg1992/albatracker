@@ -7427,7 +7427,7 @@
                             {bossCanSign && contract.status !== 'completed' && (
                                 <button onClick={handleSign} disabled={signing}
                                     className="flex-1 bg-green-600 text-white py-3 rounded-xl font-bold hover:bg-green-700 transition disabled:opacity-50">
-                                    {signing ? '처리 중...' : '서명 완료 (계약 확정)'}
+                                    {signing ? '처리 중...' : '서명 완료'}
                                 </button>
                             )}
                             <button onClick={() => { if (('ontouchstart' in window) || navigator.maxTouchPoints > 0) { alert('PC에서만 사용가능합니다.'); return; } handlePrint(); }} className="flex-1 bg-indigo-500 text-white py-3 rounded-xl font-medium hover:bg-indigo-600 transition">PDF 인쇄</button>

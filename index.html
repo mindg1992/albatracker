@@ -1199,16 +1199,18 @@
             // Google 직원 업체(workplaces) 로드
             useEffect(() => {
                 if (!firebaseUser || userRole !== 'employee' || !empAccount?.isGoogleEmployee) return;
-                let cancelled = false;
+                let isFirst = true;
                 setEmpWorkplaceLoading(true);
 
-                fbDb.collection('employeeAccounts').doc(firebaseUser.uid)
-                    .collection('workplaces').get()
-                    .then(snap => {
-                        if (cancelled) return;
+                const unsub = fbDb.collection('employeeAccounts').doc(firebaseUser.uid)
+                    .collection('workplaces').onSnapshot(snap => {
                         const workplaces = [];
                         snap.forEach(d => workplaces.push({ bossUid: d.id, ...d.data() }));
                         setEmpGoogleWorkplaces(workplaces);
+                        setEmpWorkplaceLoading(false);
+
+                        if (!isFirst) return;
+                        isFirst = false;
 
                         // 거절된 업체 — 최초 1회만 팝업 알림
                         const rejected = workplaces.filter(w => w.status === 'rejected');
@@ -1253,11 +1255,9 @@
                         } else {
                             setSelectedEmpBossUid(null);
                         }
-                    })
-                    .catch(e => { if (!cancelled) console.error('업체 로드 오류:', e); })
-                    .finally(() => { if (!cancelled) setEmpWorkplaceLoading(false); });
+                    }, e => { console.error('업체 로드 오류:', e); setEmpWorkplaceLoading(false); });
 
-                return () => { cancelled = true; };
+                return () => unsub();
             }, [firebaseUser?.uid, userRole, empAccount?.isGoogleEmployee]);
 
             // 관리자 워크스페이스 로드 — currentWorkspaceId 기반

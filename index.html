@@ -874,6 +874,7 @@
                         if (doc.exists) {
                             let d = doc.data();
                             // 로컬에서 삭제한 월 데이터가 Firestore에 아직 반영 안 됐을 경우 방어
+                            let hasPendingDeletes = false;
                             try {
                                 const pdelKey = 'at_pdel_' + currentWorkspaceId;
                                 const pendingDeletes = JSON.parse(localStorage.getItem(pdelKey) || '[]');
@@ -881,6 +882,7 @@
                                     const fixed = { ...d.monthlyData };
                                     pendingDeletes.forEach(k => { delete fixed[k]; });
                                     d = { ...d, monthlyData: fixed };
+                                    hasPendingDeletes = true;
                                 }
                             } catch(_) {}
                             const serverStr = JSON.stringify({
@@ -894,6 +896,10 @@
                             if (serverStr !== lastSyncedDataRef.current) {
                                 applyData(d);
                                 localStorage.setItem(cacheKey, JSON.stringify(d));
+                            }
+                            // 삭제 대기 항목이 있으면 lastSyncedDataRef 초기화 → 자동저장 강제 실행 → Firestore 동기화
+                            if (hasPendingDeletes) {
+                                lastSyncedDataRef.current = '';
                             }
                         } else if (!cached) {
                             lastSyncedDataRef.current = JSON.stringify({
@@ -1477,18 +1483,24 @@
                     const hasContract = !!empData.hasContract;
                     if (existingEmp) {
                         approvedId = existingEmp.id;
-                        setEmployees(prev => prev.map(e =>
-                            e.empUid === empUid ? {
-                                ...e,
-                                name: empData.name,
-                                status: 'working',
-                                hireDate: new Date().toISOString().split('T')[0],
-                                residentId: empData.residentId || e.residentId || '',
-                                bank: empData.bank || e.bank || '',
-                                account: empData.account || e.account || '',
-                                contractStatus: hasContract ? 'completed' : (e.contractStatus || null),
-                            } : e
-                        ));
+                        // 같은 empUid 가진 중복 레코드가 있으면 기존 레코드(가장 먼저 추가된 것)만 활성화, 나머지 퇴사 처리
+                        setEmployees(prev => prev.map(e => {
+                            if (e.empUid !== empUid) return e;
+                            if (e.id === existingEmp.id) {
+                                return {
+                                    ...e,
+                                    name: empData.name,
+                                    status: 'working',
+                                    hireDate: new Date().toISOString().split('T')[0],
+                                    residentId: empData.residentId || e.residentId || '',
+                                    bank: empData.bank || e.bank || '',
+                                    account: empData.account || e.account || '',
+                                    contractStatus: hasContract ? 'completed' : (e.contractStatus || null),
+                                };
+                            }
+                            // 같은 empUid의 다른 레코드(중복)는 퇴사 처리
+                            return { ...e, status: 'resigned' };
+                        }));
                         await approveGoogleEmpJoinRequest(currentWorkspaceId || firebaseUser.uid, empUid, approvedId, hasContract);
                         showAlert(`${empData.name}님이 재입사 승인되었습니다.\n기존 근무 기록이 이어집니다.`, '재입사 승인', 'success');
                     } else {
@@ -1814,6 +1826,7 @@
                             <CustomModal config={modalConfig} />
                             <EmployeeApp
                                 empAccount={{ ...empAccount, ...selectedWorkplace }}
+                                onSetEmpAccount={setEmpAccount}
                                 firebaseUser={firebaseUser}
                                 mySubmissions={mySubmissions}
                                 notifications={empNotifications}
@@ -3380,7 +3393,7 @@
             );
         }
 
-        function EmployeeApp({ empAccount, firebaseUser, mySubmissions, notifications, onLogout, onLock, showAlert, showConfirm, modalConfig, onSwitchWorkplace, onDisconnectWorkplace, onAddWorkplace, allWorkplaces, notices = [] }) {
+        function EmployeeApp({ empAccount, onSetEmpAccount, firebaseUser, mySubmissions, notifications, onLogout, onLock, showAlert, showConfirm, modalConfig, onSwitchWorkplace, onDisconnectWorkplace, onAddWorkplace, allWorkplaces, notices = [] }) {
             const [activeTab, setActiveTab] = useState('calendar');
             const [today] = useState(new Date());
             const [year, setYear] = useState(today.getFullYear());
@@ -3488,7 +3501,7 @@
                 await fbDb.collection('employeeAccounts').doc(firebaseUser.uid)
                     .collection('workplaces').doc(empAccount.bossUid)
                     .update({ pendingRewrite: firebase.firestore.FieldValue.delete() });
-                setEmpAccount(prev => ({ ...prev, pendingRewrite: false, contractStatus: 'pending_boss' }));
+                onSetEmpAccount?.(prev => ({ ...prev, pendingRewrite: false, contractStatus: 'pending_boss' }));
                 setShowTopRewrite(false);
                 showAlert('근로계약서가 제출되었습니다.\n관리자 서명을 기다려주세요.', '제출 완료', 'success');
             };
@@ -4792,7 +4805,10 @@
                     const data = doc.data();
                     const contract = data?.contract || null;
                     if (contract) {
-                        const freshDeleteReq = data?.contractDeleteRequest || null;
+                        // Firestore 필드가 undefined일 경우(삭제 직후 캐시 불일치 등) emp 상태값으로 폴백
+                        const freshDeleteReq = data?.contractDeleteRequest !== undefined
+                            ? (data.contractDeleteRequest || null)
+                            : (emp.contractDeleteRequest || null);
                         setModalDeleteReq(freshDeleteReq);
                         setEmployees(prev => prev.map(e => e.empUid === emp.empUid ? { ...e, contractDeleteRequest: freshDeleteReq } : e));
                         setViewingContract({ contract, empUid: emp.empUid, emp });

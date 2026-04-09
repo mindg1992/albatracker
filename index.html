@@ -613,6 +613,47 @@
         }
 
 
+        // 관리자: 가입 신청자의 근로계약서 반려
+        async function rejectEmpJoinContract(bossUid, empUid) {
+            const batch = fbDb.batch();
+            batch.update(
+                fbDb.collection('employeeAccounts').doc(empUid).collection('workplaces').doc(bossUid),
+                { contractRejected: true }
+            );
+            batch.update(fbDb.collection('empPending').doc(`${empUid}_${bossUid}`), { contractRejected: true });
+            await batch.commit();
+        }
+
+        // 직원: 가입 신청 근로계약서 재제출
+        async function resubmitEmpJoinContract(empUid, bossUid, contractData) {
+            const batch = fbDb.batch();
+            batch.update(
+                fbDb.collection('employeeAccounts').doc(empUid).collection('workplaces').doc(bossUid),
+                { contractRejected: firebase.firestore.FieldValue.delete() }
+            );
+            batch.update(fbDb.collection('empPending').doc(`${empUid}_${bossUid}`), {
+                contract: contractData,
+                hasContract: true,
+                contractRejected: firebase.firestore.FieldValue.delete()
+            });
+            await batch.commit();
+        }
+
+        // 직원: 가입 신청 근로계약서 반려 취소 (계약서 없이 대기 상태로 복귀)
+        async function cancelEmpJoinContractReject(empUid, bossUid) {
+            const batch = fbDb.batch();
+            batch.update(
+                fbDb.collection('employeeAccounts').doc(empUid).collection('workplaces').doc(bossUid),
+                { contractRejected: firebase.firestore.FieldValue.delete() }
+            );
+            batch.update(fbDb.collection('empPending').doc(`${empUid}_${bossUid}`), {
+                contract: firebase.firestore.FieldValue.delete(),
+                hasContract: false,
+                contractRejected: firebase.firestore.FieldValue.delete()
+            });
+            await batch.commit();
+        }
+
         // 관리자: 근로계약서 서명 완료 → completed 상태
         async function bossCompleteContract(bossUid, empUid) {
             await fbDb.collection('employeeAccounts').doc(empUid)
@@ -1430,7 +1471,7 @@
                         const newEmp = {
                             id: approvedId, name: empData.name,
                             hireDate: new Date().toISOString().split('T')[0],
-                            wage: '', scheduledDays: '', dailyHours: '',
+                            wage: Number(globalMinWage) > 0 ? Number(globalMinWage) : '', scheduledDays: '', dailyHours: '',
                             residentId: empData.residentId || '',
                             bank: empData.bank || '',
                             account: empData.account || '',
@@ -1445,6 +1486,17 @@
                     }
                 } catch(e) {
                     showAlert('승인 처리 중 오류: ' + e.message, '오류', 'error');
+                }
+            };
+
+            // 가입 신청자 근로계약서 반려 처리 (관리자)
+            const handleRejectJoinContract = async (empUid) => {
+                const empData = pendingGoogleEmployees.find(e => e.uid === empUid);
+                try {
+                    await rejectEmpJoinContract(currentWorkspaceId || firebaseUser.uid, empUid);
+                    showAlert(`${empData?.name || '직원'}님의 근로계약서가 반려되었습니다.\n직원에게 재작성이 요청됩니다.`, '반려 완료', 'success');
+                } catch(e) {
+                    showAlert('처리 중 오류: ' + e.message, '오류', 'error');
                 }
             };
 
@@ -1721,8 +1773,10 @@
                                 <CustomModal config={modalConfig} />
                                 <PendingApprovalScreen
                                     empAccount={{ ...empAccount, ...selectedWorkplace }}
+                                    firebaseUser={firebaseUser}
                                     onLogout={handleLogout}
                                     onBack={() => { setSelectedEmpBossUid(null); localStorage.removeItem('selectedEmpBossUid'); }}
+                                    showAlert={showAlert}
                                 />
                             </>
                         );
@@ -1920,6 +1974,7 @@
                             pendingEmployees={allPendingEmployees}
                             onApprove={handleApproveEmployee}
                             onReject={handleRejectEmployee}
+                            onRejectContract={handleRejectJoinContract}
                             onClose={() => setShowPendingModal(false)}
                         />
                     )}
@@ -2232,6 +2287,7 @@
                                 pendingEmployees={allPendingEmployees}
                                 onApprove={handleApproveEmployee}
                                 onReject={handleRejectEmployee}
+                                onRejectContract={handleRejectJoinContract}
                                 showAlert={showAlert}
                                 showConfirm={showConfirm}
                             />
@@ -2856,7 +2912,114 @@
             );
         }
 
-        function PendingApprovalScreen({ empAccount, onLogout, onBack }) {
+        function PendingApprovalScreen({ empAccount, firebaseUser, onLogout, onBack, showAlert }) {
+            const [contractRejected, setContractRejected] = useState(!!empAccount?.contractRejected);
+            const [showContractWrite, setShowContractWrite] = useState(false);
+            const [contractTemplate, setContractTemplate] = useState(null);
+            const [loadingTemplate, setLoadingTemplate] = useState(false);
+            const [submitting, setSubmitting] = useState(false);
+
+            // 실시간 반려 상태 감지
+            useEffect(() => {
+                if (!firebaseUser?.uid || !empAccount?.bossUid) return;
+                const unsub = fbDb.collection('employeeAccounts').doc(firebaseUser.uid)
+                    .collection('workplaces').doc(empAccount.bossUid)
+                    .onSnapshot(doc => {
+                        if (doc.exists) setContractRejected(!!doc.data()?.contractRejected);
+                    }, () => {});
+                return () => unsub();
+            }, [firebaseUser?.uid, empAccount?.bossUid]);
+
+            const handleStartRewrite = async () => {
+                setLoadingTemplate(true);
+                try {
+                    // 개인 템플릿 우선, 없으면 글로벌 템플릿
+                    const wpDoc = await fbDb.collection('employeeAccounts').doc(firebaseUser.uid)
+                        .collection('workplaces').doc(empAccount.bossUid).get();
+                    const personalTemplate = wpDoc.data()?.contractTemplate;
+                    if (personalTemplate) {
+                        setContractTemplate(personalTemplate);
+                        setShowContractWrite(true);
+                    } else {
+                        const wsDoc = await fbDb.collection('workspaces').doc(empAccount.bossUid).get();
+                        const globalTemplate = wsDoc.data()?.contractTemplate;
+                        if (globalTemplate) {
+                            setContractTemplate(globalTemplate);
+                            setShowContractWrite(true);
+                        } else {
+                            showAlert?.('근로계약서 양식이 없습니다. 관리자에게 문의하세요.', '안내', 'info');
+                        }
+                    }
+                } catch(e) {
+                    showAlert?.('양식 불러오기 실패: ' + e.message, '오류', 'error');
+                }
+                setLoadingTemplate(false);
+            };
+
+            const handleContractRewrite = async (contractData) => {
+                setSubmitting(true);
+                try {
+                    await resubmitEmpJoinContract(firebaseUser.uid, empAccount.bossUid, contractData);
+                    setContractRejected(false);
+                    setShowContractWrite(false);
+                    showAlert?.('근로계약서가 재제출되었습니다.\n관리자 승인을 기다려주세요.', '제출 완료', 'success');
+                } catch(e) {
+                    showAlert?.('제출 실패: ' + e.message, '오류', 'error');
+                }
+                setSubmitting(false);
+            };
+
+            const handleCancelReject = async () => {
+                try {
+                    await cancelEmpJoinContractReject(firebaseUser.uid, empAccount.bossUid);
+                    setContractRejected(false);
+                } catch(e) {
+                    showAlert?.('처리 실패: ' + e.message, '오류', 'error');
+                }
+            };
+
+            if (showContractWrite && contractTemplate) {
+                return (
+                    <ContractWriteModal
+                        template={contractTemplate}
+                        employeeInfo={{ name: empAccount?.name || '', address: empAccount?.address || '', phone: empAccount?.phone || '' }}
+                        onSubmit={handleContractRewrite}
+                        onBack={() => setShowContractWrite(false)}
+                    />
+                );
+            }
+
+            if (contractRejected) {
+                return (
+                    <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+                        <div className="bg-white p-8 rounded-2xl shadow-xl w-full max-w-sm text-center">
+                            <div className="w-20 h-20 rounded-full bg-red-100 flex items-center justify-center mx-auto mb-4">
+                                <svg className="w-10 h-10 text-red-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+                            </div>
+                            <h2 className="text-xl font-bold text-gray-800 mb-2">근로계약서가 반려되었습니다</h2>
+                            {empAccount?.shopName && (
+                                <p className="text-blue-600 font-bold text-sm mb-1">{empAccount.shopName}</p>
+                            )}
+                            <p className="text-gray-500 text-sm mb-6">
+                                관리자가 근로계약서 재작성을 요청했습니다.<br/>
+                                계약서를 다시 작성하거나 취소할 수 있습니다.
+                            </p>
+                            <button onClick={handleStartRewrite} disabled={loadingTemplate}
+                                className="w-full bg-purple-600 text-white py-3 rounded-xl font-bold hover:bg-purple-700 transition mb-2 disabled:opacity-50">
+                                {loadingTemplate ? '양식 불러오는 중...' : '근로계약서 재작성하기'}
+                            </button>
+                            <button onClick={handleCancelReject}
+                                className="w-full bg-gray-100 text-gray-600 py-3 rounded-xl font-medium hover:bg-gray-200 transition mb-2">
+                                취소 (계약서 없이 대기)
+                            </button>
+                            <button onClick={onLogout} className="w-full bg-gray-50 text-gray-500 py-2.5 rounded-xl font-medium hover:bg-gray-100 transition text-sm">
+                                로그아웃
+                            </button>
+                        </div>
+                    </div>
+                );
+            }
+
             return (
                 <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
                     <div className="bg-white p-8 rounded-2xl shadow-xl w-full max-w-sm text-center">
@@ -2931,8 +3094,17 @@
             );
         }
 
-        function PendingApprovalsModal({ pendingEmployees, onApprove, onReject, onClose }) {
-            const [viewingContract, setViewingContract] = useState(null);
+        function PendingApprovalsModal({ pendingEmployees, onApprove, onReject, onRejectContract, onClose }) {
+            const [reviewingEmp, setReviewingEmp] = useState(null);
+
+            const handleApproveClick = (emp) => {
+                if (emp.hasContract && emp.contract) {
+                    setReviewingEmp(emp);
+                } else {
+                    onApprove(emp.uid);
+                }
+            };
+
             return (
                 <>
                 <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-[9999] backdrop-blur-sm">
@@ -2950,16 +3122,14 @@
                                         <div>
                                             <p className="font-bold text-gray-800">{emp.name}</p>
                                             <p className="text-xs text-gray-400">초대코드: {emp.inviteCode}</p>
-                                            {emp.hasContract && (
+                                            {emp.contractRejected ? (
+                                                <span className="text-xs bg-orange-100 text-orange-700 px-2 py-0.5 rounded-full font-bold">계약서 재제출 대기</span>
+                                            ) : emp.hasContract ? (
                                                 <span className="text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full font-bold">근로계약서 있음</span>
-                                            )}
+                                            ) : null}
                                         </div>
                                         <div className="flex gap-2 flex-wrap justify-end">
-                                            {emp.hasContract && emp.contract && (
-                                                <button onClick={() => setViewingContract(emp.contract)}
-                                                    className="bg-purple-100 text-purple-700 px-3 py-1.5 rounded-lg text-xs font-bold hover:bg-purple-200 transition">계약서 보기</button>
-                                            )}
-                                            <button onClick={() => onApprove(emp.uid)} className="bg-green-600 text-white px-3 py-1.5 rounded-lg text-sm font-bold hover:bg-green-700 transition">승인</button>
+                                            <button onClick={() => handleApproveClick(emp)} className="bg-green-600 text-white px-3 py-1.5 rounded-lg text-sm font-bold hover:bg-green-700 transition">승인</button>
                                             <button onClick={() => onReject(emp.uid)} className="bg-red-100 text-red-600 px-3 py-1.5 rounded-lg text-sm font-bold hover:bg-red-200 transition">거절</button>
                                         </div>
                                     </div>
@@ -2968,16 +3138,63 @@
                         </div>
                     </div>
                 </div>
-                {viewingContract && (
-                    <ContractViewModal contract={viewingContract} onClose={() => setViewingContract(null)} />
+                {reviewingEmp && (
+                    <div className="fixed inset-0 bg-black/70 z-[10000] flex items-center justify-center p-4 backdrop-blur-sm">
+                        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] flex flex-col overflow-hidden">
+                            <div className="p-5 border-b flex items-center justify-between shrink-0">
+                                <div>
+                                    <h2 className="text-base font-bold text-gray-800">📋 {reviewingEmp.name}님의 근로계약서</h2>
+                                    <p className="text-xs text-gray-500 mt-0.5">계약서를 검토한 후 승인하거나 재요청하세요</p>
+                                </div>
+                                <button onClick={() => setReviewingEmp(null)} className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition"><X className="w-5 h-5" /></button>
+                            </div>
+                            <div className="flex-1 overflow-auto p-5 space-y-3">
+                                {reviewingEmp.contract?.title && (
+                                    <h3 className="text-center font-bold text-lg text-gray-800 mb-2">{reviewingEmp.contract.title}</h3>
+                                )}
+                                {(reviewingEmp.contract?.sections || []).map((s, i) => (
+                                    <div key={i} className="bg-gray-50 rounded-xl p-4">
+                                        <p className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed">{s.content}</p>
+                                        {s.answer && (
+                                            <div className="mt-2 border-t border-gray-200 pt-2">
+                                                <p className="text-sm font-semibold text-gray-900">{s.answer}</p>
+                                            </div>
+                                        )}
+                                    </div>
+                                ))}
+                                {reviewingEmp.contract?.employeeInfo && (
+                                    <div className="bg-green-50 rounded-xl p-4 border border-green-200">
+                                        <p className="text-xs font-bold text-green-700 mb-2">근로자</p>
+                                        <p className="text-sm text-gray-700">성명: {reviewingEmp.contract.employeeInfo.name}</p>
+                                        {reviewingEmp.contract.employeeInfo.address && <p className="text-sm text-gray-700">주소: {reviewingEmp.contract.employeeInfo.address}</p>}
+                                        {reviewingEmp.contract.employeeInfo.phone && <p className="text-sm text-gray-700">연락처: {reviewingEmp.contract.employeeInfo.phone}</p>}
+                                        {reviewingEmp.contract.employeeInfo.signatureData && (
+                                            <img src={reviewingEmp.contract.employeeInfo.signatureData} alt="서명" className="mt-2 h-12 object-contain border border-gray-200 rounded bg-white p-1" />
+                                        )}
+                                    </div>
+                                )}
+                            </div>
+                            <div className="p-4 border-t shrink-0 flex gap-3">
+                                <button
+                                    onClick={() => { onRejectContract(reviewingEmp.uid); setReviewingEmp(null); }}
+                                    className="flex-1 bg-orange-100 text-orange-700 py-3 rounded-xl font-bold hover:bg-orange-200 transition text-sm"
+                                >계약서 재요청</button>
+                                <button
+                                    onClick={() => { onApprove(reviewingEmp.uid); setReviewingEmp(null); }}
+                                    className="flex-1 bg-green-600 text-white py-3 rounded-xl font-bold hover:bg-green-700 transition text-sm"
+                                >최종 승인</button>
+                            </div>
+                        </div>
+                    </div>
                 )}
                 </>
             );
         }
 
-        function TabInvite({ workspaceInfo, setWorkspaceInfo, firebaseUser, workspaceId, pendingEmployees, onApprove, onReject, showAlert, showConfirm }) {
+        function TabInvite({ workspaceInfo, setWorkspaceInfo, firebaseUser, workspaceId, pendingEmployees, onApprove, onReject, onRejectContract, showAlert, showConfirm }) {
             const [copying, setCopying] = useState(false);
             const [regenerating, setRegenerating] = useState(false);
+            const [reviewingEmp, setReviewingEmp] = useState(null);
 
             const inviteCode = workspaceInfo?.inviteCode || '';
             const appUrl = window.location.href.split('?')[0];
@@ -3053,10 +3270,19 @@
                                     <div key={emp.uid} className="flex items-center justify-between bg-yellow-50 border border-yellow-200 rounded-xl p-4">
                                         <div>
                                             <p className="font-bold text-gray-800">{emp.name}</p>
-                                            <p className="text-xs text-gray-400">가입 신청</p>
+                                            {emp.contractRejected ? (
+                                                <p className="text-xs text-orange-600 font-bold">계약서 재제출 대기</p>
+                                            ) : emp.hasContract ? (
+                                                <p className="text-xs text-purple-600 font-bold">근로계약서 있음</p>
+                                            ) : (
+                                                <p className="text-xs text-gray-400">가입 신청</p>
+                                            )}
                                         </div>
                                         <div className="flex gap-2">
-                                            <button onClick={() => onApprove(emp.uid)} className="bg-green-600 text-white px-3 py-1.5 rounded-lg text-sm font-bold hover:bg-green-700 transition">승인</button>
+                                            <button onClick={() => {
+                                                if (emp.hasContract && emp.contract) { setReviewingEmp(emp); }
+                                                else { onApprove(emp.uid); }
+                                            }} className="bg-green-600 text-white px-3 py-1.5 rounded-lg text-sm font-bold hover:bg-green-700 transition">승인</button>
                                             <button onClick={() => onReject(emp.uid)} className="bg-red-100 text-red-600 px-3 py-1.5 rounded-lg text-sm font-bold hover:bg-red-200 transition">거절</button>
                                         </div>
                                     </div>
@@ -3064,6 +3290,56 @@
                             </div>
                         )}
                     </div>
+
+                    {reviewingEmp && (
+                        <div className="fixed inset-0 bg-black/70 z-[10000] flex items-center justify-center p-4 backdrop-blur-sm">
+                            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] flex flex-col overflow-hidden">
+                                <div className="p-5 border-b flex items-center justify-between shrink-0">
+                                    <div>
+                                        <h2 className="text-base font-bold text-gray-800">📋 {reviewingEmp.name}님의 근로계약서</h2>
+                                        <p className="text-xs text-gray-500 mt-0.5">계약서를 검토한 후 승인하거나 재요청하세요</p>
+                                    </div>
+                                    <button onClick={() => setReviewingEmp(null)} className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition"><X className="w-5 h-5" /></button>
+                                </div>
+                                <div className="flex-1 overflow-auto p-5 space-y-3">
+                                    {reviewingEmp.contract?.title && (
+                                        <h3 className="text-center font-bold text-lg text-gray-800 mb-2">{reviewingEmp.contract.title}</h3>
+                                    )}
+                                    {(reviewingEmp.contract?.sections || []).map((s, i) => (
+                                        <div key={i} className="bg-gray-50 rounded-xl p-4">
+                                            <p className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed">{s.content}</p>
+                                            {s.answer && (
+                                                <div className="mt-2 border-t border-gray-200 pt-2">
+                                                    <p className="text-sm font-semibold text-gray-900">{s.answer}</p>
+                                                </div>
+                                            )}
+                                        </div>
+                                    ))}
+                                    {reviewingEmp.contract?.employeeInfo && (
+                                        <div className="bg-green-50 rounded-xl p-4 border border-green-200">
+                                            <p className="text-xs font-bold text-green-700 mb-2">근로자</p>
+                                            <p className="text-sm text-gray-700">성명: {reviewingEmp.contract.employeeInfo.name}</p>
+                                            {reviewingEmp.contract.employeeInfo.address && <p className="text-sm text-gray-700">주소: {reviewingEmp.contract.employeeInfo.address}</p>}
+                                            {reviewingEmp.contract.employeeInfo.phone && <p className="text-sm text-gray-700">연락처: {reviewingEmp.contract.employeeInfo.phone}</p>}
+                                            {reviewingEmp.contract.employeeInfo.signatureData && (
+                                                <img src={reviewingEmp.contract.employeeInfo.signatureData} alt="서명" className="mt-2 h-12 object-contain border border-gray-200 rounded bg-white p-1" />
+                                            )}
+                                        </div>
+                                    )}
+                                </div>
+                                <div className="p-4 border-t shrink-0 flex gap-3">
+                                    <button
+                                        onClick={() => { onRejectContract(reviewingEmp.uid); setReviewingEmp(null); }}
+                                        className="flex-1 bg-orange-100 text-orange-700 py-3 rounded-xl font-bold hover:bg-orange-200 transition text-sm"
+                                    >계약서 재요청</button>
+                                    <button
+                                        onClick={() => { onApprove(reviewingEmp.uid); setReviewingEmp(null); }}
+                                        className="flex-1 bg-green-600 text-white py-3 rounded-xl font-bold hover:bg-green-700 transition text-sm"
+                                    >최종 승인</button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
 
                     <div className="bg-blue-50 rounded-xl p-4 text-sm text-blue-700 space-y-1">
                         <p className="font-bold">직원 가입 안내</p>
@@ -4684,9 +4960,10 @@
                     return;
                 }
 
+                const parsedWage = formData.wage ? parseInt(formData.wage, 10) : 0;
                 const finalData = {
                     ...formData,
-                    wage: formData.wage ? parseInt(formData.wage, 10) : ''
+                    wage: parsedWage > 0 ? parsedWage : (Number(globalMinWage) > 0 ? Number(globalMinWage) : '')
                 };
                 onSave(finalData);
             };
@@ -4730,7 +5007,7 @@
 
                             <div>
                                 <label className="block text-sm font-medium text-gray-700 mb-1">시급</label>
-                                <input type="number" name="wage" value={formData.wage} onChange={handleChange} onBlur={handleWageBlur} min={globalMinWage || 1} placeholder={`공란 시 설정된 최저시급(${Number(globalMinWage).toLocaleString()}원) 적용`} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-green-500 outline-none transition-shadow" />
+                                <input type="number" name="wage" value={formData.wage} onChange={handleChange} onBlur={handleWageBlur} min={globalMinWage || 1} placeholder={`저장 시 최저시급(${Number(globalMinWage).toLocaleString()}원) 자동 적용`} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-green-500 outline-none transition-shadow" />
                             </div>
 
                             <div className="grid grid-cols-2 gap-3">

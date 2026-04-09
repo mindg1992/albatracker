@@ -4080,15 +4080,24 @@
                     if (wageChanged && (editingEmp.contractStatus === 'completed' || editingEmp.contractStatus === 'needs_resign')) {
                         const hadPersonalWage = editingEmp.wage && Number(editingEmp.wage) > 0;
                         const hasPersonalWage = dataToSave.wage && Number(dataToSave.wage) > 0;
-                        if (hasPersonalWage || hadPersonalWage) {
-                            // 개별 시급이었거나 개별 시급으로 변경: 개인 근로계약서 팝업 열기
-                            // (공란으로 바꾼 경우도 기존 개인 템플릿 로드 후 재작성)
+                        if (hasPersonalWage) {
+                            // 개별 시급 → 개별 시급 변경: 개인 근로계약서 템플릿 편집 팝업 열기
                             // setEmployees는 팝업 저장 시점에만 호출 (앱 재시작 시 시급 원복 보장)
                             setPersonalTemplateReason('wage_change');
                             setPersonalTemplateTarget(finalData);
                             setIsModalOpen(false);
                             setEditingEmp(null);
                             return;
+                        } else if (hadPersonalWage && !hasPersonalWage) {
+                            // 개별 시급 → 공란(최저시급) 전환: 기존 저장 템플릿 수정 없이 바로 needs_resign 처리
+                            finalData = { ...finalData, contractStatus: 'needs_resign' };
+                            if (dataToSave.empUid && currentWorkspaceId) {
+                                fbDb.collection('employeeAccounts').doc(dataToSave.empUid)
+                                    .collection('workplaces').doc(currentWorkspaceId)
+                                    .update({ contractStatus: 'needs_resign' })
+                                    .catch(() => {});
+                            }
+                            showAlert('시급이 최저시급으로 변경되었습니다.\n근무자에게 계약서 재작성이 요청됩니다.', '변경 완료', 'success');
                         } else if (workspaceInfo?.contractTemplate) {
                             // 최저시급 근무자: 기존 동작 (글로벌 템플릿 수정 안내)
                             finalData = { ...finalData, contractStatus: 'needs_resign' };

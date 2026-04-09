@@ -7514,8 +7514,10 @@
                                     {signing ? '처리 중...' : '서명 완료'}
                                 </button>
                             )}
+                            {!(bossCanSign && contract.status !== 'completed') && (<>
                             <button onClick={() => { if (('ontouchstart' in window) || navigator.maxTouchPoints > 0) { alert('PC에서만 사용가능합니다.'); return; } handlePrint(); }} className="flex-1 bg-indigo-500 text-white py-3 rounded-xl font-medium hover:bg-indigo-600 transition">PDF 인쇄</button>
                             <button onClick={handleSavePDF} className="flex-1 bg-purple-500 text-white py-3 rounded-xl font-medium hover:bg-purple-600 transition">PDF 저장</button>
+                            </>)}
                             <button onClick={onClose} className="flex-1 bg-gray-100 text-gray-700 py-3 rounded-xl font-medium hover:bg-gray-200 transition">닫기</button>
                         </div>
                     </div>

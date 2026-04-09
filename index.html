@@ -5830,20 +5830,37 @@
                         <button
                             onClick={() => {
                                 showConfirm(`${year}년 ${month}월 정보를 정말 초기화하시겠습니까?`, () => {
-                                    setMonthlyData(prev => {
-                                        const newData = { ...prev };
-                                        delete newData[monthKey];
-                                        // Firestore 동기화 전 새로고침 시 데이터 복원 방지
-                                        if (workspaceId) {
-                                            try {
-                                                const pKey = 'at_pdel_' + workspaceId;
-                                                const list = JSON.parse(localStorage.getItem(pKey) || '[]');
-                                                if (!list.includes(monthKey)) localStorage.setItem(pKey, JSON.stringify([...list, monthKey]));
-                                            } catch(_) {}
-                                        }
-                                        onImmediateSaveMonthly?.(newData);
-                                        return newData;
-                                    });
+                                    const newData = { ...monthlyData };
+                                    delete newData[monthKey];
+                                    // Firestore 동기화 전 새로고침 시 데이터 복원 방지
+                                    if (workspaceId) {
+                                        try {
+                                            const pKey = 'at_pdel_' + workspaceId;
+                                            const list = JSON.parse(localStorage.getItem(pKey) || '[]');
+                                            if (!list.includes(monthKey)) localStorage.setItem(pKey, JSON.stringify([...list, monthKey]));
+                                        } catch(_) {}
+                                    }
+                                    setMonthlyData(newData);
+                                    onImmediateSaveMonthly?.(newData);
+                                    // 새로고침 시 직원 제출 데이터가 복원되는 버그 수정:
+                                    // onSnapshot 리스너가 submissions를 재적용하지 않도록 해당 월 데이터 삭제
+                                    if (workspaceId) {
+                                        const padM = month.toString().padStart(2, '0');
+                                        const nextY = month === 12 ? year + 1 : year;
+                                        const nextM = (month === 12 ? 1 : month + 1).toString().padStart(2, '0');
+                                        fbDb.collection('workspaces').doc(workspaceId)
+                                            .collection('submissions')
+                                            .where('date', '>=', `${year}-${padM}-01`)
+                                            .where('date', '<', `${nextY}-${nextM}-01`)
+                                            .get()
+                                            .then(snap => {
+                                                if (snap.empty) return;
+                                                const batch = fbDb.batch();
+                                                snap.forEach(doc => batch.delete(doc.ref));
+                                                return batch.commit();
+                                            })
+                                            .catch(() => {});
+                                    }
                                 }, "초기화 확인");
                             }}
                             className="text-sm bg-red-50 text-red-600 hover:bg-red-100 px-4 py-2.5 rounded-xl transition border border-red-200 font-medium"

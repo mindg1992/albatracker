@@ -3506,19 +3506,25 @@
                         </div>
                     )}
 
-                    {empAccount?.contractDeleteRequest === 'boss' && !rewriteBannerDismissed && (
-                        <div className="bg-orange-50 border-b border-orange-200 px-4 py-3 flex items-center justify-between gap-3">
-                            <div className="flex items-center gap-2 min-w-0">
+                    {empAccount?.contractDeleteRequest === 'boss' && (
+                        <div className="bg-orange-50 border-b border-orange-200 px-4 py-3">
+                            <div className="flex items-center gap-2 mb-2">
                                 <span className="text-orange-500 text-base flex-shrink-0">📋</span>
                                 <div className="min-w-0">
                                     <p className="text-orange-700 font-bold text-sm">근로계약서 재작성 요청</p>
-                                    <p className="text-orange-500 text-xs truncate">관리자가 재작성을 요청했습니다. 내 정보 탭에서 확인하세요.</p>
+                                    <p className="text-orange-500 text-xs">관리자가 근로계약서 재작성을 요청했습니다.</p>
                                 </div>
                             </div>
-                            <button
-                                onClick={() => { setRewriteBannerDismissed(true); setActiveTab('myinfo'); }}
-                                className="flex-shrink-0 bg-orange-600 text-white text-xs font-bold px-3 py-2 rounded-xl hover:bg-orange-700 transition"
-                            >확인</button>
+                            <div className="flex gap-2">
+                                <button
+                                    onClick={handleAgreeRewriteRequest}
+                                    className="flex-1 bg-orange-600 text-white text-xs font-bold py-2 rounded-xl hover:bg-orange-700 transition"
+                                >동의</button>
+                                <button
+                                    onClick={handleRejectRewriteRequest}
+                                    className="flex-1 bg-white text-orange-600 border border-orange-300 text-xs font-bold py-2 rounded-xl hover:bg-orange-50 transition"
+                                >거부</button>
+                            </div>
                         </div>
                     )}
 
@@ -3798,6 +3804,24 @@
                     await cancelContractDeleteRequest(firebaseUser.uid, empAccount.bossUid, 'employee');
                     setLiveDeleteReq(null);
                     showAlert('삭제 요청이 취소되었습니다.', '취소 완료', 'success');
+                } catch(e) { showAlert('처리 실패: ' + e.message, '오류', 'error'); }
+            };
+
+            const handleAgreeRewriteRequest = () => {
+                showConfirm('관리자의 재작성 요청에 동의하시겠습니까?\n동의하면 기존 근로계약서가 삭제되고 재작성이 시작됩니다.', async () => {
+                    try {
+                        const result = await requestContractDelete(firebaseUser.uid, empAccount.bossUid, 'employee');
+                        if (result === 'deleted') {
+                            showAlert('근로계약서가 삭제되었습니다.\n재작성이 필요합니다.', '동의 완료', 'success');
+                        }
+                    } catch(e) { showAlert('처리 실패: ' + e.message, '오류', 'error'); }
+                }, '재작성 동의');
+            };
+
+            const handleRejectRewriteRequest = async () => {
+                try {
+                    await cancelContractDeleteRequest(firebaseUser.uid, empAccount.bossUid, 'employee');
+                    showAlert('재작성 요청을 거부했습니다.', '거부 완료', 'success');
                 } catch(e) { showAlert('처리 실패: ' + e.message, '오류', 'error'); }
             };
 
@@ -4150,17 +4174,32 @@
                     const template = { title: title.trim(), sections, ownerInfo: finalOwnerInfo };
                     const bossUid = workspaceId || firebaseUser.uid;
                     if (emp.empUid) {
-                        await fbDb.collection('employeeAccounts').doc(emp.empUid)
-                            .collection('workplaces').doc(bossUid)
-                            .update({
-                                contractTemplate: template,
-                                contractStatus: 'needs_resign',
-                                contractDeleteRequest: firebase.firestore.FieldValue.delete()
-                            });
+                        if (reason === 'rewrite_request') {
+                            // 재작성 요청: 템플릿만 저장하고 근무자 동의 요청
+                            await fbDb.collection('employeeAccounts').doc(emp.empUid)
+                                .collection('workplaces').doc(bossUid)
+                                .update({ contractTemplate: template });
+                            const result = await requestContractDelete(emp.empUid, bossUid, 'boss');
+                            if (result === 'deleted') {
+                                setEmployees(prev => prev.map(e => e.id === emp.id ? { ...e, contractStatus: 'needs_resign', contract: null, contractDeleteRequest: null } : e));
+                                showAlert(`${emp.name}님의 근로계약서가 삭제되었습니다.\n근무자가 재작성해야 합니다.`, '삭제 완료', 'success');
+                            } else {
+                                setEmployees(prev => prev.map(e => e.id === emp.id ? { ...e, contractDeleteRequest: 'boss' } : e));
+                                showAlert(`${emp.name}님에게 재작성 요청을 보냈습니다.\n근무자가 동의하면 재작성이 시작됩니다.`, '요청 완료', 'success');
+                            }
+                        } else {
+                            // wage_change / new_contract: 기존 동작 (즉시 needs_resign)
+                            await fbDb.collection('employeeAccounts').doc(emp.empUid)
+                                .collection('workplaces').doc(bossUid)
+                                .update({
+                                    contractTemplate: template,
+                                    contractStatus: 'needs_resign',
+                                    contractDeleteRequest: firebase.firestore.FieldValue.delete()
+                                });
+                            setEmployees(prev => prev.map(e => e.id === emp.id ? { ...emp, contractStatus: 'needs_resign', contractDeleteRequest: null } : e));
+                            showAlert(`${emp.name}님의 근로계약서 템플릿이 저장되었습니다.\n근무자에게 재작성이 요청됩니다.`, '저장 완료', 'success');
+                        }
                     }
-                    // 팝업 저장 시점에 시급 변경 + needs_resign 동시 적용 (이전까지는 state 미반영)
-                    setEmployees(prev => prev.map(e => e.id === emp.id ? { ...emp, contractStatus: 'needs_resign', contractDeleteRequest: null } : e));
-                    showAlert(`${emp.name}님의 근로계약서 템플릿이 저장되었습니다.\n근무자에게 재작성이 요청됩니다.`, '저장 완료', 'success');
                     onClose();
                 } catch(e) { showAlert('저장 실패: ' + e.message, '오류', 'error'); }
                 setSaving(false);
@@ -4190,7 +4229,7 @@
                                     </p>
                                 </div>
                             </div>
-                            {reason === 'rewrite_request' && (
+                            {reason !== 'new_contract' && (
                                 <button onClick={onClose} className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition">
                                     <X className="w-5 h-5" />
                                 </button>
@@ -4285,11 +4324,17 @@
                             </div>
                         </div>
 
-                        <div className="p-5 border-t border-gray-100">
+                        <div className="p-5 border-t border-gray-100 space-y-2">
                             <button onClick={handleSave} disabled={saving}
                                 className="w-full bg-purple-600 text-white py-3 rounded-xl font-bold hover:bg-purple-700 transition disabled:opacity-50 text-sm">
                                 {saving ? '저장 중...' : reason === 'new_contract' ? '저장 및 작성 요청' : '저장 및 재작성 요청'}
                             </button>
+                            {reason === 'wage_change' && (
+                                <button onClick={onClose} disabled={saving}
+                                    className="w-full bg-gray-100 text-gray-600 py-2.5 rounded-xl font-medium hover:bg-gray-200 transition text-sm disabled:opacity-50">
+                                    닫기 (시급 변경 취소)
+                                </button>
+                            )}
                         </div>
                     </div>
                 </div>

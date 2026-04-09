@@ -6038,7 +6038,7 @@
             const handlePrint = () => {
                 const c = contract;
                 const esc = s => String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-                const sigImg = src => src ? `<img src="${src}" style="height:52px;object-fit:contain;border:1px solid #e5e7eb;border-radius:8px;background:#fff;padding:3px;display:block;margin-top:6px;">` : '';
+                const sigImg = src => src ? `<img src="${src}" style="width:100%;height:52px;object-fit:contain;border:1px solid #e5e7eb;border-radius:8px;background:#fff;padding:3px;display:block;margin-top:6px;">` : '';
 
                 const sectionsHtml = (c.sections || []).map(s => `
                     <div style="background:#f9fafb;border-radius:10px;padding:14px;margin-bottom:10px;page-break-inside:avoid;">
@@ -6101,7 +6101,7 @@
             const handleSavePDF = () => {
                 const c = contract;
                 const esc = s => String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-                const sigImg = src => src ? `<img src="${src}" style="height:52px;object-fit:contain;border:1px solid #e5e7eb;border-radius:8px;background:#fff;padding:3px;display:block;margin-top:6px;">` : '';
+                const sigImg = src => src ? `<img src="${src}" style="width:100%;height:52px;object-fit:contain;border:1px solid #e5e7eb;border-radius:8px;background:#fff;padding:3px;display:block;margin-top:6px;">` : '';
 
                 // instruction(지시 문구)은 PDF에서 제외
                 const sectionsHtml = (c.sections || []).map(s => `<div style="background:#f9fafb;border-radius:8px;padding:8px 10px;margin-bottom:6px;page-break-inside:avoid;"><p style="font-size:10.5px;color:#1f2937;white-space:pre-wrap;line-height:1.45;margin:0;">${esc(s.content)}</p>${s.answer ? `<div style="border-bottom:2px solid #9ca3af;padding-bottom:2px;margin-top:5px;"><p style="font-size:11px;font-weight:600;color:#111;margin:0;">${esc(s.answer)}</p></div>` : ''}</div>`).join('');

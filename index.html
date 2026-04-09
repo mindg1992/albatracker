@@ -2999,6 +2999,11 @@
                 return `${digits.slice(0,3)}-${digits.slice(3,7)}-${digits.slice(7)}`;
             };
 
+            // empAccount prop에서 contractRejected 동기화 (부모 상태 업데이트 반영)
+            useEffect(() => {
+                if (empAccount?.contractRejected) setContractRejected(true);
+            }, [empAccount?.contractRejected]);
+
             // 실시간 반려 상태 감지
             useEffect(() => {
                 if (!firebaseUser?.uid || !empAccount?.bossUid) return;

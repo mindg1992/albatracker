@@ -6354,7 +6354,7 @@
         }
 
         // ─── 관리자: 근로계약서 템플릿 편집기 ───
-        function ContractTemplateEditor({ workspaceInfo, setWorkspaceInfo, workspaceId, firebaseUser, showAlert, employees, setEmployees }) {
+        function ContractTemplateEditor({ workspaceInfo, setWorkspaceInfo, workspaceId, firebaseUser, showAlert, showConfirm, employees, setEmployees }) {
             const existing = workspaceInfo?.contractTemplate;
             const [title, setTitle] = useState(existing?.title || '근로계약서');
             const [sections, setSections] = useState(
@@ -6367,6 +6367,26 @@
             const addSection = () => setSections(prev => [...prev, { content: '', instruction: '' }]);
             const removeSection = (i) => { if (sections.length <= 1) return; setSections(prev => prev.filter((_, j) => j !== i)); };
             const updateSection = (i, key, val) => setSections(prev => prev.map((s, j) => j === i ? { ...s, [key]: val } : s));
+
+            const handleDeleteTemplate = () => {
+                if (!firebaseUser || !existing) return;
+                showConfirm(
+                    '근로계약서 템플릿을 삭제하시겠습니까?\n\n삭제 후 신규 입사자는 근로계약서 없이 입사하며,\n이후 템플릿을 다시 저장하면 기존 근무자에게 재작성이 요청됩니다.\n(현재 계약서가 완료된 근무자의 계약서는 유지됩니다)',
+                    async () => {
+                        try {
+                            await fbDb.collection('workspaces').doc(workspaceId || firebaseUser.uid)
+                                .update({ contractTemplate: firebase.firestore.FieldValue.delete() });
+                            setWorkspaceInfo(prev => { const n = { ...prev }; delete n.contractTemplate; return n; });
+                            setTitle('근로계약서');
+                            setSections([{ content: '', instruction: '' }]);
+                            setOwnerInfo({ shopName: '', phone: '', address: '', representative: '', signatureData: '' });
+                            setExpanded(false);
+                            showAlert('템플릿이 삭제되었습니다.\n앞으로 신규 입사자는 근로계약서 없이 입사합니다.', '삭제 완료', 'success');
+                        } catch(e) { showAlert('삭제 실패: ' + e.message, '오류', 'error'); }
+                    },
+                    '템플릿 삭제'
+                );
+            };
 
             const handleSave = async () => {
                 if (!firebaseUser) return;
@@ -6518,6 +6538,12 @@
                                 className="w-full bg-purple-600 text-white py-3.5 rounded-xl font-bold hover:bg-purple-700 transition disabled:opacity-50">
                                 {saving ? '저장 중...' : '근로계약서 템플릿 저장'}
                             </button>
+                            {existing && (
+                                <button onClick={handleDeleteTemplate}
+                                    className="w-full bg-red-50 text-red-600 border border-red-200 py-3 rounded-xl font-bold hover:bg-red-100 transition text-sm">
+                                    템플릿 삭제
+                                </button>
+                            )}
                         </div>
                     )}
                 </div>
@@ -6771,6 +6797,7 @@
                         workspaceId={workspaceId}
                         firebaseUser={firebaseUser}
                         showAlert={showAlert}
+                        showConfirm={showConfirm}
                         employees={employees}
                         setEmployees={setEmployees}
                     />

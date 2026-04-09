@@ -1395,7 +1395,8 @@
                             contract: data.contract || null,
                             contractDeleteRequest: data.contractDeleteRequest || null,
                             workStatus: data.workStatus || prev.workStatus,
-                            wageBelowMin: data.wageBelowMin || false
+                            wageBelowMin: data.wageBelowMin || false,
+                            pendingRewrite: data.pendingRewrite || false
                         }));
                     }, () => {});
                 return () => unsub();
@@ -3363,6 +3364,8 @@
             const [noticePopupQueue, setNoticePopupQueue] = useState([]);
             const [currentNoticePopup, setCurrentNoticePopup] = useState(null);
             const [rewriteBannerDismissed, setRewriteBannerDismissed] = useState(false);
+            const [showTopRewrite, setShowTopRewrite] = useState(false);
+            const [topRewriteTemplate, setTopRewriteTemplate] = useState(null);
             const pendingSubmitDateRef = useRef(null);
             const unreadCount = notifications.filter(n => !n.read).length;
             const unreadNoticeCount = (() => {
@@ -3437,21 +3440,48 @@
                 if (activeTab === 'notifications' && unreadCount > 0) markAllRead();
             }, [activeTab]);
 
-            const handleAgreeRewriteRequest = () => {
-                showConfirm('관리자의 재작성 요청에 동의하시겠습니까?\n동의하면 기존 근로계약서가 삭제되고 재작성이 시작됩니다.', async () => {
-                    try {
-                        const result = await requestContractDelete(firebaseUser.uid, empAccount.bossUid, 'employee');
-                        if (result === 'deleted') {
-                            showAlert('근로계약서가 삭제되었습니다.\n재작성이 필요합니다.', '동의 완료', 'success');
-                        }
-                    } catch(e) { showAlert('처리 실패: ' + e.message, '오류', 'error'); }
-                }, '재작성 동의');
+            const handleOpenTopRewrite = async () => {
+                if (!empAccount?.bossUid) return;
+                try {
+                    const wpDoc = await fbDb.collection('employeeAccounts').doc(firebaseUser.uid)
+                        .collection('workplaces').doc(empAccount.bossUid).get();
+                    const personalTemplate = wpDoc.data()?.contractTemplate;
+                    if (personalTemplate) { setTopRewriteTemplate(personalTemplate); setShowTopRewrite(true); return; }
+                    const wsDoc = await fbDb.collection('workspaces').doc(empAccount.bossUid).get();
+                    const template = wsDoc.data()?.contractTemplate;
+                    if (!template) { showAlert('관리자가 근로계약서 템플릿을 설정하지 않았습니다.', '안내', 'info'); return; }
+                    setTopRewriteTemplate(template);
+                    setShowTopRewrite(true);
+                } catch(e) { showAlert('불러오기 실패: ' + e.message, '오류', 'error'); }
+            };
+
+            const handleTopResubmit = async (contractData) => {
+                try {
+                    await resubmitEmpContract(firebaseUser.uid, empAccount.bossUid, contractData);
+                    await fbDb.collection('employeeAccounts').doc(firebaseUser.uid)
+                        .collection('workplaces').doc(empAccount.bossUid)
+                        .update({ pendingRewrite: firebase.firestore.FieldValue.delete() });
+                    setShowTopRewrite(false);
+                    showAlert('근로계약서가 제출되었습니다.\n관리자 서명을 기다려주세요.', '제출 완료', 'success');
+                } catch(e) { showAlert('제출 실패: ' + e.message, '오류', 'error'); }
+            };
+
+            const handleAgreeRewriteRequest = async () => {
+                try {
+                    // 계약서 삭제 없이 pendingRewrite=true로만 전환 후 재작성창 즉시 오픈
+                    await fbDb.collection('employeeAccounts').doc(firebaseUser.uid)
+                        .collection('workplaces').doc(empAccount.bossUid)
+                        .update({ contractDeleteRequest: firebase.firestore.FieldValue.delete(), pendingRewrite: true });
+                    await handleOpenTopRewrite();
+                } catch(e) { showAlert('처리 실패: ' + e.message, '오류', 'error'); }
             };
 
             const handleRejectRewriteRequest = async () => {
                 try {
-                    await cancelContractDeleteRequest(firebaseUser.uid, empAccount.bossUid, 'employee');
-                    showAlert('재작성 요청을 거부했습니다.', '거부 완료', 'success');
+                    // 거부: 계약서 유지, pendingRewrite=true(재작성중 상태)로 전환
+                    await fbDb.collection('employeeAccounts').doc(firebaseUser.uid)
+                        .collection('workplaces').doc(empAccount.bossUid)
+                        .update({ contractDeleteRequest: firebase.firestore.FieldValue.delete(), pendingRewrite: true });
                 } catch(e) { showAlert('처리 실패: ' + e.message, '오류', 'error'); }
             };
 
@@ -3490,6 +3520,14 @@
                     )}
                     {viewModal && (
                         <EmpDayViewModal sub={viewModal.sub} date={viewModal.date} onClose={() => setViewModal(null)} />
+                    )}
+                    {showTopRewrite && topRewriteTemplate && (
+                        <ContractWriteModal
+                            template={topRewriteTemplate}
+                            employeeInfo={{ name: empAccount?.name || '', address: empAccount?.address || '', phone: empAccount?.phone || '' }}
+                            onSubmit={handleTopResubmit}
+                            onBack={() => setShowTopRewrite(false)}
+                        />
                     )}
 
                     <header className="bg-blue-600 text-white shadow-md">
@@ -3534,15 +3572,26 @@
                                 </div>
                             </div>
                             <div className="flex gap-2">
-                                <button
-                                    onClick={handleAgreeRewriteRequest}
-                                    className="flex-1 bg-orange-600 text-white text-xs font-bold py-2 rounded-xl hover:bg-orange-700 transition"
-                                >동의</button>
-                                <button
-                                    onClick={handleRejectRewriteRequest}
-                                    className="flex-1 bg-white text-orange-600 border border-orange-300 text-xs font-bold py-2 rounded-xl hover:bg-orange-50 transition"
-                                >거부</button>
+                                <button onClick={handleAgreeRewriteRequest}
+                                    className="flex-1 bg-orange-600 text-white text-xs font-bold py-2 rounded-xl hover:bg-orange-700 transition">동의</button>
+                                <button onClick={handleRejectRewriteRequest}
+                                    className="flex-1 bg-white text-orange-600 border border-orange-300 text-xs font-bold py-2 rounded-xl hover:bg-orange-50 transition">거부</button>
                             </div>
+                        </div>
+                    )}
+                    {empAccount?.pendingRewrite && (
+                        <div className="bg-blue-50 border-b border-blue-200 px-4 py-3 flex items-center justify-between gap-3">
+                            <div className="flex items-center gap-2 min-w-0">
+                                <span className="text-blue-500 text-base flex-shrink-0">📋</span>
+                                <div className="min-w-0">
+                                    <p className="text-blue-700 font-bold text-sm">근로계약서 재작성 필요</p>
+                                    <p className="text-blue-500 text-xs">기존 계약서는 계속 열람할 수 있습니다.</p>
+                                </div>
+                            </div>
+                            <button onClick={handleOpenTopRewrite}
+                                className="flex-shrink-0 bg-blue-600 text-white text-xs font-bold py-2 px-3 rounded-xl hover:bg-blue-700 transition whitespace-nowrap">
+                                재작성하기
+                            </button>
                         </div>
                     )}
 
@@ -3671,6 +3720,8 @@
                                 onDisconnectWorkplace={onDisconnectWorkplace && empAccount?.bossUid
                                     ? () => onDisconnectWorkplace(empAccount.bossUid)
                                     : null}
+                                onBossRewriteAgree={handleAgreeRewriteRequest}
+                                onBossRewriteReject={handleRejectRewriteRequest}
                             />
                         )}
                     </main>
@@ -3731,7 +3782,7 @@
         }
 
         // 직원 내 정보 탭
-        function EmpProfileTab({ empAccount, firebaseUser, showAlert, showConfirm, onDisconnectWorkplace }) {
+        function EmpProfileTab({ empAccount, firebaseUser, showAlert, showConfirm, onDisconnectWorkplace, onBossRewriteAgree, onBossRewriteReject }) {
             const [formData, setFormData] = useState({
                 residentId: empAccount?.residentId || '',
                 bank: empAccount?.bank || '',
@@ -3960,8 +4011,12 @@
                             contract={viewingContract}
                             onClose={() => setViewingContract(null)}
                             contractDeleteRequest={liveDeleteReq}
-                            onRequestDelete={handleRequestDeleteContract}
-                            onCancelDelete={handleCancelDeleteContract}
+                            onRequestDelete={liveDeleteReq === 'boss'
+                                ? () => { setViewingContract(null); onBossRewriteAgree?.(); }
+                                : handleRequestDeleteContract}
+                            onCancelDelete={liveDeleteReq === 'boss'
+                                ? () => { setViewingContract(null); onBossRewriteReject?.(); }
+                                : handleCancelDeleteContract}
                         />
                     )}
 
@@ -7241,7 +7296,7 @@
                         {error && <p className="text-red-500 text-sm text-center">{error}</p>}
                         <button onClick={handleSubmit} disabled={loading}
                             className="w-full bg-green-600 text-white py-3.5 rounded-xl font-bold hover:bg-green-700 transition disabled:opacity-50 mt-2">
-                            {loading ? '제출 중...' : '계약서 제출 (가입 신청)'}
+                            {loading ? '제출 중...' : '계약서 제출'}
                         </button>
                     </div>
                 </div>

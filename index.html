@@ -2348,7 +2348,6 @@
                                 onApprove={handleApproveEmployee}
                                 onReject={handleRejectEmployee}
                                 onRejectContract={handleRejectJoinContract}
-                                globalTemplate={workspaceInfo?.contractTemplate}
                                 showAlert={showAlert}
                                 showConfirm={showConfirm}
                             />
@@ -3342,11 +3341,10 @@
             );
         }
 
-        function TabInvite({ workspaceInfo, setWorkspaceInfo, firebaseUser, workspaceId, pendingEmployees, onApprove, onReject, onRejectContract, globalTemplate, showAlert, showConfirm }) {
+        function TabInvite({ workspaceInfo, setWorkspaceInfo, firebaseUser, workspaceId, pendingEmployees, onApprove, onReject, onRejectContract, showAlert, showConfirm }) {
             const [copying, setCopying] = useState(false);
             const [regenerating, setRegenerating] = useState(false);
             const [reviewingEmp, setReviewingEmp] = useState(null);
-            const [pendingRewriteTarget, setPendingRewriteTarget] = useState(null);
 
             const inviteCode = workspaceInfo?.inviteCode || '';
             const appUrl = window.location.href.split('?')[0];
@@ -3381,7 +3379,6 @@
             };
 
             return (
-                <React.Fragment>
                 <div className="max-w-xl mx-auto space-y-6">
                     <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6">
                         <h2 className="text-lg font-bold text-gray-800 mb-1">직원 초대 코드</h2>
@@ -3420,30 +3417,24 @@
                         ) : (
                             <div className="space-y-3">
                                 {pendingEmployees.map(emp => (
-                                    <div key={emp.uid} className="bg-yellow-50 border border-yellow-200 rounded-xl p-4 space-y-2">
-                                        <div className="flex items-center justify-between">
-                                            <div>
-                                                <p className="font-bold text-gray-800">{emp.name}</p>
-                                                {!emp.contractRejected && (emp.hasContract
-                                                    ? <p className="text-xs text-purple-600 font-bold">근로계약서 있음</p>
-                                                    : <p className="text-xs text-gray-400">가입 신청</p>
-                                                )}
-                                            </div>
-                                            <div className="flex gap-2">
-                                                <button onClick={() => {
-                                                    if (emp.hasContract && emp.contract) { setReviewingEmp(emp); }
-                                                    else { onApprove(emp.uid); }
-                                                }} className="bg-green-600 text-white px-3 py-1.5 rounded-lg text-sm font-bold hover:bg-green-700 transition">승인</button>
-                                                <button onClick={() => onReject(emp.uid)} className="bg-red-100 text-red-600 px-3 py-1.5 rounded-lg text-sm font-bold hover:bg-red-200 transition">거절</button>
-                                            </div>
+                                    <div key={emp.uid} className="flex items-center justify-between bg-yellow-50 border border-yellow-200 rounded-xl p-4">
+                                        <div>
+                                            <p className="font-bold text-gray-800">{emp.name}</p>
+                                            {emp.contractRejected ? (
+                                                <p className="text-xs text-orange-600 font-bold">계약서 재제출 대기</p>
+                                            ) : emp.hasContract ? (
+                                                <p className="text-xs text-purple-600 font-bold">근로계약서 있음</p>
+                                            ) : (
+                                                <p className="text-xs text-gray-400">가입 신청</p>
+                                            )}
                                         </div>
-                                        {emp.contractRejected && (
-                                            <button
-                                                onClick={() => setPendingRewriteTarget({ ...emp, empUid: emp.uid, id: emp.uid })}
-                                                className="w-full bg-orange-50 border border-orange-300 text-orange-700 text-xs font-bold py-2 rounded-lg hover:bg-orange-100 transition">
-                                                근로계약서 재작성 요청 (양식 수정)
-                                            </button>
-                                        )}
+                                        <div className="flex gap-2">
+                                            <button onClick={() => {
+                                                if (emp.hasContract && emp.contract) { setReviewingEmp(emp); }
+                                                else { onApprove(emp.uid); }
+                                            }} className="bg-green-600 text-white px-3 py-1.5 rounded-lg text-sm font-bold hover:bg-green-700 transition">승인</button>
+                                            <button onClick={() => onReject(emp.uid)} className="bg-red-100 text-red-600 px-3 py-1.5 rounded-lg text-sm font-bold hover:bg-red-200 transition">거절</button>
+                                        </div>
                                     </div>
                                 ))}
                             </div>
@@ -3508,19 +3499,6 @@
                         <p>④ 관리자가 이 화면에서 승인</p>
                     </div>
                 </div>
-                {pendingRewriteTarget && (
-                    <PersonalContractTemplateModal
-                        emp={pendingRewriteTarget}
-                        globalTemplate={globalTemplate}
-                        workspaceId={workspaceId}
-                        firebaseUser={firebaseUser}
-                        setEmployees={() => {}}
-                        showAlert={showAlert}
-                        onClose={() => setPendingRewriteTarget(null)}
-                        reason="pending_rewrite"
-                    />
-                )}
-                </React.Fragment>
             );
         }
 
@@ -4358,16 +4336,7 @@
                         : { ...ownerInfo, signatureData: globalTemplate?.ownerInfo?.signatureData || '' };
                     const template = { title: title.trim(), sections, ownerInfo: finalOwnerInfo };
                     const bossUid = workspaceId || firebaseUser.uid;
-                    if (reason === 'pending_rewrite') {
-                        // 가입 신청 중인 직원의 계약서 양식만 업데이트 (상태 변경 없음)
-                        const empUid = emp.uid || emp.empUid;
-                        if (empUid) {
-                            await fbDb.collection('employeeAccounts').doc(empUid)
-                                .collection('workplaces').doc(bossUid)
-                                .update({ contractTemplate: template });
-                            showAlert(`${emp.name}님의 계약서 양식이 업데이트되었습니다.\n직원이 재작성 시 새 양식이 적용됩니다.`, '업데이트 완료', 'success');
-                        }
-                    } else if (emp.empUid) {
+                    if (emp.empUid) {
                         // 모든 경로 통일: pendingRewrite=true + needs_resign으로 재작성 요청
                         // needs_resign은 Firestore 규칙 호환성 및 재제출 흐름 보장용
                         await fbDb.collection('employeeAccounts').doc(emp.empUid)

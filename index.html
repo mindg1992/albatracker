@@ -3578,6 +3578,17 @@
             const [today] = useState(new Date());
             const [year, setYear] = useState(today.getFullYear());
             const [month, setMonth] = useState(today.getMonth() + 1);
+            const empTouchStartX = useRef(null);
+            const handleEmpTouchStart = (e) => { empTouchStartX.current = e.touches[0].clientX; };
+            const handleEmpTouchEnd = (e) => {
+                if (empTouchStartX.current === null || submitModal || viewModal) return;
+                const dx = e.changedTouches[0].clientX - empTouchStartX.current;
+                if (Math.abs(dx) > 50) {
+                    if (dx < 0) { let m=month+1,y=year; if(m>12){m=1;y++;} setMonth(m);setYear(y); }
+                    else        { let m=month-1,y=year; if(m<1){m=12;y--;} setMonth(m);setYear(y); }
+                }
+                empTouchStartX.current = null;
+            };
             const [submitModal, setSubmitModal] = useState(null);
             const [viewModal, setViewModal] = useState(null); // 제출된 날 열람 { date, sub }
             const [timeUnit, setTimeUnit] = useState('hour');
@@ -3800,7 +3811,7 @@
                                     </button>
                                 </div>
 
-                                <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+                                <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden" onTouchStart={handleEmpTouchStart} onTouchEnd={handleEmpTouchEnd}>
                                     <div className="grid grid-cols-7 border-b border-gray-100">
                                         {['일','월','화','수','목','금','토'].map(d => (
                                             <div key={d} className="py-2 text-center text-xs font-bold text-gray-500">{d}</div>

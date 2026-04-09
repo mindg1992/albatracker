@@ -737,8 +737,9 @@
             // 직원 자체 퇴사 시 applyData 덮어쓰기 방지용
             const resignedEmpUidsRef = useRef(new Set());
             // 항상 최신 employees를 참조 (snapshot 핸들러 stale closure 방지)
+            // 렌더 바디에서 직접 갱신 → useEffect 지연 없이 항상 최신값 보장 (latest ref 패턴)
             const employeesRef = useRef([]);
-            useEffect(() => { employeesRef.current = employees; }, [employees]);
+            employeesRef.current = employees;
 
             // PC 네비게이션 스크롤 버튼
             const navScrollRef = useRef(null);
@@ -1392,8 +1393,10 @@
                                 const ee = de.entries || {};
                                 if (ee[sub.employeeId]?.bossModified) return prev; // 관리자가 수정한 경우 유지
                                 // 현재 employees에 등록된 이름 우선 사용 (재가입 이름 변경 시 구 이름 복원 방지)
+                                // 폴백 순서: ①관리자 등록 이름 → ②기존 엔트리 이름(이미 업데이트됐을 경우 보존) → ③제출 시 이름
                                 const currentEmp = employeesRef.current.find(e => e.empUid === sub.empUid);
-                                const displayName = currentEmp?.name || sub.empName;
+                                const existingEntryName = ee[sub.employeeId]?.name;
+                                const displayName = currentEmp?.name || existingEntryName || sub.empName;
                                 return {
                                     ...prev,
                                     [mk]: { ...md, days: { ...dd, [day]: { ...de, entries: { ...ee,

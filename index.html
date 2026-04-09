@@ -1818,6 +1818,10 @@
                                     sessionStorage.setItem('bossWorkspaceSelected', wsId);
                                     setBossSetupWorkspaceId(null);
                                 }}
+                                onCancel={bossSetupWorkspaceId && bossSetupWorkspaceId !== firebaseUser.uid ? () => {
+                                    setShowBossSetup(false);
+                                    setBossSetupWorkspaceId(null);
+                                } : undefined}
                             />
                         )}
                         <BossWorkspaceLoginPage
@@ -1904,6 +1908,11 @@
                                 }
                                 setBossSetupWorkspaceId(null);
                             }}
+                            onCancel={bossSetupWorkspaceId && bossSetupWorkspaceId !== firebaseUser.uid ? () => {
+                                setShowBossSetup(false);
+                                setBossSetupWorkspaceId(null);
+                                setShowBossWorkspaceSelect(true);
+                            } : undefined}
                         />
                     )}
                     {showPendingModal && (
@@ -2876,7 +2885,7 @@
             );
         }
 
-        function BossSetupModal({ firebaseUser, workspaceId, onSetup }) {
+        function BossSetupModal({ firebaseUser, workspaceId, onSetup, onCancel }) {
             const [shopName, setShopName] = useState('');
             const [loading, setLoading] = useState(false);
             const [error, setError] = useState('');
@@ -2912,6 +2921,11 @@
                         <button onClick={handleSubmit} disabled={loading} className="w-full bg-green-600 text-white py-3 rounded-xl font-bold hover:bg-green-700 transition disabled:opacity-50">
                             {loading ? '설정 중...' : (isNewWorkspace ? '업체 추가' : '시작하기')}
                         </button>
+                        {isNewWorkspace && onCancel && (
+                            <button onClick={onCancel} disabled={loading} className="w-full mt-2 bg-gray-100 text-gray-600 py-3 rounded-xl font-medium hover:bg-gray-200 transition disabled:opacity-50">
+                                취소
+                            </button>
+                        )}
                     </div>
                 </div>
             );
@@ -3235,8 +3249,8 @@
                     <main className="max-w-lg mx-auto px-3 py-4">
                         {activeTab === 'calendar' && (
                             <div>
-                                {isFullyBlocked && (
-                                    <div className={`mb-4 p-3 rounded-xl text-sm font-medium flex items-center gap-2 ${(workStatus === 'resigned' || contractStatus === 'needs_resign' || isWageBlocked) ? 'bg-red-50 text-red-700 border border-red-200' : 'bg-yellow-50 text-yellow-700 border border-yellow-200'}`}>
+                                {isFullyBlocked && !isWageBlocked && (
+                                    <div className={`mb-4 p-3 rounded-xl text-sm font-medium flex items-center gap-2 ${(workStatus === 'resigned' || contractStatus === 'needs_resign') ? 'bg-red-50 text-red-700 border border-red-200' : 'bg-yellow-50 text-yellow-700 border border-yellow-200'}`}>
                                         <AlertCircle className="w-4 h-4 flex-shrink-0"/>
                                         {isWageBlocked
                                             ? '관리자가 시급 조정을 완료할때까지 근무시간 입력이 불가능합니다.'
@@ -4317,7 +4331,7 @@
                                 const isContractBlocked = contractStatus === 'needs_resign' || contractStatus === 'pending_boss';
                                 const isLowWage = emp.wage && Number(emp.wage) > 0 && Number(emp.wage) < Number(globalMinWage);
                                 return (
-                                    <div key={emp.id} className={`bg-white rounded-xl border shadow-sm p-5 relative transition ${isLowWage ? 'border-red-400 ring-1 ring-red-300' : ''} ${(statusVal !== 'working' || isContractBlocked) ? 'opacity-75 bg-gray-50' : ''}`}>
+                                    <div key={emp.id} className={`bg-white rounded-xl border shadow-sm p-5 relative transition ${isLowWage ? 'border-red-400 ring-1 ring-red-300' : ''} ${(statusVal !== 'working' || (isContractBlocked && !isLowWage)) ? 'opacity-75 bg-gray-50' : ''}`}>
                                         {isLowWage && (
                                             <div className="mb-2 px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1 bg-red-50 text-red-700 border border-red-300">
                                                 <AlertCircle className="w-3.5 h-3.5 flex-shrink-0" />
@@ -4801,7 +4815,7 @@
                 const statusVal = e.status || (e.isWorking === false ? 'resigned' : 'working');
                 const cStatus = e.contractStatus || null;
                 const isLow = e.wage && Number(e.wage) > 0 && Number(e.wage) < Number(globalMinWage);
-                return statusVal === 'working' && cStatus !== 'needs_resign' && cStatus !== 'pending_boss' && !isLow;
+                return statusVal === 'working' && cStatus !== 'needs_resign' && cStatus !== 'pending_boss';
             }).sort((a,b) => a.displayId - b.displayId);
 
             const prevMonth = () => setCurrentDate(new Date(year, month - 2, 1));

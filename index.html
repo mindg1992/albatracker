@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>알바트래커 v1.8.6</title>
+    <title>알바트래커 v1.8.9</title>
 
     <!-- PWA -->
     <link rel="manifest" href="manifest.json">
@@ -80,7 +80,7 @@
     <!-- 버전 체크: 앱 버전이 바뀌면 캐시된 구버전을 쓰는 사용자도 강제 새로고침 -->
     <script>
         (function() {
-            var APP_VERSION = 'v1.8.6';
+            var APP_VERSION = 'v1.8.9';
             var KEY = 'at_app_version';
             var stored = localStorage.getItem(KEY);
             localStorage.setItem(KEY, APP_VERSION);
@@ -585,7 +585,11 @@
             const batch = fbDb.batch();
             batch.update(
                 fbDb.collection('employeeAccounts').doc(empUid).collection('workplaces').doc(bossUid),
-                { contractStatus: 'pending_boss', contract: contractData }
+                {
+                    contractStatus: 'pending_boss',
+                    contract: contractData,
+                    contractDeleteRequest: firebase.firestore.FieldValue.delete()
+                }
             );
             const pendingDocId = `${empUid}_${bossUid}`;
             batch.set(fbDb.collection('empPending').doc(pendingDocId), {
@@ -600,7 +604,10 @@
         async function bossCompleteContract(bossUid, empUid) {
             await fbDb.collection('employeeAccounts').doc(empUid)
                 .collection('workplaces').doc(bossUid)
-                .update({ contractStatus: 'completed' });
+                .update({
+                    contractStatus: 'completed',
+                    contractDeleteRequest: firebase.firestore.FieldValue.delete()
+                });
             const pendingDocId = `${empUid}_${bossUid}`;
             await fbDb.collection('empPending').doc(pendingDocId).delete().catch(() => {});
         }
@@ -1229,7 +1236,7 @@
                             // 직원이 근로계약서 재제출한 경우
                             if (data.type === 'contract_resubmit') {
                                 setEmployees(prev => prev.map(e =>
-                                    e.empUid === data.empUid ? { ...e, contractStatus: 'pending_boss' } : e
+                                    e.empUid === data.empUid ? { ...e, contractStatus: 'pending_boss', contractDeleteRequest: null } : e
                                 ));
                                 fbDb.collection('empPending').doc(d.id).delete().catch(() => {});
                                 return;
@@ -2355,6 +2362,9 @@
                                 <p className="text-[10px] text-gray-300 leading-relaxed">알바트래커v1.8.3: 관리자 전체공지기능 추가</p>
                                 <p className="text-[10px] text-gray-300 leading-relaxed">알바트래커v1.8.5: 근로계약서 PDF 저장 기능 추가</p>
                                 <p className="text-[10px] text-gray-300 leading-relaxed">알바트래커v1.8.6: 시급변경 재작성 알림, PDF 개선, 업체추가 버그 수정</p>
+                                <p className="text-[10px] text-gray-300 leading-relaxed">알바트래커v1.8.7: 근무자카드 재작성 요청, 템플릿 없이 개별 계약서 작성, 계약 상태 초기화</p>
+                                <p className="text-[10px] text-gray-300 leading-relaxed">알바트래커v1.8.8: 근로계약서 상태 충돌 버그 수정 (contractDeleteRequest 잔재 제거)</p>
+                                <p className="text-[10px] text-gray-300 leading-relaxed">알바트래커v1.8.9: 개별 시급 최저시급 미만 설정 불가, 자동 공란 초기화</p>
                             </div>
                         )}
                     </div>
@@ -3496,6 +3506,7 @@
 
             const handleResubmit = async (contractData) => {
                 await resubmitEmpContract(firebaseUser.uid, empAccount.bossUid, contractData);
+                setLiveDeleteReq(null);
                 setShowContractWrite(false);
                 showAlert('근로계약서가 제출되었습니다.\n관리자 서명을 기다려주세요.', '제출 완료', 'success');
             };
@@ -3773,19 +3784,39 @@
         }
 
         // ─── 관리자: 개인 근로계약서 템플릿 편집 팝업 ───
-        function PersonalContractTemplateModal({ emp, globalTemplate, workspaceId, firebaseUser, setEmployees, showAlert, onClose }) {
-            const [title, setTitle] = useState(globalTemplate?.title || '근로계약서');
+        function PersonalContractTemplateModal({ emp, globalTemplate, workspaceId, firebaseUser, setEmployees, showAlert, onClose, reason }) {
+            const baseTemplate = globalTemplate || {};
+            const [title, setTitle] = useState(baseTemplate?.title || '근로계약서');
             const [sections, setSections] = useState(
-                globalTemplate?.sections?.length >= 1
-                    ? globalTemplate.sections.map(s => ({ ...s }))
+                baseTemplate?.sections?.length >= 1
+                    ? baseTemplate.sections.map(s => ({ ...s }))
                     : [{ content: '', instruction: '' }]
             );
             const [ownerInfo, setOwnerInfo] = useState(
-                globalTemplate?.ownerInfo
-                    ? { ...globalTemplate.ownerInfo, signatureData: '' }
+                baseTemplate?.ownerInfo
+                    ? { ...baseTemplate.ownerInfo, signatureData: '' }
                     : { shopName: '', phone: '', address: '', representative: '', signatureData: '' }
             );
             const [saving, setSaving] = useState(false);
+            const [loadingPersonal, setLoadingPersonal] = useState(!!emp.empUid);
+
+            // 기존에 저장된 개인 템플릿이 있으면 우선 로드 (이전 수정 내용 유지)
+            useEffect(() => {
+                if (!emp.empUid) { setLoadingPersonal(false); return; }
+                const bossUid = workspaceId || firebaseUser.uid;
+                fbDb.collection('employeeAccounts').doc(emp.empUid)
+                    .collection('workplaces').doc(bossUid).get()
+                    .then(doc => {
+                        const personal = doc.data()?.contractTemplate;
+                        if (personal) {
+                            setTitle(personal.title || '근로계약서');
+                            setSections(personal.sections?.length >= 1 ? personal.sections.map(s => ({ ...s })) : [{ content: '', instruction: '' }]);
+                            setOwnerInfo(personal.ownerInfo ? { ...personal.ownerInfo, signatureData: '' } : (baseTemplate?.ownerInfo ? { ...baseTemplate.ownerInfo, signatureData: '' } : { shopName: '', phone: '', address: '', representative: '', signatureData: '' }));
+                        }
+                    })
+                    .catch(() => {})
+                    .finally(() => setLoadingPersonal(false));
+            }, []);
 
             const addSection = () => setSections(prev => [...prev, { content: '', instruction: '' }]);
             const removeSection = (i) => { if (sections.length <= 1) return; setSections(prev => prev.filter((_, j) => j !== i)); };
@@ -3804,15 +3835,28 @@
                     if (emp.empUid) {
                         await fbDb.collection('employeeAccounts').doc(emp.empUid)
                             .collection('workplaces').doc(bossUid)
-                            .update({ contractTemplate: template, contractStatus: 'needs_resign' });
+                            .update({
+                                contractTemplate: template,
+                                contractStatus: 'needs_resign',
+                                contractDeleteRequest: firebase.firestore.FieldValue.delete()
+                            });
                     }
                     // 팝업 저장 시점에 시급 변경 + needs_resign 동시 적용 (이전까지는 state 미반영)
-                    setEmployees(prev => prev.map(e => e.id === emp.id ? { ...emp, contractStatus: 'needs_resign' } : e));
+                    setEmployees(prev => prev.map(e => e.id === emp.id ? { ...emp, contractStatus: 'needs_resign', contractDeleteRequest: null } : e));
                     showAlert(`${emp.name}님의 근로계약서 템플릿이 저장되었습니다.\n근무자에게 재작성이 요청됩니다.`, '저장 완료', 'success');
                     onClose();
                 } catch(e) { showAlert('저장 실패: ' + e.message, '오류', 'error'); }
                 setSaving(false);
             };
+
+            if (loadingPersonal) return (
+                <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center">
+                    <div className="bg-white rounded-2xl p-8 flex flex-col items-center gap-3">
+                        <div className="w-8 h-8 border-4 border-purple-300 border-t-purple-600 rounded-full animate-spin"></div>
+                        <p className="text-sm text-gray-600">계약서 불러오는 중...</p>
+                    </div>
+                </div>
+            );
 
             return (
                 <div className="fixed inset-0 bg-black/50 z-50 flex items-start justify-center overflow-y-auto p-4">
@@ -3823,15 +3867,21 @@
                                     <svg className="w-5 h-5 text-purple-700" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" x2="8" y1="13" y2="13"/><line x1="16" x2="8" y1="17" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
                                 </div>
                                 <div>
-                                    <h2 className="text-base font-bold text-gray-800">{emp.name}님 근로계약서 수정</h2>
-                                    <p className="text-xs text-gray-500">시급 변경으로 인한 개인 계약서 업데이트</p>
+                                    <h2 className="text-base font-bold text-gray-800">{emp.name}님 근로계약서 {reason === 'new_contract' ? '작성 요청' : '재작성 요청'}</h2>
+                                    <p className="text-xs text-gray-500">
+                                        {reason === 'new_contract' ? '신규 개인 근로계약서 작성' : reason === 'rewrite_request' ? '관리자 직접 재작성 요청' : '시급 변경으로 인한 개인 계약서 업데이트'}
+                                    </p>
                                 </div>
                             </div>
                         </div>
 
                         <div className="p-5 space-y-4 max-h-[65vh] overflow-y-auto">
                             <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 text-xs text-blue-700">
-                                시급이 변경된 {emp.name}님 전용 근로계약서입니다. 내용을 수정 후 저장하면 해당 근무자에게 재작성이 요청됩니다.
+                                {reason === 'new_contract'
+                                    ? `${emp.name}님 전용 근로계약서를 새로 작성합니다. 내용 작성 후 저장하면 해당 근무자에게 계약서 작성이 요청됩니다.`
+                                    : reason === 'rewrite_request'
+                                    ? `${emp.name}님에게 근로계약서 재작성을 요청합니다. 내용을 수정 후 저장하면 해당 근무자에게 재작성이 요청됩니다.`
+                                    : `시급이 변경된 ${emp.name}님 전용 근로계약서입니다. 내용을 수정 후 저장하면 해당 근무자에게 재작성이 요청됩니다.`}
                             </div>
 
                             <div>
@@ -3916,7 +3966,7 @@
                         <div className="p-5 border-t border-gray-100">
                             <button onClick={handleSave} disabled={saving}
                                 className="w-full bg-purple-600 text-white py-3 rounded-xl font-bold hover:bg-purple-700 transition disabled:opacity-50 text-sm">
-                                {saving ? '저장 중...' : '저장 및 재작성 요청'}
+                                {saving ? '저장 중...' : reason === 'new_contract' ? '저장 및 작성 요청' : '저장 및 재작성 요청'}
                             </button>
                         </div>
                     </div>
@@ -3933,6 +3983,7 @@
             const prevMinWageRef = useRef(''); // 최저시급 편집 시작 전 값 저장용
             const [signingEmpUid, setSigningEmpUid] = useState(null);
             const [personalTemplateTarget, setPersonalTemplateTarget] = useState(null); // 개인 근로계약서 팝업 대상 근무자
+            const [personalTemplateReason, setPersonalTemplateReason] = useState('wage_change'); // 'wage_change' | 'rewrite_request' | 'new_contract'
 
             // 팝업 열려있는 동안 해당 직원 workplaces 문서 실시간 감지
             // → 근무자가 동의하면 즉시 employees 상태 반영 (팝업 닫기 전에도 갱신)
@@ -3987,16 +4038,17 @@
                     const newWage = Number(dataToSave.wage) || Number(globalMinWage);
                     const wageChanged = oldWage !== newWage;
                     let finalData = { ...dataToSave };
-                    if (wageChanged && editingEmp.contractStatus === 'completed' && workspaceInfo?.contractTemplate) {
+                    if (wageChanged && editingEmp.contractStatus === 'completed') {
                         const hasPersonalWage = dataToSave.wage && Number(dataToSave.wage) > 0;
                         if (hasPersonalWage) {
                             // 개별 시급 근무자: 개인 근로계약서 팝업 열기
                             // setEmployees는 팝업 저장 시점에만 호출 (앱 재시작 시 시급 원복 보장)
+                            setPersonalTemplateReason('wage_change');
                             setPersonalTemplateTarget(finalData);
                             setIsModalOpen(false);
                             setEditingEmp(null);
                             return;
-                        } else {
+                        } else if (workspaceInfo?.contractTemplate) {
                             // 최저시급 근무자: 기존 동작 (글로벌 템플릿 수정 안내)
                             finalData = { ...finalData, contractStatus: 'needs_resign' };
                             showAlert('시급이 변경되었습니다.\n\n근로계약서 템플릿에 기재된 시급 항목을 새 시급으로 수정해야 근무자에게 계약서 재작성이 요청됩니다.\n\n확인을 누르면 템플릿 수정 화면으로 이동합니다.', '계약서 재작성 필요', 'alert', () => setActiveTab('settings'));
@@ -4095,7 +4147,7 @@
                 showConfirm(`${emp.name}님의 근로계약서에 서명 완료 처리하시겠습니까?\n서명 후 근무자 기능이 정상화됩니다.`, async () => {
                     try {
                         await bossCompleteContract(currentWorkspaceId || firebaseUser.uid, emp.empUid);
-                        setEmployees(prev => prev.map(e => e.id === emp.id ? { ...e, contractStatus: 'completed' } : e));
+                        setEmployees(prev => prev.map(e => e.id === emp.id ? { ...e, contractStatus: 'completed', contractDeleteRequest: null } : e));
                         showAlert('서명이 완료되었습니다. 기능이 정상화되었습니다.', '서명 완료', 'success');
                     } catch(e) { showAlert('서명 실패: ' + e.message, '오류', 'error'); }
                 }, '근로계약서 서명');
@@ -4229,15 +4281,27 @@
 
                                         {/* 근로계약서 버튼 (Google 직원만) */}
                                         {emp.empUid && (
-                                            <div className="flex gap-2 mb-3">
+                                            <div className="flex gap-2 mb-3 flex-wrap">
                                                 {contractStatus === 'completed' && (
-                                                    <button onClick={() => handleViewContract(emp)}
-                                                        className={`flex-1 text-xs py-1.5 rounded-lg font-bold transition ${
-                                                            emp.contractDeleteRequest === 'employee'
-                                                                ? 'bg-orange-50 text-orange-700 border border-orange-300 hover:bg-orange-100'
-                                                                : 'bg-purple-50 text-purple-700 border border-purple-200 hover:bg-purple-100'
-                                                        }`}>
-                                                        {emp.contractDeleteRequest === 'employee' ? '근로계약서 재작성 요청' : '근로계약서 열람'}
+                                                    <>
+                                                        <button onClick={() => handleViewContract(emp)}
+                                                            className={`flex-1 text-xs py-1.5 rounded-lg font-bold transition ${
+                                                                emp.contractDeleteRequest === 'employee'
+                                                                    ? 'bg-orange-50 text-orange-700 border border-orange-300 hover:bg-orange-100'
+                                                                    : 'bg-purple-50 text-purple-700 border border-purple-200 hover:bg-purple-100'
+                                                            }`}>
+                                                            {emp.contractDeleteRequest === 'employee' ? '재작성 확인' : '근로계약서 열람'}
+                                                        </button>
+                                                        <button onClick={() => { setPersonalTemplateReason('rewrite_request'); setPersonalTemplateTarget(emp); }}
+                                                            className="flex-1 text-xs py-1.5 rounded-lg font-bold transition bg-orange-50 text-orange-700 border border-orange-300 hover:bg-orange-100">
+                                                            재작성 요청
+                                                        </button>
+                                                    </>
+                                                )}
+                                                {contractStatus === null && (
+                                                    <button onClick={() => { setPersonalTemplateReason('new_contract'); setPersonalTemplateTarget(emp); }}
+                                                        className="w-full text-xs py-1.5 rounded-lg font-bold transition bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100">
+                                                        계약서 작성 요청
                                                     </button>
                                                 )}
                                                 {contractStatus === 'pending_boss' && (
@@ -4311,6 +4375,7 @@
                             firebaseUser={firebaseUser}
                             setEmployees={setEmployees}
                             showAlert={showAlert}
+                            reason={personalTemplateReason}
                             onClose={() => setPersonalTemplateTarget(null)}
                         />
                     )}
@@ -4495,6 +4560,16 @@
                 }));
             };
 
+            const handleWageBlur = () => {
+                const w = Number(formData.wage);
+                const min = Number(globalMinWage);
+                if (!formData.wage || w === 0) return; // 공란은 최저시급 적용이므로 그대로 둠
+                if (w < min) {
+                    showAlert(`개별 시급은 최저시급(${min.toLocaleString()}원)보다 낮게 설정할 수 없습니다.\n공란으로 초기화합니다.`, '시급 오류', 'alert');
+                    setFormData(prev => ({ ...prev, wage: '' }));
+                }
+            };
+
             const handleResidentIdChange = (e) => {
                 const raw = e.target.value.replace(/[^0-9]/g, '');
                 const trimmed = raw.slice(0, 13);
@@ -4508,10 +4583,15 @@
                     showAlert('이름을 입력해주세요.');
                     return;
                 }
-                
+
+                const wageVal = formData.wage ? parseInt(formData.wage, 10) : 0;
+                const minVal = Number(globalMinWage);
+                // 개별 시급이 최저시급보다 낮으면 공란(최저시급)으로 처리
+                const finalWage = (wageVal > 0 && wageVal < minVal) ? 0 : wageVal;
+
                 const finalData = {
                     ...formData,
-                    wage: formData.wage ? parseInt(formData.wage, 10) : Number(globalMinWage)
+                    wage: finalWage > 0 ? finalWage : ''
                 };
                 onSave(finalData);
             };
@@ -4555,7 +4635,7 @@
 
                             <div>
                                 <label className="block text-sm font-medium text-gray-700 mb-1">시급</label>
-                                <input type="number" name="wage" value={formData.wage} onChange={handleChange} placeholder={`공란 시 설정된 최저시급(${Number(globalMinWage).toLocaleString()}원) 적용`} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-green-500 outline-none transition-shadow" />
+                                <input type="number" name="wage" value={formData.wage} onChange={handleChange} onBlur={handleWageBlur} min={globalMinWage || 1} placeholder={`공란 시 설정된 최저시급(${Number(globalMinWage).toLocaleString()}원) 적용`} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-green-500 outline-none transition-shadow" />
                             </div>
 
                             <div className="grid grid-cols-2 gap-3">
@@ -6552,6 +6632,27 @@
             const removeSection = (i) => { if (sections.length <= 1) return; setSections(prev => prev.filter((_, j) => j !== i)); };
             const updateSection = (i, key, val) => setSections(prev => prev.map((s, j) => j === i ? { ...s, [key]: val } : s));
 
+            const handleClearContract = (emp) => {
+                if (!firebaseUser || !emp.empUid) return;
+                showConfirm(
+                    `${emp.name}님의 근로계약서 상태를 초기화하시겠습니까?\n\n근무자가 제출한 계약서 원본에는 영향이 없습니다.`,
+                    async () => {
+                        try {
+                            const bossUid = workspaceId || firebaseUser.uid;
+                            await fbDb.collection('employeeAccounts').doc(emp.empUid)
+                                .collection('workplaces').doc(bossUid)
+                                .update({
+                                    contractStatus: firebase.firestore.FieldValue.delete(),
+                                    contractDeleteRequest: firebase.firestore.FieldValue.delete()
+                                });
+                            setEmployees(prev => prev.map(e => e.id === emp.id ? { ...e, contractStatus: null, contractDeleteRequest: null } : e));
+                            showAlert(`${emp.name}님의 근로계약서 상태가 초기화되었습니다.`, '초기화 완료', 'success');
+                        } catch(err) { showAlert('처리 실패: ' + err.message, '오류', 'error'); }
+                    },
+                    '계약서 상태 초기화'
+                );
+            };
+
             const handleDeleteTemplate = () => {
                 if (!firebaseUser || !existing) return;
                 showConfirm(
@@ -6621,6 +6722,7 @@
             };
 
             return (
+            <>
                 <div className="max-w-md mx-auto mt-6 bg-white rounded-2xl shadow-sm border border-gray-200">
                     <button onClick={() => setExpanded(p => !p)} className="w-full p-6 flex items-center justify-between text-left">
                         <div className="flex items-center gap-3">
@@ -6731,6 +6833,36 @@
                         </div>
                     )}
                 </div>
+                {/* 근무자 근로계약서 관리 (템플릿 미설정 시) */}
+                {!existing && employees && employees.some(e => e.empUid && e.contractStatus) && (
+                    <div className="max-w-md mx-auto mt-4 bg-white rounded-2xl shadow-sm border border-gray-200">
+                        <div className="p-5 border-b border-gray-100">
+                            <h3 className="text-base font-bold text-gray-800">근무자 근로계약서 관리</h3>
+                            <p className="text-xs text-gray-500 mt-0.5">계약서 상태를 초기화합니다. 근무자가 제출한 계약서 원본에는 영향이 없습니다.</p>
+                        </div>
+                        <div className="divide-y divide-gray-100">
+                            {employees.filter(e => e.empUid && e.contractStatus).map(emp => (
+                                <div key={emp.id} className="flex items-center justify-between px-5 py-3">
+                                    <div>
+                                        <p className="text-sm font-bold text-gray-800">{emp.name}</p>
+                                        <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                                            emp.contractStatus === 'completed' ? 'bg-purple-100 text-purple-700' :
+                                            emp.contractStatus === 'pending_boss' ? 'bg-yellow-100 text-yellow-700' :
+                                            'bg-red-100 text-red-700'
+                                        }`}>
+                                            {emp.contractStatus === 'completed' ? '계약 완료' : emp.contractStatus === 'pending_boss' ? '서명 대기' : '재작성 대기'}
+                                        </span>
+                                    </div>
+                                    <button onClick={() => handleClearContract(emp)}
+                                        className="text-xs text-red-600 border border-red-200 bg-red-50 hover:bg-red-100 px-3 py-1.5 rounded-lg font-bold transition">
+                                        초기화
+                                    </button>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                )}
+            </>
             );
         }
 

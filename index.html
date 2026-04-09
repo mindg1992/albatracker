@@ -897,9 +897,12 @@
                                 applyData(d);
                                 localStorage.setItem(cacheKey, JSON.stringify(d));
                             }
-                            // 삭제 대기 항목이 있으면 lastSyncedDataRef 초기화 → 자동저장 강제 실행 → Firestore 동기화
+                            // 삭제 대기 항목이 있으면: lastSyncedDataRef 초기화 + monthlyData 새 참조로 강제 업데이트
+                            // → applyData 호출 여부와 무관하게 auto-save useEffect가 반드시 재실행됨
                             if (hasPendingDeletes) {
+                                const filteredMonthly = d.monthlyData !== undefined ? d.monthlyData : {};
                                 lastSyncedDataRef.current = '';
+                                setMonthlyData({ ...filteredMonthly });
                             }
                         } else if (!cached) {
                             lastSyncedDataRef.current = JSON.stringify({

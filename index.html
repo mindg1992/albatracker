@@ -4551,7 +4551,7 @@
         }
 
         // ─── 최저시급 변경 후 계약서 일괄 재작성 모달 ───
-        function MinWageContractTemplateModal({ globalTemplate, workspaceId, firebaseUser, setEmployees, showAlert, affectedEmps, onClose }) {
+        function MinWageContractTemplateModal({ globalTemplate, workspaceId, firebaseUser, setEmployees, showAlert, affectedEmps, onClose, onSaveComplete }) {
             const baseTemplate = globalTemplate || {};
             const [title, setTitle] = useState(baseTemplate?.title || '근로계약서');
             const [sections, setSections] = useState(
@@ -4598,7 +4598,8 @@
                     } else {
                         showAlert('연동된 계정이 있는 근무자가 없어 재작성 요청을 보내지 않았습니다.', '안내');
                     }
-                    onClose();
+                    if (onSaveComplete) onSaveComplete();
+                    else onClose();
                 } catch(e) { showAlert('저장 실패: ' + e.message, '오류', 'error'); }
                 setSaving(false);
             };
@@ -4716,6 +4717,7 @@
             const [personalTemplateReason, setPersonalTemplateReason] = useState('wage_change'); // 'wage_change' | 'rewrite_request' | 'boss_rewrite' | 'new_contract'
             const [minWageModalOpen, setMinWageModalOpen] = useState(false);
             const [minWageTemplateAfterSave, setMinWageTemplateAfterSave] = useState(null); // { affectedEmps }
+            const [pendingContractUpdateEmpIds, setPendingContractUpdateEmpIds] = useState(new Set()); // 최저시급 변경 후 계약서 수정 필요 근무자 ID
 
             // 팝업 열려있는 동안 해당 직원 workplaces 문서 실시간 감지
             // → 근무자가 동의하면 즉시 employees 상태 반영 (팝업 닫기 전에도 갱신)
@@ -4750,12 +4752,16 @@
                 const isLowWage = (emp) => emp.wage && Number(emp.wage) > 0 && Number(emp.wage) < minW;
                 const list = searchTerm ? employees.filter(emp => emp.name.includes(searchTerm)) : [...employees];
                 return list.sort((a, b) => {
+                    const aPending = pendingContractUpdateEmpIds.has(a.id);
+                    const bPending = pendingContractUpdateEmpIds.has(b.id);
+                    if (aPending && !bPending) return -1;
+                    if (!aPending && bPending) return 1;
                     const aLow = isLowWage(a), bLow = isLowWage(b);
                     if (aLow && !bLow) return -1;
                     if (!aLow && bLow) return 1;
                     return a.displayId - b.displayId;
                 });
-            }, [employees, searchTerm, globalMinWage]);
+            }, [employees, searchTerm, globalMinWage, pendingContractUpdateEmpIds]);
 
             const handleMinWageSave = (newVal) => {
                 const oldVal = globalMinWage;
@@ -4803,6 +4809,7 @@
                 });
                 if (affectedEmps.length > 0) {
                     setMinWageTemplateAfterSave({ affectedEmps });
+                    setPendingContractUpdateEmpIds(new Set(affectedEmps.map(e => e.id)));
                 }
             };
 
@@ -5048,8 +5055,15 @@
                                 const contractStatus = emp.contractStatus || null;
                                 const isContractBlocked = contractStatus === 'needs_resign' || contractStatus === 'pending_boss';
                                 const isLowWage = emp.wage && Number(emp.wage) > 0 && Number(emp.wage) < Number(globalMinWage);
+                                const needsContractUpdate = pendingContractUpdateEmpIds.has(emp.id);
                                 return (
-                                    <div key={emp.id} className={`bg-white rounded-xl border shadow-sm p-5 relative transition ${isLowWage ? 'border-red-400 ring-1 ring-red-300' : ''} ${(statusVal !== 'working' || (isContractBlocked && !isLowWage)) ? 'opacity-75 bg-gray-50' : ''}`}>
+                                    <div key={emp.id} className={`bg-white rounded-xl border shadow-sm p-5 relative transition ${isLowWage ? 'border-red-400 ring-1 ring-red-300' : needsContractUpdate ? 'border-orange-400 ring-1 ring-orange-300' : ''} ${(statusVal !== 'working' || (isContractBlocked && !isLowWage)) ? 'opacity-75 bg-gray-50' : ''}`}>
+                                        {needsContractUpdate && !isContractBlocked && (
+                                            <div className="mb-2 px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1 bg-orange-50 text-orange-700 border border-orange-300">
+                                                <AlertCircle className="w-3.5 h-3.5 flex-shrink-0" />
+                                                📋 근로계약서 수정필요
+                                            </div>
+                                        )}
                                         {isLowWage && (
                                             <div className="mb-2 px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1 bg-red-50 text-red-700 border border-red-300">
                                                 <AlertCircle className="w-3.5 h-3.5 flex-shrink-0" />
@@ -5248,6 +5262,10 @@
                             showAlert={showAlert}
                             affectedEmps={minWageTemplateAfterSave.affectedEmps}
                             onClose={() => setMinWageTemplateAfterSave(null)}
+                            onSaveComplete={() => {
+                                setPendingContractUpdateEmpIds(new Set());
+                                setMinWageTemplateAfterSave(null);
+                            }}
                         />
                     )}
                 </div>

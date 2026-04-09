@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>알바트래커 v1.8.9</title>
+    <title>알바트래커 v1.9.0</title>
 
     <!-- PWA -->
     <link rel="manifest" href="manifest.json">
@@ -80,7 +80,7 @@
     <!-- 버전 체크: 앱 버전이 바뀌면 캐시된 구버전을 쓰는 사용자도 강제 새로고침 -->
     <script>
         (function() {
-            var APP_VERSION = 'v1.8.9';
+            var APP_VERSION = 'v1.9.0';
             var KEY = 'at_app_version';
             var stored = localStorage.getItem(KEY);
             localStorage.setItem(KEY, APP_VERSION);
@@ -459,6 +459,19 @@
                 .collection('notifications').doc(notifId).set({
                     type: 'status_change',
                     newStatus,
+                    read: false,
+                    createdAt: firebase.firestore.FieldValue.serverTimestamp()
+                });
+        }
+
+        // 직원 시급 변경 알림 발송
+        async function sendWageChangeNotification(empUid, oldWage, newWage) {
+            const notifId = `wage_${Date.now()}`;
+            await fbDb.collection('employeeAccounts').doc(empUid)
+                .collection('notifications').doc(notifId).set({
+                    type: 'wage_change',
+                    oldWage,
+                    newWage,
                     read: false,
                     createdAt: firebase.firestore.FieldValue.serverTimestamp()
                 });
@@ -2364,7 +2377,7 @@
                                 <p className="text-[10px] text-gray-300 leading-relaxed">알바트래커v1.8.6: 시급변경 재작성 알림, PDF 개선, 업체추가 버그 수정</p>
                                 <p className="text-[10px] text-gray-300 leading-relaxed">알바트래커v1.8.7: 근무자카드 재작성 요청, 템플릿 없이 개별 계약서 작성, 계약 상태 초기화</p>
                                 <p className="text-[10px] text-gray-300 leading-relaxed">알바트래커v1.8.8: 근로계약서 상태 충돌 버그 수정 (contractDeleteRequest 잔재 제거)</p>
-                                <p className="text-[10px] text-gray-300 leading-relaxed">알바트래커v1.8.9: 개별 시급 최저시급 미만 설정 불가, 자동 공란 초기화</p>
+                                <p className="text-[10px] text-gray-300 leading-relaxed">알바트래커v1.9.0: 시급 변경 알림, 최저시급 미만 시 카드 경고 및 맨 앞 정렬</p>
                             </div>
                         )}
                     </div>
@@ -3298,13 +3311,17 @@
                                     <div key={n.id} className={`bg-white rounded-xl border p-4 ${n.read ? 'border-gray-200' : 'border-yellow-300 bg-yellow-50'}`}>
                                         <div className="flex items-start justify-between mb-1">
                                             <p className="text-sm font-bold text-gray-800">
-                                                {n.type === 'status_change' ? '근무 상태 변경' : `${n.date} 근무시간 변경`}
+                                                {n.type === 'status_change' ? '근무 상태 변경' : n.type === 'wage_change' ? '시급 변경' : `${n.date} 근무시간 변경`}
                                             </p>
                                             {!n.read && <span className="text-xs bg-yellow-400 text-yellow-900 px-2 py-0.5 rounded-full font-bold">새 알림</span>}
                                         </div>
                                         {n.type === 'status_change' ? (
                                             <p className="text-sm text-gray-600">
                                                 {n.newStatus === 'leave' ? '휴직 처리되었습니다.' : n.newStatus === 'resigned' ? '퇴사 처리되었습니다.' : '근무 중 상태로 변경되었습니다.'}
+                                            </p>
+                                        ) : n.type === 'wage_change' ? (
+                                            <p className="text-sm text-gray-600">
+                                                시급이 <span className="font-medium">{Number(n.oldWage).toLocaleString()}원</span> → <span className="font-bold text-blue-600">{Number(n.newWage).toLocaleString()}원</span>으로 변경되었습니다.
                                             </p>
                                         ) : (
                                             <>
@@ -4013,9 +4030,16 @@
             }, [viewingContract?.empUid, firebaseUser, currentWorkspaceId]);
 
             const filteredEmployees = useMemo(() => {
-                if (!searchTerm) return employees.sort((a, b) => a.displayId - b.displayId);
-                return employees.filter(emp => emp.name.includes(searchTerm)).sort((a, b) => a.displayId - b.displayId);
-            }, [employees, searchTerm]);
+                const minW = Number(globalMinWage);
+                const isLowWage = (emp) => emp.wage && Number(emp.wage) > 0 && Number(emp.wage) < minW;
+                const list = searchTerm ? employees.filter(emp => emp.name.includes(searchTerm)) : [...employees];
+                return list.sort((a, b) => {
+                    const aLow = isLowWage(a), bLow = isLowWage(b);
+                    if (aLow && !bLow) return -1;
+                    if (!aLow && bLow) return 1;
+                    return a.displayId - b.displayId;
+                });
+            }, [employees, searchTerm, globalMinWage]);
 
             const handleAddClick = () => {
                 if (globalMinWage === '' || Number(globalMinWage) <= 0) {
@@ -4062,6 +4086,15 @@
                     }
 
                     setEmployees(prev => prev.map(e => e.id === finalData.id ? finalData : e));
+
+                    // 시급 변경 시 Google 직원에게 알림 발송
+                    if (wageChanged && dataToSave.empUid) {
+                        sendWageChangeNotification(
+                            dataToSave.empUid,
+                            Number(editingEmp.wage) || Number(globalMinWage),
+                            Number(finalData.wage) || Number(globalMinWage)
+                        ).catch(() => {});
+                    }
 
                     if (oldStatus !== newStatus) {
                         // Google 직원이면 workplaces 서브컬렉션 workStatus 업데이트 + 알림
@@ -4235,8 +4268,15 @@
                                 const statusVal = emp.status || (emp.isWorking === false ? 'resigned' : 'working');
                                 const contractStatus = emp.contractStatus || null;
                                 const isContractBlocked = contractStatus === 'needs_resign' || contractStatus === 'pending_boss';
+                                const isLowWage = emp.wage && Number(emp.wage) > 0 && Number(emp.wage) < Number(globalMinWage);
                                 return (
-                                    <div key={emp.id} className={`bg-white rounded-xl border shadow-sm p-5 relative transition ${(statusVal !== 'working' || isContractBlocked) ? 'opacity-75 bg-gray-50' : ''}`}>
+                                    <div key={emp.id} className={`bg-white rounded-xl border shadow-sm p-5 relative transition ${isLowWage ? 'border-red-400 ring-1 ring-red-300' : ''} ${(statusVal !== 'working' || isContractBlocked) ? 'opacity-75 bg-gray-50' : ''}`}>
+                                        {isLowWage && (
+                                            <div className="mb-2 px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1 bg-red-50 text-red-700 border border-red-300">
+                                                <AlertCircle className="w-3.5 h-3.5 flex-shrink-0" />
+                                                ⚠️ 시급({Number(emp.wage).toLocaleString()}원)이 최저시급({Number(globalMinWage).toLocaleString()}원)보다 낮습니다
+                                            </div>
+                                        )}
                                         {isContractBlocked && (
                                             <div className={`mb-2 px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1 ${contractStatus === 'needs_resign' ? 'bg-red-50 text-red-700 border border-red-200' : 'bg-yellow-50 text-yellow-700 border border-yellow-200'}`}>
                                                 <AlertCircle className="w-3.5 h-3.5 flex-shrink-0" />
@@ -4563,10 +4603,9 @@
             const handleWageBlur = () => {
                 const w = Number(formData.wage);
                 const min = Number(globalMinWage);
-                if (!formData.wage || w === 0) return; // 공란은 최저시급 적용이므로 그대로 둠
+                if (!formData.wage || w === 0) return;
                 if (w < min) {
-                    showAlert(`개별 시급은 최저시급(${min.toLocaleString()}원)보다 낮게 설정할 수 없습니다.\n공란으로 초기화합니다.`, '시급 오류', 'alert');
-                    setFormData(prev => ({ ...prev, wage: '' }));
+                    showAlert(`입력한 시급(${w.toLocaleString()}원)이 최저시급(${min.toLocaleString()}원)보다 낮습니다.\n저장하면 근무자 카드에 경고가 표시됩니다.`, '시급 경고', 'alert');
                 }
             };
 
@@ -4584,14 +4623,9 @@
                     return;
                 }
 
-                const wageVal = formData.wage ? parseInt(formData.wage, 10) : 0;
-                const minVal = Number(globalMinWage);
-                // 개별 시급이 최저시급보다 낮으면 공란(최저시급)으로 처리
-                const finalWage = (wageVal > 0 && wageVal < minVal) ? 0 : wageVal;
-
                 const finalData = {
                     ...formData,
-                    wage: finalWage > 0 ? finalWage : ''
+                    wage: formData.wage ? parseInt(formData.wage, 10) : ''
                 };
                 onSave(finalData);
             };

@@ -1308,6 +1308,17 @@
                 const unsub = fbDb.collection('empPending')
                     .where('bossUid', '==', currentWorkspaceId)
                     .onSnapshot(snap => {
+                        // 삭제된 문서 처리 (예: 근무자가 재작성 요청을 취소한 경우)
+                        snap.docChanges().forEach(change => {
+                            if (change.type === 'removed') {
+                                const data = change.doc.data();
+                                if (data.type === 'contract_delete_request') {
+                                    setEmployees(prev => prev.map(e =>
+                                        e.empUid === data.empUid ? { ...e, contractDeleteRequest: null } : e
+                                    ));
+                                }
+                            }
+                        });
                         const list = [];
                         snap.forEach(d => {
                             const data = d.data();

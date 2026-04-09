@@ -601,7 +601,8 @@
                 {
                     contractStatus: 'pending_boss',
                     contract: contractData,
-                    contractDeleteRequest: firebase.firestore.FieldValue.delete()
+                    contractDeleteRequest: firebase.firestore.FieldValue.delete(),
+                    pendingRewrite: firebase.firestore.FieldValue.delete()
                 }
             );
             const pendingDocId = `${empUid}_${bossUid}`;
@@ -3512,9 +3513,6 @@
 
             const handleTopResubmit = async (contractData) => {
                 await resubmitEmpContract(firebaseUser.uid, empAccount.bossUid, contractData);
-                await fbDb.collection('employeeAccounts').doc(firebaseUser.uid)
-                    .collection('workplaces').doc(empAccount.bossUid)
-                    .update({ pendingRewrite: firebase.firestore.FieldValue.delete() });
                 onSetEmpAccount?.(prev => ({ ...prev, pendingRewrite: false, contractStatus: 'pending_boss' }));
                 setShowTopRewrite(false);
                 showAlert('근로계약서가 제출되었습니다.\n관리자 서명을 기다려주세요.', '제출 완료', 'success');
@@ -3926,9 +3924,6 @@
 
             const handleResubmit = async (contractData) => {
                 await resubmitEmpContract(firebaseUser.uid, empAccount.bossUid, contractData);
-                await fbDb.collection('employeeAccounts').doc(firebaseUser.uid)
-                    .collection('workplaces').doc(empAccount.bossUid)
-                    .update({ pendingRewrite: firebase.firestore.FieldValue.delete() });
                 onSetEmpAccount?.(prev => ({ ...prev, pendingRewrite: false, contractStatus: 'pending_boss' }));
                 setLiveDeleteReq(null);
                 setShowContractWrite(false);

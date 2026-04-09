@@ -736,6 +736,9 @@
             const lastSyncedDataRef = useRef("");
             // 직원 자체 퇴사 시 applyData 덮어쓰기 방지용
             const resignedEmpUidsRef = useRef(new Set());
+            // 항상 최신 employees를 참조 (snapshot 핸들러 stale closure 방지)
+            const employeesRef = useRef([]);
+            useEffect(() => { employeesRef.current = employees; }, [employees]);
 
             // PC 네비게이션 스크롤 버튼
             const navScrollRef = useRef(null);
@@ -1388,13 +1391,16 @@
                                 const de = dd[day] || {};
                                 const ee = de.entries || {};
                                 if (ee[sub.employeeId]?.bossModified) return prev; // 관리자가 수정한 경우 유지
+                                // 현재 employees에 등록된 이름 우선 사용 (재가입 이름 변경 시 구 이름 복원 방지)
+                                const currentEmp = employeesRef.current.find(e => e.empUid === sub.empUid);
+                                const displayName = currentEmp?.name || sub.empName;
                                 return {
                                     ...prev,
                                     [mk]: { ...md, days: { ...dd, [day]: { ...de, entries: { ...ee,
                                         [sub.employeeId]: {
                                             hours: sub.hours,
                                             pay: Math.round(sub.hours * wage),
-                                            name: sub.empName,
+                                            name: displayName,
                                             wage,
                                             note: sub.note || '',
                                             submittedByEmp: true,
@@ -1524,6 +1530,7 @@
                         // 이름이 변경된 경우 기존 근무 기록(monthlyData + submissions)의 이름도 업데이트
                         if (existingEmp.name !== empData.name) {
                             const newName = empData.name;
+                            const empIdStr = String(approvedId);
                             setMonthlyData(prev => {
                                 let changed = false;
                                 const result = {};
@@ -1536,7 +1543,9 @@
                                         const newEntries = {};
                                         let entryChanged = false;
                                         for (const [eid, entry] of Object.entries(dData.entries)) {
-                                            if (entry?.empUid === empUid && entry.name !== newName) {
+                                            // empUid 매칭(직원 제출) 또는 직원 ID 매칭(관리자 직접 입력) 둘 다 처리
+                                            const isMatch = (entry?.empUid === empUid) || (eid === empIdStr);
+                                            if (isMatch && entry?.name !== newName) {
                                                 newEntries[eid] = { ...entry, name: newName };
                                                 entryChanged = true;
                                             } else {

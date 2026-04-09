@@ -1833,6 +1833,13 @@
                                     firebaseUser={firebaseUser}
                                     onLogout={handleLogout}
                                     onBack={() => { setSelectedEmpBossUid(null); localStorage.removeItem('selectedEmpBossUid'); }}
+                                    onResubmitComplete={(bossUid) => {
+                                        setEmpGoogleWorkplaces(prev => prev.map(w =>
+                                            w.bossUid === bossUid ? { ...w, contractRejected: false } : w
+                                        ));
+                                        setSelectedEmpBossUid(null);
+                                        localStorage.removeItem('selectedEmpBossUid');
+                                    }}
                                     showAlert={showAlert}
                                 />
                             </>
@@ -2981,7 +2988,7 @@
             );
         }
 
-        function PendingApprovalScreen({ empAccount, firebaseUser, onLogout, onBack, showAlert }) {
+        function PendingApprovalScreen({ empAccount, firebaseUser, onLogout, onBack, onResubmitComplete, showAlert }) {
             const [contractRejected, setContractRejected] = useState(!!empAccount?.contractRejected);
             const [showProfileStep, setShowProfileStep] = useState(false);
             const [showContractWrite, setShowContractWrite] = useState(false);
@@ -3066,7 +3073,7 @@
                 try {
                     await resubmitEmpJoinContract(firebaseUser.uid, empAccount.bossUid, contractData, rewriteProfile);
                     showAlert?.('근로계약서가 재제출되었습니다.\n관리자 승인을 기다려주세요.', '제출 완료', 'success');
-                    onBack?.();
+                    onResubmitComplete?.(empAccount.bossUid);
                 } catch(e) {
                     showAlert?.('제출 실패: ' + e.message, '오류', 'error');
                 }

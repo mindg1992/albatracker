@@ -6505,14 +6505,14 @@
 
             return (
                 <div className="space-y-4 max-w-5xl mx-auto">
-                    <div className="flex justify-center items-center bg-white p-5 rounded-2xl shadow-sm border border-gray-200 gap-4">
+                    <div className="flex flex-col md:flex-row justify-center items-center bg-white p-4 md:p-5 rounded-2xl shadow-sm border border-gray-200 gap-3 md:gap-4">
                         <div className="flex items-center gap-2 md:gap-4 shrink-0">
                             <button onClick={prevMonth} className="p-2 hover:bg-gray-100 rounded-full transition"><ChevronLeft className="w-5 h-5 md:w-6 md:h-6" /></button>
                             <MonthYearSelector year={year} month={month} onChange={(y, m) => setCurrentDate(new Date(y, m - 1, 1))} />
                             <button onClick={nextMonth} className="p-2 hover:bg-gray-100 rounded-full transition"><ChevronRight className="w-5 h-5 md:w-6 md:h-6" /></button>
                         </div>
                         {payrollList.length > 0 && (
-                            <button onClick={handleExcelDownload} className="flex items-center gap-2 text-sm font-bold bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2.5 rounded-xl transition shadow-sm whitespace-nowrap">
+                            <button onClick={handleExcelDownload} className="flex items-center gap-2 text-sm font-bold bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-xl transition shadow-sm whitespace-nowrap w-full md:w-auto justify-center">
                                 <FileSpreadsheet className="w-4 h-4" />
                                 엑셀 다운로드
                             </button>

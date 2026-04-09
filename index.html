@@ -2399,7 +2399,7 @@
                 <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-4">
                     <div className="bg-white p-8 rounded-2xl shadow-xl w-full max-w-sm text-center">
                         <ATLogo className="w-16 h-16 mx-auto mb-4 rounded-2xl shadow-md" />
-                        <h2 className="text-2xl font-bold text-gray-800 mb-1">{empName ? `${empName}님` : '알바트래커 v1.9.2'}</h2>
+                        <h2 className="text-2xl font-bold text-gray-800 mb-1">{empName ? `${empName}님` : '알바트래커 v1.9.5'}</h2>
                         <p className="text-gray-500 mb-6 text-sm">
                             {empName ? 'PIN을 입력해주세요.' : (appPin === INITIAL_PIN ? '초기 비밀번호는 "000000"입니다.' : '비밀번호를 입력해주세요.')}
                         </p>
@@ -2442,9 +2442,9 @@
 
                         {!empName && (
                             <div className="mt-6 text-left border-t border-gray-100 pt-4 space-y-1">
-                                <p className="text-[10px] text-gray-300 leading-relaxed">알바트래커v1.9.0: 시급 변경 알림, 최저시급 미만 시 카드 경고 및 맨 앞 정렬</p>
-                                <p className="text-[10px] text-gray-300 leading-relaxed">알바트래커v1.9.1: 최저시급 미만 근무자 근무시간 입력 차단 및 직원 헤더 알림</p>
-                                <p className="text-[10px] text-gray-300 leading-relaxed">알바트래커v1.9.2: 개별시급→공란 전환 계약서 재작성, 재작성 팝업 닫기, 재작성대기 중 시급 수정 시 계약서 재작성 강제</p>
+                                <p className="text-[10px] text-gray-300 leading-relaxed">v1.9.3: 최저시급 변경 팝업 추가, 해당 근무자 계약서 일괄 재작성 요청</p>
+                                <p className="text-[10px] text-gray-300 leading-relaxed">v1.9.4: 재작성 동의→즉시 재작성창, 거부→재작성중 상태 유지, 관리자 근무시간 수정→직원 달력 실시간 반영</p>
+                                <p className="text-[10px] text-gray-300 leading-relaxed">v1.9.5: 최저시급 변경 시 동일 시급 근무자 시급 자동 업데이트</p>
                             </div>
                         )}
                     </div>

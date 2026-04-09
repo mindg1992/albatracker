@@ -4363,7 +4363,7 @@
                                 <div className="flex items-center gap-2">
                                     <input type="number" value={inputVal} onChange={e => setInputVal(e.target.value)}
                                         className="flex-1 border-2 border-gray-300 rounded-xl py-2.5 px-4 focus:border-blue-500 outline-none text-sm text-right"
-                                        placeholder="0" autoFocus onKeyDown={e => e.key === 'Enter' && handleSave()} />
+                                        placeholder="0" autoFocus />
                                     <span className="text-sm text-gray-600 font-medium">원</span>
                                 </div>
                                 {currentMinWage && <p className="text-xs text-gray-400 mt-1">현재: {Number(currentMinWage).toLocaleString()}원</p>}
@@ -4647,6 +4647,14 @@
                             setPersonalTemplateTarget(finalData);
                             setIsModalOpen(false);
                             setEditingEmp(null);
+                            // early return 전에 wageBelowMin 즉시 반영
+                            if (dataToSave.empUid && currentWorkspaceId) {
+                                const isLow = Number(finalData.wage) > 0 && Number(finalData.wage) < Number(globalMinWage);
+                                fbDb.collection('employeeAccounts').doc(dataToSave.empUid)
+                                    .collection('workplaces').doc(currentWorkspaceId)
+                                    .update({ wageBelowMin: isLow ? true : firebase.firestore.FieldValue.delete() })
+                                    .catch(() => {});
+                            }
                             return;
                         } else if (hadPersonalWage && !hasPersonalWage) {
                             // 개별 시급 → 공란(최저시급) 전환: 기존 저장 템플릿 수정 없이 바로 needs_resign 처리

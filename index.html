@@ -6929,14 +6929,14 @@
             return (
                 <div className="bg-white p-6 md:p-8 rounded-2xl shadow-sm border border-gray-200 max-w-5xl mx-auto space-y-10">
                     <div>
-                        <div className="flex justify-between items-center mb-8 gap-3">
-                            <h2 className="text-lg md:text-xl font-bold text-gray-800 flex items-center gap-2 whitespace-nowrap">
-                                <BarChart3 className="text-green-600 flex-shrink-0" /> 월별 매출 및 인건비 추이
+                        <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center mb-8 gap-2">
+                            <h2 className="text-lg md:text-xl font-bold text-gray-800 flex items-center gap-2">
+                                <BarChart3 className="w-5 h-5 text-green-600 flex-shrink-0" /> 월별 매출 및 인건비 추이
                             </h2>
                             <select
                                 value={selectedYear}
                                 onChange={e => setSelectedYear(parseInt(e.target.value))}
-                                className="border border-gray-200 rounded-xl px-4 py-2 font-bold bg-gray-50 focus:ring-2 focus:ring-green-500 outline-none transition flex-shrink-0"
+                                className="border border-gray-200 rounded-xl px-4 py-2 font-bold bg-gray-50 focus:ring-2 focus:ring-green-500 outline-none transition self-start sm:self-auto flex-shrink-0"
                             >
                                 {availableYears.map(y => <option key={y} value={y}>{y}년</option>)}
                             </select>

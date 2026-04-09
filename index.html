@@ -626,17 +626,21 @@
         }
 
         // 직원: 가입 신청 근로계약서 재제출
-        async function resubmitEmpJoinContract(empUid, bossUid, contractData) {
+        async function resubmitEmpJoinContract(empUid, bossUid, contractData, profileData) {
             const batch = fbDb.batch();
+            const wpUpdate = { contractRejected: firebase.firestore.FieldValue.delete() };
+            if (profileData) Object.assign(wpUpdate, profileData);
             batch.update(
                 fbDb.collection('employeeAccounts').doc(empUid).collection('workplaces').doc(bossUid),
-                { contractRejected: firebase.firestore.FieldValue.delete() }
+                wpUpdate
             );
-            batch.update(fbDb.collection('empPending').doc(`${empUid}_${bossUid}`), {
+            const pendingUpdate = {
                 contract: contractData,
                 hasContract: true,
                 contractRejected: firebase.firestore.FieldValue.delete()
-            });
+            };
+            if (profileData) Object.assign(pendingUpdate, profileData);
+            batch.update(fbDb.collection('empPending').doc(`${empUid}_${bossUid}`), pendingUpdate);
             await batch.commit();
         }
 
@@ -2076,13 +2080,6 @@
                                 <svg className="w-4 h-4 text-green-300 group-hover:text-green-100 hidden sm:block" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="m6 9 6 6 6-6"/></svg>
                             </button>
                             <div className="flex items-center gap-1 md:gap-3">
-                                {allPendingEmployees.length > 0 && (
-                                    <button onClick={() => setShowPendingModal(true)} className="relative flex items-center gap-1 text-sm bg-yellow-500 hover:bg-yellow-400 text-white px-2 md:px-3 py-1.5 rounded-md transition font-bold">
-                                        <Users className="w-4 h-4" />
-                                        <span className="hidden sm:inline">가입 대기</span>
-                                        <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full w-4 h-4 flex items-center justify-center">{allPendingEmployees.length}</span>
-                                    </button>
-                                )}
                                 {isSyncing ? (
                                     <span className="text-green-200 text-xs flex items-center gap-1">
                                         <svg className="w-3 h-3 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>
@@ -2351,6 +2348,7 @@
                                 onApprove={handleApproveEmployee}
                                 onReject={handleRejectEmployee}
                                 onRejectContract={handleRejectJoinContract}
+                                globalTemplate={workspaceInfo?.contractTemplate}
                                 showAlert={showAlert}
                                 showConfirm={showConfirm}
                             />
@@ -2977,10 +2975,30 @@
 
         function PendingApprovalScreen({ empAccount, firebaseUser, onLogout, onBack, showAlert }) {
             const [contractRejected, setContractRejected] = useState(!!empAccount?.contractRejected);
+            const [showProfileStep, setShowProfileStep] = useState(false);
             const [showContractWrite, setShowContractWrite] = useState(false);
             const [contractTemplate, setContractTemplate] = useState(null);
             const [loadingTemplate, setLoadingTemplate] = useState(false);
             const [submitting, setSubmitting] = useState(false);
+            const [profileError, setProfileError] = useState('');
+            const [rewriteProfile, setRewriteProfile] = useState({
+                residentId: empAccount?.residentId || '',
+                bank: empAccount?.bank || '',
+                account: empAccount?.account || '',
+                address: empAccount?.address || '',
+                phone: empAccount?.phone || ''
+            });
+
+            const formatResidentId = (raw) => {
+                const digits = raw.replace(/[^0-9]/g, '').slice(0, 13);
+                return digits.length > 6 ? `${digits.slice(0,6)}-${digits.slice(6)}` : digits;
+            };
+            const formatPhone = (raw) => {
+                const digits = raw.replace(/[^0-9]/g, '').slice(0, 11);
+                if (digits.length <= 3) return digits;
+                if (digits.length <= 7) return `${digits.slice(0,3)}-${digits.slice(3)}`;
+                return `${digits.slice(0,3)}-${digits.slice(3,7)}-${digits.slice(7)}`;
+            };
 
             // 실시간 반려 상태 감지
             useEffect(() => {
@@ -3002,28 +3020,40 @@
                     const personalTemplate = wpDoc.data()?.contractTemplate;
                     if (personalTemplate) {
                         setContractTemplate(personalTemplate);
-                        setShowContractWrite(true);
                     } else {
                         const wsDoc = await fbDb.collection('workspaces').doc(empAccount.bossUid).get();
                         const globalTemplate = wsDoc.data()?.contractTemplate;
                         if (globalTemplate) {
                             setContractTemplate(globalTemplate);
-                            setShowContractWrite(true);
                         } else {
                             showAlert?.('근로계약서 양식이 없습니다. 관리자에게 문의하세요.', '안내', 'info');
+                            setLoadingTemplate(false);
+                            return;
                         }
                     }
+                    setShowProfileStep(true);
                 } catch(e) {
                     showAlert?.('양식 불러오기 실패: ' + e.message, '오류', 'error');
                 }
                 setLoadingTemplate(false);
             };
 
+            const handleProfileNext = () => {
+                if (!rewriteProfile.address.trim()) { setProfileError('주소를 입력해주세요.'); return; }
+                if (!rewriteProfile.phone.trim()) { setProfileError('연락처를 입력해주세요.'); return; }
+                if (!rewriteProfile.residentId.trim()) { setProfileError('주민번호를 입력해주세요.'); return; }
+                if (!rewriteProfile.bank.trim()) { setProfileError('은행명을 입력해주세요.'); return; }
+                if (!rewriteProfile.account.trim()) { setProfileError('계좌번호를 입력해주세요.'); return; }
+                setProfileError('');
+                setShowContractWrite(true);
+            };
+
             const handleContractRewrite = async (contractData) => {
                 setSubmitting(true);
                 try {
-                    await resubmitEmpJoinContract(firebaseUser.uid, empAccount.bossUid, contractData);
+                    await resubmitEmpJoinContract(firebaseUser.uid, empAccount.bossUid, contractData, rewriteProfile);
                     setContractRejected(false);
+                    setShowProfileStep(false);
                     setShowContractWrite(false);
                     showAlert?.('근로계약서가 재제출되었습니다.\n관리자 승인을 기다려주세요.', '제출 완료', 'success');
                 } catch(e) {
@@ -3045,10 +3075,68 @@
                 return (
                     <ContractWriteModal
                         template={contractTemplate}
-                        employeeInfo={{ name: empAccount?.name || '', address: empAccount?.address || '', phone: empAccount?.phone || '' }}
+                        employeeInfo={{ name: empAccount?.name || '', address: rewriteProfile.address, phone: rewriteProfile.phone }}
                         onSubmit={handleContractRewrite}
                         onBack={() => setShowContractWrite(false)}
                     />
+                );
+            }
+
+            if (showProfileStep) {
+                return (
+                    <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+                        <div className="bg-white p-8 rounded-2xl shadow-xl w-full max-w-sm">
+                            <button onClick={() => setShowProfileStep(false)} className="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700 mb-5">
+                                <ChevronLeft className="w-4 h-4" /> 뒤로
+                            </button>
+                            <h2 className="text-lg font-bold text-gray-800 mb-1">프로필 확인 및 수정</h2>
+                            <p className="text-gray-500 text-xs mb-4">정보를 확인하고 수정한 뒤 계약서를 작성하세요.</p>
+                            <div className="space-y-3 mb-5">
+                                <div>
+                                    <label className="block text-xs font-bold text-gray-600 mb-1">주소 *</label>
+                                    <input value={rewriteProfile.address}
+                                        onChange={e => setRewriteProfile(p => ({ ...p, address: e.target.value }))}
+                                        className="w-full border-2 border-gray-300 rounded-xl py-2.5 px-4 focus:border-blue-500 outline-none text-sm"
+                                        placeholder="서울시 강남구 테헤란로 123" />
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-bold text-gray-600 mb-1">연락처 *</label>
+                                    <input value={rewriteProfile.phone}
+                                        onChange={e => setRewriteProfile(p => ({ ...p, phone: formatPhone(e.target.value) }))}
+                                        className="w-full border-2 border-gray-300 rounded-xl py-2.5 px-4 focus:border-blue-500 outline-none text-sm"
+                                        placeholder="010-0000-0000" />
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-bold text-gray-600 mb-1">주민번호 *</label>
+                                    <input value={rewriteProfile.residentId}
+                                        onChange={e => setRewriteProfile(p => ({ ...p, residentId: formatResidentId(e.target.value) }))}
+                                        className="w-full border-2 border-gray-300 rounded-xl py-2.5 px-4 focus:border-blue-500 outline-none text-sm font-mono tracking-wider"
+                                        placeholder="000000-0000000" />
+                                </div>
+                                <div className="grid grid-cols-2 gap-2">
+                                    <div>
+                                        <label className="block text-xs font-bold text-gray-600 mb-1">은행명 *</label>
+                                        <input value={rewriteProfile.bank}
+                                            onChange={e => setRewriteProfile(p => ({ ...p, bank: e.target.value }))}
+                                            className="w-full border-2 border-gray-300 rounded-xl py-2.5 px-3 focus:border-blue-500 outline-none text-sm"
+                                            placeholder="국민은행" />
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs font-bold text-gray-600 mb-1">계좌번호 *</label>
+                                        <input value={rewriteProfile.account}
+                                            onChange={e => setRewriteProfile(p => ({ ...p, account: e.target.value }))}
+                                            className="w-full border-2 border-gray-300 rounded-xl py-2.5 px-3 focus:border-blue-500 outline-none text-sm"
+                                            placeholder="123-456-789" />
+                                    </div>
+                                </div>
+                            </div>
+                            {profileError && <p className="text-red-500 text-sm mb-3">{profileError}</p>}
+                            <button onClick={handleProfileNext}
+                                className="w-full bg-purple-600 text-white py-3 rounded-xl font-bold hover:bg-purple-700 transition">
+                                다음 (근로계약서 작성)
+                            </button>
+                        </div>
+                    </div>
                 );
             }
 
@@ -3254,10 +3342,11 @@
             );
         }
 
-        function TabInvite({ workspaceInfo, setWorkspaceInfo, firebaseUser, workspaceId, pendingEmployees, onApprove, onReject, onRejectContract, showAlert, showConfirm }) {
+        function TabInvite({ workspaceInfo, setWorkspaceInfo, firebaseUser, workspaceId, pendingEmployees, onApprove, onReject, onRejectContract, globalTemplate, showAlert, showConfirm }) {
             const [copying, setCopying] = useState(false);
             const [regenerating, setRegenerating] = useState(false);
             const [reviewingEmp, setReviewingEmp] = useState(null);
+            const [pendingRewriteTarget, setPendingRewriteTarget] = useState(null);
 
             const inviteCode = workspaceInfo?.inviteCode || '';
             const appUrl = window.location.href.split('?')[0];
@@ -3292,6 +3381,7 @@
             };
 
             return (
+                <React.Fragment>
                 <div className="max-w-xl mx-auto space-y-6">
                     <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6">
                         <h2 className="text-lg font-bold text-gray-800 mb-1">직원 초대 코드</h2>
@@ -3330,24 +3420,30 @@
                         ) : (
                             <div className="space-y-3">
                                 {pendingEmployees.map(emp => (
-                                    <div key={emp.uid} className="flex items-center justify-between bg-yellow-50 border border-yellow-200 rounded-xl p-4">
-                                        <div>
-                                            <p className="font-bold text-gray-800">{emp.name}</p>
-                                            {emp.contractRejected ? (
-                                                <p className="text-xs text-orange-600 font-bold">계약서 재제출 대기</p>
-                                            ) : emp.hasContract ? (
-                                                <p className="text-xs text-purple-600 font-bold">근로계약서 있음</p>
-                                            ) : (
-                                                <p className="text-xs text-gray-400">가입 신청</p>
-                                            )}
+                                    <div key={emp.uid} className="bg-yellow-50 border border-yellow-200 rounded-xl p-4 space-y-2">
+                                        <div className="flex items-center justify-between">
+                                            <div>
+                                                <p className="font-bold text-gray-800">{emp.name}</p>
+                                                {!emp.contractRejected && (emp.hasContract
+                                                    ? <p className="text-xs text-purple-600 font-bold">근로계약서 있음</p>
+                                                    : <p className="text-xs text-gray-400">가입 신청</p>
+                                                )}
+                                            </div>
+                                            <div className="flex gap-2">
+                                                <button onClick={() => {
+                                                    if (emp.hasContract && emp.contract) { setReviewingEmp(emp); }
+                                                    else { onApprove(emp.uid); }
+                                                }} className="bg-green-600 text-white px-3 py-1.5 rounded-lg text-sm font-bold hover:bg-green-700 transition">승인</button>
+                                                <button onClick={() => onReject(emp.uid)} className="bg-red-100 text-red-600 px-3 py-1.5 rounded-lg text-sm font-bold hover:bg-red-200 transition">거절</button>
+                                            </div>
                                         </div>
-                                        <div className="flex gap-2">
-                                            <button onClick={() => {
-                                                if (emp.hasContract && emp.contract) { setReviewingEmp(emp); }
-                                                else { onApprove(emp.uid); }
-                                            }} className="bg-green-600 text-white px-3 py-1.5 rounded-lg text-sm font-bold hover:bg-green-700 transition">승인</button>
-                                            <button onClick={() => onReject(emp.uid)} className="bg-red-100 text-red-600 px-3 py-1.5 rounded-lg text-sm font-bold hover:bg-red-200 transition">거절</button>
-                                        </div>
+                                        {emp.contractRejected && (
+                                            <button
+                                                onClick={() => setPendingRewriteTarget({ ...emp, empUid: emp.uid, id: emp.uid })}
+                                                className="w-full bg-orange-50 border border-orange-300 text-orange-700 text-xs font-bold py-2 rounded-lg hover:bg-orange-100 transition">
+                                                근로계약서 재작성 요청 (양식 수정)
+                                            </button>
+                                        )}
                                     </div>
                                 ))}
                             </div>
@@ -3412,6 +3508,19 @@
                         <p>④ 관리자가 이 화면에서 승인</p>
                     </div>
                 </div>
+                {pendingRewriteTarget && (
+                    <PersonalContractTemplateModal
+                        emp={pendingRewriteTarget}
+                        globalTemplate={globalTemplate}
+                        workspaceId={workspaceId}
+                        firebaseUser={firebaseUser}
+                        setEmployees={() => {}}
+                        showAlert={showAlert}
+                        onClose={() => setPendingRewriteTarget(null)}
+                        reason="pending_rewrite"
+                    />
+                )}
+                </React.Fragment>
             );
         }
 
@@ -4249,7 +4358,16 @@
                         : { ...ownerInfo, signatureData: globalTemplate?.ownerInfo?.signatureData || '' };
                     const template = { title: title.trim(), sections, ownerInfo: finalOwnerInfo };
                     const bossUid = workspaceId || firebaseUser.uid;
-                    if (emp.empUid) {
+                    if (reason === 'pending_rewrite') {
+                        // 가입 신청 중인 직원의 계약서 양식만 업데이트 (상태 변경 없음)
+                        const empUid = emp.uid || emp.empUid;
+                        if (empUid) {
+                            await fbDb.collection('employeeAccounts').doc(empUid)
+                                .collection('workplaces').doc(bossUid)
+                                .update({ contractTemplate: template });
+                            showAlert(`${emp.name}님의 계약서 양식이 업데이트되었습니다.\n직원이 재작성 시 새 양식이 적용됩니다.`, '업데이트 완료', 'success');
+                        }
+                    } else if (emp.empUid) {
                         // 모든 경로 통일: pendingRewrite=true + needs_resign으로 재작성 요청
                         // needs_resign은 Firestore 규칙 호환성 및 재제출 흐름 보장용
                         await fbDb.collection('employeeAccounts').doc(emp.empUid)

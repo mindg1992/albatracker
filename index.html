@@ -3190,6 +3190,12 @@
                             관리자 승인을 기다리고 있습니다.
                         </p>
                         <p className="text-xs text-gray-400 mb-8">관리자가 승인하면 자동으로 접속됩니다.</p>
+                        {contractRejected && (
+                            <button onClick={handleStartRewrite} disabled={loadingTemplate}
+                                className="w-full bg-purple-600 text-white py-3 rounded-xl font-bold hover:bg-purple-700 transition mb-2 disabled:opacity-50">
+                                {loadingTemplate ? '양식 불러오는 중...' : '근로계약서 재작성하기'}
+                            </button>
+                        )}
                         {onBack && (
                             <button onClick={onBack} className="w-full bg-blue-50 text-blue-600 py-3 rounded-xl font-medium hover:bg-blue-100 transition mb-2">
                                 업체 목록으로 돌아가기

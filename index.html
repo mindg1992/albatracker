@@ -1521,6 +1521,50 @@
                             return { ...e, status: 'resigned' };
                         }));
                         await approveGoogleEmpJoinRequest(currentWorkspaceId || firebaseUser.uid, empUid, approvedId, hasContract);
+                        // 이름이 변경된 경우 기존 근무 기록(monthlyData + submissions)의 이름도 업데이트
+                        if (existingEmp.name !== empData.name) {
+                            const newName = empData.name;
+                            setMonthlyData(prev => {
+                                let changed = false;
+                                const result = {};
+                                for (const [mk, mData] of Object.entries(prev)) {
+                                    if (!mData?.days) { result[mk] = mData; continue; }
+                                    const newDays = {};
+                                    let dayChanged = false;
+                                    for (const [d, dData] of Object.entries(mData.days)) {
+                                        if (!dData?.entries) { newDays[d] = dData; continue; }
+                                        const newEntries = {};
+                                        let entryChanged = false;
+                                        for (const [eid, entry] of Object.entries(dData.entries)) {
+                                            if (entry?.empUid === empUid && entry.name !== newName) {
+                                                newEntries[eid] = { ...entry, name: newName };
+                                                entryChanged = true;
+                                            } else {
+                                                newEntries[eid] = entry;
+                                            }
+                                        }
+                                        newDays[d] = entryChanged ? { ...dData, entries: newEntries } : dData;
+                                        if (entryChanged) dayChanged = true;
+                                    }
+                                    result[mk] = dayChanged ? { ...mData, days: newDays } : mData;
+                                    if (dayChanged) changed = true;
+                                }
+                                return changed ? result : prev;
+                            });
+                            if (currentWorkspaceId) {
+                                fbDb.collection('workspaces').doc(currentWorkspaceId)
+                                    .collection('submissions')
+                                    .where('empUid', '==', empUid)
+                                    .get()
+                                    .then(snap => {
+                                        if (snap.empty) return;
+                                        const batch = fbDb.batch();
+                                        snap.forEach(doc => batch.update(doc.ref, { empName: newName }));
+                                        return batch.commit();
+                                    })
+                                    .catch(() => {});
+                            }
+                        }
                         showAlert(`${empData.name}님이 재입사 승인되었습니다.\n기존 근무 기록이 이어집니다.`, '재입사 승인', 'success');
                     } else {
                         approvedId = nextEmpId;

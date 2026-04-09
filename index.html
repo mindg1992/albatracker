@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>알바트래커 v1.9.1</title>
+    <title>알바트래커 v1.9.2</title>
 
     <!-- PWA -->
     <link rel="manifest" href="manifest.json">
@@ -80,7 +80,7 @@
     <!-- 버전 체크: 앱 버전이 바뀌면 캐시된 구버전을 쓰는 사용자도 강제 새로고침 -->
     <script>
         (function() {
-            var APP_VERSION = 'v1.9.1';
+            var APP_VERSION = 'v1.9.2';
             var KEY = 'at_app_version';
             var stored = localStorage.getItem(KEY);
             localStorage.setItem(KEY, APP_VERSION);
@@ -2332,7 +2332,7 @@
                 <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-4">
                     <div className="bg-white p-8 rounded-2xl shadow-xl w-full max-w-sm text-center">
                         <ATLogo className="w-16 h-16 mx-auto mb-4 rounded-2xl shadow-md" />
-                        <h2 className="text-2xl font-bold text-gray-800 mb-1">{empName ? `${empName}님` : '알바트래커 v1.8.6'}</h2>
+                        <h2 className="text-2xl font-bold text-gray-800 mb-1">{empName ? `${empName}님` : '알바트래커 v1.9.2'}</h2>
                         <p className="text-gray-500 mb-6 text-sm">
                             {empName ? 'PIN을 입력해주세요.' : (appPin === INITIAL_PIN ? '초기 비밀번호는 "000000"입니다.' : '비밀번호를 입력해주세요.')}
                         </p>
@@ -2375,13 +2375,9 @@
 
                         {!empName && (
                             <div className="mt-6 text-left border-t border-gray-100 pt-4 space-y-1">
-                                <p className="text-[10px] text-gray-300 leading-relaxed">알바트래커v1.8.3: 관리자 전체공지기능 추가</p>
-                                <p className="text-[10px] text-gray-300 leading-relaxed">알바트래커v1.8.5: 근로계약서 PDF 저장 기능 추가</p>
-                                <p className="text-[10px] text-gray-300 leading-relaxed">알바트래커v1.8.6: 시급변경 재작성 알림, PDF 개선, 업체추가 버그 수정</p>
-                                <p className="text-[10px] text-gray-300 leading-relaxed">알바트래커v1.8.7: 근무자카드 재작성 요청, 템플릿 없이 개별 계약서 작성, 계약 상태 초기화</p>
-                                <p className="text-[10px] text-gray-300 leading-relaxed">알바트래커v1.8.8: 근로계약서 상태 충돌 버그 수정 (contractDeleteRequest 잔재 제거)</p>
                                 <p className="text-[10px] text-gray-300 leading-relaxed">알바트래커v1.9.0: 시급 변경 알림, 최저시급 미만 시 카드 경고 및 맨 앞 정렬</p>
                                 <p className="text-[10px] text-gray-300 leading-relaxed">알바트래커v1.9.1: 최저시급 미만 근무자 근무시간 입력 차단 및 직원 헤더 알림</p>
+                                <p className="text-[10px] text-gray-300 leading-relaxed">알바트래커v1.9.2: 개별시급→공란 전환 계약서 재작성, 재작성 팝업 닫기, 재작성대기 중 시급 수정 시 계약서 재작성 강제</p>
                             </div>
                         )}
                     </div>
@@ -3904,6 +3900,11 @@
                                     </p>
                                 </div>
                             </div>
+                            {reason === 'rewrite_request' && (
+                                <button onClick={onClose} className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition">
+                                    <X className="w-5 h-5" />
+                                </button>
+                            )}
                         </div>
 
                         <div className="p-5 space-y-4 max-h-[65vh] overflow-y-auto">
@@ -4071,15 +4072,17 @@
                     const oldStatus = editingEmp.status || (editingEmp.isWorking === false ? 'resigned' : 'working');
                     const newStatus = dataToSave.status;
 
-                    // 시급 변경 감지: 계약서가 완료된 근무자의 시급이 바뀌면 재작성 필요
+                    // 시급 변경 감지: 계약서가 완료됐거나 재작성 대기 중인 근무자의 시급이 바뀌면 재작성 필요
                     const oldWage = Number(editingEmp.wage) || Number(globalMinWage);
                     const newWage = Number(dataToSave.wage) || Number(globalMinWage);
                     const wageChanged = oldWage !== newWage;
                     let finalData = { ...dataToSave };
-                    if (wageChanged && editingEmp.contractStatus === 'completed') {
+                    if (wageChanged && (editingEmp.contractStatus === 'completed' || editingEmp.contractStatus === 'needs_resign')) {
+                        const hadPersonalWage = editingEmp.wage && Number(editingEmp.wage) > 0;
                         const hasPersonalWage = dataToSave.wage && Number(dataToSave.wage) > 0;
-                        if (hasPersonalWage) {
-                            // 개별 시급 근무자: 개인 근로계약서 팝업 열기
+                        if (hasPersonalWage || hadPersonalWage) {
+                            // 개별 시급이었거나 개별 시급으로 변경: 개인 근로계약서 팝업 열기
+                            // (공란으로 바꾼 경우도 기존 개인 템플릿 로드 후 재작성)
                             // setEmployees는 팝업 저장 시점에만 호출 (앱 재시작 시 시급 원복 보장)
                             setPersonalTemplateReason('wage_change');
                             setPersonalTemplateTarget(finalData);

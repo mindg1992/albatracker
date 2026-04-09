@@ -4711,20 +4711,16 @@
                                         {emp.empUid && (
                                             <div className="flex gap-2 mb-3 flex-wrap">
                                                 {contractStatus === 'completed' && (
-                                                    <>
-                                                        <button onClick={() => handleViewContract(emp)}
-                                                            className={`flex-1 text-xs py-1.5 rounded-lg font-bold transition ${
-                                                                emp.contractDeleteRequest === 'employee'
-                                                                    ? 'bg-orange-50 text-orange-700 border border-orange-300 hover:bg-orange-100'
-                                                                    : 'bg-purple-50 text-purple-700 border border-purple-200 hover:bg-purple-100'
-                                                            }`}>
-                                                            {emp.contractDeleteRequest === 'employee' ? '재작성 확인' : '근로계약서 열람'}
-                                                        </button>
-                                                        <button onClick={() => { setPersonalTemplateReason('rewrite_request'); setPersonalTemplateTarget(emp); }}
-                                                            className="flex-1 text-xs py-1.5 rounded-lg font-bold transition bg-orange-50 text-orange-700 border border-orange-300 hover:bg-orange-100">
-                                                            재작성 요청
-                                                        </button>
-                                                    </>
+                                                    <button onClick={() => handleViewContract(emp)}
+                                                        className={`flex-1 text-xs py-1.5 rounded-lg font-bold transition ${
+                                                            emp.contractDeleteRequest === 'employee'
+                                                                ? 'bg-orange-50 text-orange-700 border border-orange-300 hover:bg-orange-100'
+                                                                : emp.contractDeleteRequest === 'boss'
+                                                                ? 'bg-yellow-50 text-yellow-700 border border-yellow-300 hover:bg-yellow-100'
+                                                                : 'bg-purple-50 text-purple-700 border border-purple-200 hover:bg-purple-100'
+                                                        }`}>
+                                                        {emp.contractDeleteRequest === 'employee' ? '재작성 확인' : emp.contractDeleteRequest === 'boss' ? '재작성 요청 대기중' : '근로계약서 열람'}
+                                                    </button>
                                                 )}
                                                 {contractStatus === null && (
                                                     <button onClick={() => { setPersonalTemplateReason('new_contract'); setPersonalTemplateTarget(emp); }}

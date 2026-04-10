@@ -5340,7 +5340,6 @@
                             nextId={nextEmpId}
                             globalMinWage={globalMinWage}
                             showAlert={showAlert}
-                            payslipMode={workspaceInfo?.payslipSettings?.mode === 'per_employee' && workspaceInfo?.payslipSettings?.perEmpMode === 'manual' ? 'per_employee_manual' : null}
                         />
                     )}
                     {viewingContract && (
@@ -5576,7 +5575,7 @@
             );
         }
 
-        function EmployeeModal({ employee, onClose, onSave, nextId, globalMinWage, showAlert, payslipMode }) {
+        function EmployeeModal({ employee, onClose, onSave, nextId, globalMinWage, showAlert }) {
             const [formData, setFormData] = useState(() => {
                 const initialStatus = employee 
                     ? (employee.status || (employee.isWorking === false ? 'resigned' : 'working'))
@@ -5678,16 +5677,6 @@
                                 <label className="block text-sm font-medium text-gray-700 mb-1">시급</label>
                                 <input type="number" name="wage" value={formData.wage} onChange={handleChange} onBlur={handleWageBlur} min={globalMinWage || 1} placeholder={`저장 시 최저시급(${Number(globalMinWage).toLocaleString()}원) 자동 적용`} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-green-500 outline-none transition-shadow" />
                             </div>
-                            {payslipMode === 'per_employee_manual' && (
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-1">급여 지급일 <span className="text-gray-400 font-normal">(매월)</span></label>
-                                    <div className="relative">
-                                        <input type="number" name="payDay" value={formData.payDay || ''} onChange={handleChange} min="1" max="31" placeholder="예: 10"
-                                            className="w-full border border-gray-300 rounded-lg px-3 py-2 pr-8 text-sm focus:ring-2 focus:ring-green-500 outline-none transition-shadow" />
-                                        <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-gray-400">일</span>
-                                    </div>
-                                </div>
-                            )}
 
                             <div className="grid grid-cols-2 gap-3">
                                 <div>
@@ -6571,13 +6560,56 @@
             const [sendIncludeHoliday, setSendIncludeHoliday] = useState(true);
             const [sending, setSending] = useState(false);
 
-            const handleOpenSend = (item) => {
-                const defaultInclude = workspaceInfo?.payslipSettings?.includeHoliday !== false;
-                setSendIncludeHoliday(defaultInclude);
-                const autoMode = workspaceInfo?.payslipSettings?.mode;
-                if (autoMode && autoMode !== 'manual') {
-                    if (!window.confirm('자동발송 설정이 되어있습니다.\n그래도 발송하시겠습니까?')) return;
+            // 일괄발송
+            const [bulkModal, setBulkModal] = useState(false);
+            const [bulkIncludeHoliday, setBulkIncludeHoliday] = useState(true);
+            const [bulkSending, setBulkSending] = useState(false);
+
+            const handleBulkSend = async () => {
+                if (!workspaceId || payrollList.length === 0) return;
+                setBulkSending(true);
+                let successCount = 0;
+                for (const item of payrollList) {
+                    try {
+                        const finalAmount = bulkIncludeHoliday ? (item.totalPay + item.holidayPay) : item.totalPay;
+                        const calcLines = [`시급: ${Number(item.wage).toLocaleString()}원`, `근무시간: ${fmtHours(item.totalHours)}`, `${bulkIncludeHoliday ? '순수급여' : '총 급여'}: ${Number(item.totalPay).toLocaleString()}원`];
+                        if (bulkIncludeHoliday && item.holidayPay > 0) calcLines.push(`주휴수당: ${Number(item.holidayPay).toLocaleString()}원`);
+                        const docId = `${item.id}_${year}_${month}`;
+                        const emp = employees.find(e => e.id.toString() === item.id);
+                        const payslipData = {
+                            empId: String(item.id), empName: item.name, year, month,
+                            empUid: emp?.empUid || '',
+                            totalPay: item.totalPay, holidayPay: item.holidayPay,
+                            includeHoliday: bulkIncludeHoliday, finalAmount,
+                            wage: item.wage, totalHours: item.totalHours,
+                            calcMethod: calcLines.join('\n'),
+                            payDate: `${year}년 ${month}월`,
+                            shopName: workspaceInfo?.shopName || '',
+                            bossName: workspaceInfo?.bossName || '',
+                            bossSignature: workspaceInfo?.bossSignature || '',
+                            sentAt: firebase.firestore.FieldValue.serverTimestamp(),
+                            read: false
+                        };
+                        await fbDb.collection('workspaces').doc(workspaceId).collection('payslips').doc(docId).set(payslipData);
+                        if (emp?.empUid) {
+                            await fbDb.collection('employeeAccounts').doc(emp.empUid).collection('notifications').add({
+                                type: 'payslip', year, month,
+                                message: `${year}년 ${month}월 급여명세서가 도착했습니다.`,
+                                payslipDocId: docId, bossUid: workspaceId,
+                                createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+                                read: false
+                            });
+                        }
+                        successCount++;
+                    } catch(e) {}
                 }
+                setBulkSending(false);
+                setBulkModal(false);
+                showAlert(`${successCount}명에게 ${month}월 급여명세서를 발송했습니다.`, '일괄발송 완료', 'success');
+            };
+
+            const handleOpenSend = (item) => {
+                setSendIncludeHoliday(true);
                 setSendModal({ item });
             };
 
@@ -6589,12 +6621,7 @@
                 const calcLines = [`시급: ${Number(item.wage).toLocaleString()}원`, `근무시간: ${fmtHours(item.totalHours)}`, `${sendIncludeHoliday ? '순수급여' : '총 급여'}: ${Number(item.totalPay).toLocaleString()}원`];
                 if (sendIncludeHoliday && item.holidayPay > 0) calcLines.push(`주휴수당: ${Number(item.holidayPay).toLocaleString()}원`);
                 const calcMethod = calcLines.join('\n');
-                const payslipSettings = workspaceInfo?.payslipSettings || {};
-                const payDate = payslipSettings.mode === 'monthly_auto'
-                    ? `매월 ${payslipSettings.autoDay || '-'}일`
-                    : (employees.find(e => e.id.toString() === item.id)?.payDay
-                        ? `매월 ${employees.find(e => e.id.toString() === item.id).payDay}일`
-                        : `${year}년 ${month}월`);
+                const payDate = `${year}년 ${month}월`;
                 const docId = `${item.id}_${year}_${month}`;
                 const emp = employees.find(e => e.id.toString() === item.id);
                 const payslipData = {
@@ -6714,10 +6741,18 @@
                             <button onClick={nextMonth} className="p-2 hover:bg-gray-100 rounded-full transition"><ChevronRight className="w-5 h-5 md:w-6 md:h-6" /></button>
                         </div>
                         {payrollList.length > 0 && (
-                            <button onClick={handleExcelDownload} className="flex items-center gap-2 text-sm font-bold bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-xl transition shadow-sm whitespace-nowrap w-full md:w-auto justify-center">
-                                <FileSpreadsheet className="w-4 h-4" />
-                                엑셀 다운로드
-                            </button>
+                            <div className="flex flex-col md:flex-row gap-2 w-full md:w-auto">
+                                {workspaceId && (
+                                    <button onClick={() => { setBulkIncludeHoliday(true); setBulkModal(true); }} className="flex items-center gap-2 text-sm font-bold bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-xl transition shadow-sm whitespace-nowrap w-full md:w-auto justify-center">
+                                        <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>
+                                        급여명세서 일괄발송
+                                    </button>
+                                )}
+                                <button onClick={handleExcelDownload} className="flex items-center gap-2 text-sm font-bold bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-xl transition shadow-sm whitespace-nowrap w-full md:w-auto justify-center">
+                                    <FileSpreadsheet className="w-4 h-4" />
+                                    엑셀 다운로드
+                                </button>
+                            </div>
                         )}
                     </div>
 
@@ -6875,6 +6910,32 @@
                                 <button onClick={() => setSendModal(null)} className="flex-1 bg-gray-100 text-gray-700 py-3 rounded-xl font-medium hover:bg-gray-200 transition">취소</button>
                                 <button onClick={handleSendPayslip} disabled={sending} className="flex-1 bg-emerald-600 text-white py-3 rounded-xl font-bold hover:bg-emerald-700 transition disabled:opacity-50">
                                     {sending ? '발송 중...' : '발송'}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                )}
+                {/* 급여명세서 일괄발송 팝업 */}
+                {bulkModal && (
+                    <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-[9999] backdrop-blur-sm">
+                        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 space-y-5">
+                            <h3 className="text-lg font-bold text-gray-800">급여명세서 일괄발송</h3>
+                            <div className="bg-gray-50 rounded-xl p-4 space-y-1 text-sm">
+                                <p className="text-gray-500">{year}년 {month}월</p>
+                                <p className="font-bold text-gray-800">대상: {payrollList.length}명</p>
+                                <p className="text-xs text-gray-400">급여가 발생한 전원에게 발송됩니다.</p>
+                            </div>
+                            <label className="flex items-center gap-3 cursor-pointer bg-blue-50 rounded-xl p-4 border border-blue-100">
+                                <input type="checkbox" checked={bulkIncludeHoliday} onChange={e => setBulkIncludeHoliday(e.target.checked)} className="w-4 h-4 accent-blue-600" />
+                                <div>
+                                    <p className="font-bold text-blue-800 text-sm">주휴수당 포함</p>
+                                    <p className="text-xs text-blue-600">체크 시 주휴수당이 임금총액에 포함됩니다</p>
+                                </div>
+                            </label>
+                            <div className="flex gap-2">
+                                <button onClick={() => setBulkModal(false)} className="flex-1 bg-gray-100 text-gray-700 py-3 rounded-xl font-medium hover:bg-gray-200 transition">취소</button>
+                                <button onClick={handleBulkSend} disabled={bulkSending} className="flex-1 bg-blue-600 text-white py-3 rounded-xl font-bold hover:bg-blue-700 transition disabled:opacity-50">
+                                    {bulkSending ? '발송 중...' : '일괄발송'}
                                 </button>
                             </div>
                         </div>
@@ -8309,29 +8370,27 @@
             );
         }
 
-        function PayslipSendSettings({ workspaceInfo, setWorkspaceInfo, workspaceId, firebaseUser, showAlert, employees, setEmployees }) {
-            const settings = workspaceInfo?.payslipSettings || {};
+        function PayslipSendSettings({ workspaceInfo, setWorkspaceInfo, workspaceId, firebaseUser, showAlert }) {
             const [open, setOpen] = useState(false);
-            const [mode, setMode] = useState(settings.mode || 'manual');
-            const [autoDay, setAutoDay] = useState(settings.autoDay || 10);
-            const [perEmpMode, setPerEmpMode] = useState(settings.perEmpMode || 'hiredate');
-            const [includeHoliday, setIncludeHoliday] = useState(settings.includeHoliday !== false);
             const [bossName, setBossName] = useState(workspaceInfo?.bossName || '');
             const [bossSignature, setBossSignature] = useState(workspaceInfo?.bossSignature || '');
             const [saving, setSaving] = useState(false);
+
+            // 근로계약서 템플릿에서 대표자 정보 자동 불러오기
+            useEffect(() => {
+                const tmpl = workspaceInfo?.contractTemplate?.ownerInfo;
+                if (!tmpl) return;
+                if (!bossName && tmpl.representative) setBossName(tmpl.representative);
+                if (!bossSignature && tmpl.signatureData) setBossSignature(tmpl.signatureData);
+            }, [workspaceInfo?.contractTemplate]);
 
             const handleSave = async () => {
                 if (!firebaseUser) return;
                 setSaving(true);
                 try {
-                    const newSettings = { mode, autoDay: Number(autoDay), perEmpMode, includeHoliday };
-                    await fbDb.collection('workspaces').doc(workspaceId || firebaseUser.uid).update({
-                        payslipSettings: newSettings,
-                        bossName,
-                        bossSignature
-                    });
-                    setWorkspaceInfo(prev => ({ ...prev, payslipSettings: newSettings, bossName, bossSignature }));
-                    showAlert('설정이 저장되었습니다.', '저장 완료', 'success');
+                    await fbDb.collection('workspaces').doc(workspaceId || firebaseUser.uid).update({ bossName, bossSignature });
+                    setWorkspaceInfo(prev => ({ ...prev, bossName, bossSignature }));
+                    showAlert('저장되었습니다.', '저장 완료', 'success');
                 } catch(e) { showAlert('저장 실패: ' + e.message, '오류', 'error'); }
                 setSaving(false);
             };
@@ -8344,99 +8403,30 @@
                                 <svg className="w-6 h-6 text-emerald-700" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>
                             </div>
                             <div>
-                                <h2 className="text-xl font-bold text-gray-800">급여지급일 자동발송 설정</h2>
-                                <p className="text-xs text-gray-500">급여명세서 발송 방식 및 대표자 정보</p>
+                                <h2 className="text-xl font-bold text-gray-800">급여명세서 대표자 서명</h2>
+                                <p className="text-xs text-gray-500">급여명세서에 첨부될 대표자 정보</p>
                             </div>
                         </div>
                         <svg className={`w-5 h-5 text-gray-400 transition-transform ${open ? 'rotate-180' : ''}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="6 9 12 15 18 9"/></svg>
                     </button>
                     {open && (
-                        <div className="px-6 pb-6 border-t border-gray-100 pt-4 space-y-5">
-                            {/* 발송 모드 */}
+                        <div className="px-6 pb-6 border-t border-gray-100 pt-4 space-y-4">
                             <div>
-                                <p className="text-sm font-bold text-gray-700 mb-3">발송 방식</p>
-                                <div className="space-y-2">
-                                    {[
-                                        { value: 'manual', label: '수동 발송', desc: '인건비탭에서 직접 발송' },
-                                        { value: 'monthly_auto', label: '월별 일괄 자동발송', desc: '매월 지정일에 전체 발송' },
-                                        { value: 'per_employee', label: '근무자별 날짜 지정', desc: '근무자별 개별 날짜 설정' },
-                                    ].map(opt => (
-                                        <label key={opt.value} className={`flex items-center gap-3 p-3 border-2 rounded-xl cursor-pointer transition ${mode === opt.value ? 'border-emerald-500 bg-emerald-50' : 'border-gray-200 hover:bg-gray-50'}`}>
-                                            <input type="radio" name="payslipMode" value={opt.value} checked={mode === opt.value} onChange={() => setMode(opt.value)} className="accent-emerald-600" />
-                                            <div>
-                                                <p className="font-bold text-gray-800 text-sm">{opt.label}</p>
-                                                <p className="text-xs text-gray-400">{opt.desc}</p>
-                                            </div>
-                                        </label>
-                                    ))}
-                                </div>
+                                <p className="text-sm font-bold text-gray-700 mb-2">대표자 이름</p>
+                                <input type="text" value={bossName} onChange={e => setBossName(e.target.value)}
+                                    placeholder="대표자 성명"
+                                    className="w-full border-2 border-gray-300 rounded-xl py-2.5 px-4 focus:border-emerald-500 outline-none text-sm transition" />
                             </div>
-                            {/* 월별 일괄 - 날짜 설정 */}
-                            {mode === 'monthly_auto' && (
-                                <div className="bg-emerald-50 rounded-xl p-4 border border-emerald-100">
-                                    <p className="text-sm font-bold text-emerald-800 mb-2">매월 발송일</p>
-                                    <div className="flex items-center gap-2">
-                                        <span className="text-sm text-gray-600">매월</span>
-                                        <input type="number" min="1" max="31" value={autoDay} onChange={e => setAutoDay(e.target.value)}
-                                            className="w-16 border-2 border-emerald-300 rounded-lg px-2 py-1.5 text-center font-bold focus:border-emerald-500 outline-none text-sm" />
-                                        <span className="text-sm text-gray-600">일 자동발송</span>
-                                    </div>
-                                </div>
-                            )}
-                            {/* 근무자별 - 하위 옵션 */}
-                            {mode === 'per_employee' && (
-                                <div className="space-y-3">
-                                    <div className="space-y-2">
-                                        {[
-                                            { value: 'hiredate', label: '매월 입사일에 자동발송' },
-                                            { value: 'manual', label: '자동발송일 수동설정' },
-                                        ].map(opt => (
-                                            <label key={opt.value} className={`flex items-center gap-3 p-3 border-2 rounded-xl cursor-pointer transition ${perEmpMode === opt.value ? 'border-blue-400 bg-blue-50' : 'border-gray-200 hover:bg-gray-50'}`}>
-                                                <input type="radio" name="perEmpMode" value={opt.value} checked={perEmpMode === opt.value} onChange={() => setPerEmpMode(opt.value)} className="accent-blue-600" />
-                                                <p className="font-bold text-gray-800 text-sm">{opt.label}</p>
-                                            </label>
-                                        ))}
-                                    </div>
-                                    {perEmpMode === 'manual' && (
-                                        <div className="bg-yellow-50 rounded-xl p-3 border border-yellow-200 text-sm text-yellow-800 font-medium">
-                                            근무자 카드에서 급여 지급일을 설정하세요.
-                                        </div>
-                                    )}
-                                </div>
-                            )}
-                            {/* 주휴수당 포함 여부 */}
                             <div>
-                                <p className="text-sm font-bold text-gray-700 mb-2">기본 발송 설정</p>
-                                <label className="flex items-center gap-3 cursor-pointer bg-blue-50 rounded-xl p-3 border border-blue-100">
-                                    <input type="checkbox" checked={includeHoliday} onChange={e => setIncludeHoliday(e.target.checked)} className="w-4 h-4 accent-blue-600" />
-                                    <div>
-                                        <p className="font-bold text-blue-800 text-sm">주휴수당 포함</p>
-                                        <p className="text-xs text-blue-500">체크 시 주휴수당이 임금총액에 포함됩니다</p>
+                                <p className="text-sm font-bold text-gray-700 mb-2">대표자 서명</p>
+                                {bossSignature && (
+                                    <div className="mb-2">
+                                        <p className="text-xs text-gray-400 mb-1">현재 서명</p>
+                                        <img src={bossSignature} alt="서명" className="h-14 border border-gray-200 rounded-xl bg-white p-1 object-contain" />
                                     </div>
-                                </label>
-                            </div>
-                            {/* 대표자 정보 */}
-                            <div className="space-y-3">
-                                <div>
-                                    <p className="text-sm font-bold text-gray-700 mb-2">대표자 이름</p>
-                                    <input type="text" value={bossName} onChange={e => setBossName(e.target.value)}
-                                        placeholder="대표자 성명"
-                                        className="w-full border-2 border-gray-300 rounded-xl py-2.5 px-4 focus:border-emerald-500 outline-none text-sm transition" />
-                                </div>
-                                <div>
-                                    <p className="text-sm font-bold text-gray-700 mb-2">대표자 서명</p>
-                                    {bossSignature && (
-                                        <div className="mb-2">
-                                            <p className="text-xs text-gray-400 mb-1">현재 서명</p>
-                                            <img src={bossSignature} alt="서명" className="h-14 border border-gray-200 rounded-xl bg-white p-1 object-contain" />
-                                        </div>
-                                    )}
-                                    <SignatureCanvas
-                                        onSave={sig => setBossSignature(sig)}
-                                        width={360} height={100}
-                                    />
-                                    {!bossSignature && <p className="text-xs text-gray-400 mt-1">서명을 등록하면 급여명세서에 자동으로 첨부됩니다.</p>}
-                                </div>
+                                )}
+                                <SignatureCanvas onSave={sig => setBossSignature(sig)} width={360} height={100} />
+                                {!bossSignature && <p className="text-xs text-gray-400 mt-1">서명을 등록하면 급여명세서에 자동으로 첨부됩니다.</p>}
                             </div>
                             <button onClick={handleSave} disabled={saving} className="w-full bg-emerald-600 text-white font-bold py-3.5 rounded-xl hover:bg-emerald-700 transition disabled:opacity-50">
                                 {saving ? '저장 중...' : '저장하기'}

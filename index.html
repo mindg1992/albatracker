@@ -6560,6 +6560,28 @@
             const [sendIncludeHoliday, setSendIncludeHoliday] = useState(true);
             const [sending, setSending] = useState(false);
 
+            // 발송 완료 추적
+            const [sentPayslips, setSentPayslips] = useState({});
+            useEffect(() => {
+                if (!workspaceId) return;
+                const unsub = fbDb.collection('workspaces').doc(workspaceId)
+                    .collection('payslips')
+                    .where('year', '==', year).where('month', '==', month)
+                    .onSnapshot(snap => {
+                        const map = {};
+                        snap.forEach(d => { map[d.id] = d.data(); });
+                        setSentPayslips(map);
+                    }, () => {});
+                return () => unsub();
+            }, [workspaceId, year, month]);
+
+            const parsePayDate = (str) => {
+                if (!str) return todayDateVal();
+                const m = str.match(/(\d{4})년\s*(\d{1,2})월\s*(\d{1,2})일/);
+                if (!m) return todayDateVal();
+                return `${m[1]}-${String(m[2]).padStart(2,'0')}-${String(m[3]).padStart(2,'0')}`;
+            };
+
             // 일괄발송
             const [bulkModal, setBulkModal] = useState(false);
             const [bulkIncludeHoliday, setBulkIncludeHoliday] = useState(true);
@@ -6617,10 +6639,10 @@
                 showAlert(`${successCount}명에게 ${month}월 급여명세서를 발송했습니다.`, '일괄발송 완료', 'success');
             };
 
-            const handleOpenSend = (item) => {
-                setSendIncludeHoliday(true);
-                setSendPayDate(todayDateVal());
-                setSendModal({ item });
+            const handleOpenSend = (item, existing = null) => {
+                setSendIncludeHoliday(existing ? existing.includeHoliday !== false : true);
+                setSendPayDate(existing ? parsePayDate(existing.payDate) : todayDateVal());
+                setSendModal({ item, isResend: !!existing });
             };
 
             const handleSendPayslip = async () => {
@@ -6806,14 +6828,19 @@
                                                 <span className="text-sm font-bold text-blue-600">{formatCurrency(item.holidayPay)}</span>
                                             </div>
                                         )}
-                                        {workspaceId && (
-                                            <div className="mt-3 pt-3 border-t border-gray-100">
-                                                <button onClick={() => handleOpenSend(item)} className="w-full flex items-center justify-center gap-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 py-2 rounded-xl text-sm font-bold transition">
-                                                    <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
-                                                    급여명세서 발송
-                                                </button>
-                                            </div>
-                                        )}
+                                        {workspaceId && (() => {
+                                            const docId = `${item.id}_${year}_${month}`;
+                                            const isSent = !!sentPayslips[docId];
+                                            return (
+                                                <div className="mt-3 pt-3 border-t border-gray-100">
+                                                    <button onClick={() => handleOpenSend(item, isSent ? sentPayslips[docId] : null)}
+                                                        className={`w-full flex items-center justify-center gap-2 py-2 rounded-xl text-sm font-bold transition border ${isSent ? 'bg-gray-100 hover:bg-gray-200 text-gray-600 border-gray-300' : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-200'}`}>
+                                                        <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+                                                        {isSent ? '발송완료 (재발송)' : '급여명세서 발송'}
+                                                    </button>
+                                                </div>
+                                            );
+                                        })()}
                                     </div>
                                 ))}
                                 <div className="bg-purple-50 rounded-2xl border border-purple-200 p-5 flex justify-between items-center shadow-sm">
@@ -6829,16 +6856,16 @@
                             <table className="w-full text-left border-collapse min-w-max">
                                 <thead className="bg-gray-50 border-b">
                                     <tr>
-                                        <th className="p-4 font-bold text-gray-600">구분번호</th>
-                                        <th className="p-4 font-bold text-gray-600">이름</th>
-                                        <th className="p-4 font-bold text-gray-600">은행명</th>
-                                        <th className="p-4 font-bold text-gray-600">계좌번호</th>
-                                        <th className="p-4 font-bold text-gray-600 text-right">시급</th>
-                                        <th className="p-4 font-bold text-gray-600 text-right">이번달 근무시간</th>
-                                        <th className="p-4 font-bold text-gray-600 text-right">순수 급여</th>
-                                        <th className="p-4 font-bold text-blue-600 text-right">주휴수당</th>
-                                        <th className="p-4 font-bold text-purple-600 text-right">{month}월 총 지급액</th>
-                                        {workspaceId && <th className="p-4 font-bold text-emerald-600 text-center">급여명세서</th>}
+                                        <th className="px-6 py-4 font-bold text-gray-600 min-w-[90px]">구분번호</th>
+                                        <th className="px-6 py-4 font-bold text-gray-600 min-w-[110px]">이름</th>
+                                        <th className="px-6 py-4 font-bold text-gray-600 min-w-[110px]">은행명</th>
+                                        <th className="px-6 py-4 font-bold text-gray-600 min-w-[180px]">계좌번호</th>
+                                        <th className="px-6 py-4 font-bold text-gray-600 text-right min-w-[110px]">시급</th>
+                                        <th className="px-6 py-4 font-bold text-gray-600 text-right min-w-[150px]">이번달 근무시간</th>
+                                        <th className="px-6 py-4 font-bold text-gray-600 text-right min-w-[150px]">순수 급여</th>
+                                        <th className="px-6 py-4 font-bold text-blue-600 text-right min-w-[150px]">주휴수당</th>
+                                        <th className="px-6 py-4 font-bold text-purple-600 text-right min-w-[150px]">{month}월 총 지급액</th>
+                                        {workspaceId && <th className="px-6 py-4 font-bold text-emerald-600 text-center min-w-[110px]">급여명세서</th>}
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-gray-100">
@@ -6847,19 +6874,19 @@
                                     ) : (
                                         payrollList.map(item => (
                                             <tr key={item.id} className="hover:bg-gray-50 transition">
-                                                <td className="p-4 text-gray-600 font-medium">
+                                                <td className="px-6 py-4 text-gray-600 font-medium">
                                                     {item.displayId === 99999 ? '- (삭제됨)' : `No. ${item.displayId}`}
                                                 </td>
-                                                <td className="p-4 font-bold text-gray-800">{item.name}</td>
-                                                <td className="p-4 text-gray-600">{item.bank}</td>
-                                                <td className="p-4 text-gray-600 font-mono text-sm">{item.account}</td>
-                                                <td className="p-4 text-right text-gray-600 font-medium">{formatCurrency(item.wage)}</td>
-                                                <td className="p-4 text-right text-gray-600 font-bold">{fmtHours(item.totalHours) || '0시간'}</td>
-                                                <td className="p-4 text-right font-bold text-green-600">
+                                                <td className="px-6 py-4 font-bold text-gray-800">{item.name}</td>
+                                                <td className="px-6 py-4 text-gray-600">{item.bank}</td>
+                                                <td className="px-6 py-4 text-gray-600 font-mono text-sm">{item.account}</td>
+                                                <td className="px-6 py-4 text-right text-gray-600 font-medium">{formatCurrency(item.wage)}</td>
+                                                <td className="px-6 py-4 text-right text-gray-600 font-bold">{fmtHours(item.totalHours) || '0시간'}</td>
+                                                <td className="px-6 py-4 text-right font-bold text-green-600">
                                                     <div className="text-[11px] text-gray-400 font-normal">{formatCurrency(item.wage)} × {fmtHours(item.totalHours)}</div>
                                                     <div>{formatCurrency(item.totalPay)}</div>
                                                 </td>
-                                                <td className="p-4 text-right font-bold text-blue-600">
+                                                <td className="px-6 py-4 text-right font-bold text-blue-600">
                                                     {item.holidayPay > 0 ? (
                                                         <>
                                                             {item.holidayWeeks.length === 1 ? (
@@ -6873,12 +6900,21 @@
                                                         </>
                                                     ) : <span className="text-gray-300 font-normal">-</span>}
                                                 </td>
-                                                <td className="p-4 text-right font-black text-purple-700">
+                                                <td className="px-6 py-4 text-right font-black text-purple-700">
                                                     {formatCurrency(item.totalPay + item.holidayPay)}
                                                 </td>
                                                 {workspaceId && (
-                                                    <td className="p-4 text-center">
-                                                        <button onClick={() => handleOpenSend(item)} className="bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 px-3 py-1.5 rounded-lg text-xs font-bold transition whitespace-nowrap">발송</button>
+                                                    <td className="px-6 py-4 text-center">
+                                                        {(() => {
+                                                            const docId = `${item.id}_${year}_${month}`;
+                                                            const isSent = !!sentPayslips[docId];
+                                                            return (
+                                                                <button onClick={() => handleOpenSend(item, isSent ? sentPayslips[docId] : null)}
+                                                                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition whitespace-nowrap border ${isSent ? 'bg-gray-100 hover:bg-gray-200 text-gray-600 border-gray-300' : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-200'}`}>
+                                                                    {isSent ? '발송완료' : '발송'}
+                                                                </button>
+                                                            );
+                                                        })()}
                                                     </td>
                                                 )}
                                             </tr>
@@ -6888,8 +6924,8 @@
                                 {payrollList.length > 0 && (
                                     <tfoot className="bg-gray-50 border-t-2 border-gray-200">
                                         <tr>
-                                            <td colSpan={workspaceId ? 9 : 8} className="p-5 text-right font-bold text-gray-700">총 지급 예정액</td>
-                                            <td className="p-5 text-right font-black text-xl text-purple-700">{formatCurrency(grandTotal)}</td>
+                                            <td colSpan={workspaceId ? 9 : 8} className="px-6 py-5 text-right font-bold text-gray-700">총 지급 예정액</td>
+                                            <td className="px-6 py-5 text-right font-black text-xl text-purple-700">{formatCurrency(grandTotal)}</td>
                                             {workspaceId && <td></td>}
                                         </tr>
                                     </tfoot>
@@ -6903,7 +6939,7 @@
                 {sendModal && (
                     <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-[9999] backdrop-blur-sm">
                         <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 space-y-5">
-                            <h3 className="text-lg font-bold text-gray-800">급여명세서 발송</h3>
+                            <h3 className="text-lg font-bold text-gray-800">{sendModal.isResend ? '급여명세서 재발송' : '급여명세서 발송'}</h3>
                             <div className="bg-gray-50 rounded-xl p-4 space-y-1 text-sm">
                                 <p className="font-bold text-gray-800">{sendModal.item.name}</p>
                                 <p className="text-gray-500">{year}년 {month}월 급여</p>
@@ -6924,7 +6960,7 @@
                             <div className="flex gap-2">
                                 <button onClick={() => setSendModal(null)} className="flex-1 bg-gray-100 text-gray-700 py-3 rounded-xl font-medium hover:bg-gray-200 transition">취소</button>
                                 <button onClick={handleSendPayslip} disabled={sending} className="flex-1 bg-emerald-600 text-white py-3 rounded-xl font-bold hover:bg-emerald-700 transition disabled:opacity-50">
-                                    {sending ? '발송 중...' : '발송'}
+                                    {sending ? '발송 중...' : (sendModal.isResend ? '재발송' : '발송')}
                                 </button>
                             </div>
                         </div>

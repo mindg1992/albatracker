@@ -35,6 +35,7 @@
     <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-check-compat.js"></script>
     <script>
         // 사용자님의 고유 Firebase 설정 (시스템 오버라이드 제거하여 충돌 방지)
         const firebaseConfig = {
@@ -45,8 +46,16 @@
             messagingSenderId: "1042360867233",
             appId: "1:1042360867233:web:5e37d3bf84492ec70b93e0"
         };
-        
+
         firebase.initializeApp(firebaseConfig);
+
+        // App Check: 봇/스크립트 차단 (reCAPTCHA Enterprise)
+        const appCheck = firebase.appCheck();
+        appCheck.activate(
+            new firebase.appCheck.ReCaptchaEnterpriseProvider('6LcBOrAsAAAAAE4NLv52Yiny4etvSkKPHHxSz15J'),
+            true // 토큰 자동 갱신
+        );
+
         const fbAuth = firebase.auth();
         const fbDb = firebase.firestore();
         // WebSocket 시도 없이 처음부터 Long Polling(HTTP)만 사용

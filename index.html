@@ -685,6 +685,30 @@
             return h > 0 ? `${h}시간 ${m}분` : `${m}분`;
         }
 
+        // --- 근무 완료 알림 배너 (3초 후 자동 사라짐) ---
+        function WorkSubmitBannerBar({ banner, onDismiss }) {
+            useEffect(() => {
+                const timer = setTimeout(onDismiss, 3000);
+                return () => clearTimeout(timer);
+            }, [banner]);
+            const [y, m, d] = banner.date.split('-').map(Number);
+            const h = Math.floor(banner.hours);
+            const min = Math.round((banner.hours % 1) * 60);
+            const timeStr = min > 0 ? `${h}시간 ${min}분` : `${h}시간`;
+            return (
+                <div className="bg-green-50 border-b border-green-200 px-4 py-3 flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-2 min-w-0">
+                        <span className="text-green-500 text-base flex-shrink-0">✅</span>
+                        <div className="min-w-0">
+                            <p className="text-green-800 font-bold text-sm">근무 완료 알림</p>
+                            <p className="text-green-700 text-xs truncate">{banner.empName}님이 {y}년 {m}월 {d}일 {timeStr} 근무를 완료했습니다.</p>
+                        </div>
+                    </div>
+                    <button onClick={onDismiss} className="flex-shrink-0 text-green-600 hover:text-green-800 p-1"><X className="w-4 h-4" /></button>
+                </div>
+            );
+        }
+
         // --- 메인 애플리케이션 컴포넌트 ---
         function AlbaTracker() {
             const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -2333,27 +2357,7 @@
                         </div>
                     )}
 
-                    {workSubmitBanner && (() => {
-                        const [y, m, d] = workSubmitBanner.date.split('-').map(Number);
-                        const h = Math.floor(workSubmitBanner.hours);
-                        const min = Math.round((workSubmitBanner.hours % 1) * 60);
-                        const timeStr = min > 0 ? `${h}시간 ${min}분` : `${h}시간`;
-                        return (
-                            <div className="bg-green-50 border-b border-green-200 px-4 py-3 flex items-center justify-between gap-3">
-                                <div className="flex items-center gap-2 min-w-0">
-                                    <span className="text-green-500 text-base flex-shrink-0">✅</span>
-                                    <div className="min-w-0">
-                                        <p className="text-green-800 font-bold text-sm">근무 완료 알림</p>
-                                        <p className="text-green-700 text-xs truncate">{workSubmitBanner.empName}님이 {y}년 {m}월 {d}일 {timeStr} 근무를 완료했습니다.</p>
-                                    </div>
-                                </div>
-                                <button
-                                    onClick={() => setWorkSubmitBanner(null)}
-                                    className="flex-shrink-0 text-green-600 hover:text-green-800 p-1"
-                                ><X className="w-4 h-4" /></button>
-                            </div>
-                        );
-                    })()}
+                    {workSubmitBanner && <WorkSubmitBannerBar banner={workSubmitBanner} onDismiss={() => setWorkSubmitBanner(null)} />}
 
                     <main className="max-w-7xl mx-auto px-3 md:px-4 py-4 md:py-6">
                         {/* 삭제 예약 중: 설정탭 외 조작 불가 (inert로 클릭/포커스 차단, 스크롤은 허용) */}

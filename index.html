@@ -8389,7 +8389,7 @@
                                     <div className="space-y-2">
                                         {[
                                             { value: 'hiredate', label: '매월 입사일에 자동발송' },
-                                            { value: 'manual', label: '발송일 수동설정' },
+                                            { value: 'manual', label: '자동발송일 수동설정' },
                                         ].map(opt => (
                                             <label key={opt.value} className={`flex items-center gap-3 p-3 border-2 rounded-xl cursor-pointer transition ${perEmpMode === opt.value ? 'border-blue-400 bg-blue-50' : 'border-gray-200 hover:bg-gray-50'}`}>
                                                 <input type="radio" name="perEmpMode" value={opt.value} checked={perEmpMode === opt.value} onChange={() => setPerEmpMode(opt.value)} className="accent-blue-600" />

@@ -8790,25 +8790,38 @@
         root.render(<AlbaTracker />);
     </script>
 
-    <!-- 서비스 워커 등록 (PWA 설치 지원) + 자동 업데이트 -->
+    <!-- 서비스 워커 등록 (PWA 설치 지원) + 자동 업데이트 (A' 절충안) -->
     <script>
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('./sw.js').then(reg => {
-                    // 새 서비스 워커가 대기 중이면 즉시 활성화 후 새로고침
-                    reg.addEventListener('updatefound', () => {
-                        const newWorker = reg.installing;
-                        newWorker.addEventListener('statechange', () => {
-                            if (newWorker.state === 'activated' && navigator.serviceWorker.controller) {
-                                window.location.reload();
-                            }
-                        });
-                    });
-                });
-                // 다른 탭에서 새 SW가 활성화되면 이 탭도 새로고침
-                navigator.serviceWorker.addEventListener('controllerchange', () => {
+                // 페이지 로드 시점의 controller 존재 여부 — 첫 방문 guard 용
+                const hadController = !!navigator.serviceWorker.controller;
+                let reloaded = false;
+
+                const tryReload = () => {
+                    if (reloaded) return;
+                    // 첫 방문(이전 controller 없음) → 리로드 금지 (깜빡임 방지)
+                    if (!hadController) return;
+                    // 사용자가 화면 보고 있을 때는 리로드 금지 (데이터 손실 방지)
+                    if (!document.hidden) return;
+                    reloaded = true;
                     window.location.reload();
-                });
+                };
+
+                navigator.serviceWorker.register('./sw.js', { updateViaCache: 'none' }).then(reg => {
+                    // 포커스/가시성 복귀 시 새 SW 체크
+                    const checkUpdate = () => { reg.update().catch(() => {}); };
+                    window.addEventListener('focus', checkUpdate);
+                    document.addEventListener('visibilitychange', () => {
+                        if (document.hidden) tryReload(); // 숨김 전환 시 대기 중인 리로드 처리
+                        else checkUpdate();
+                    });
+                    // 주기적 체크 (5분마다)
+                    setInterval(checkUpdate, 5 * 60 * 1000);
+                }).catch(() => {});
+
+                // 새 SW가 control 권한을 잡으면 리로드 시도 (hidden 상태에서만 실행됨)
+                navigator.serviceWorker.addEventListener('controllerchange', tryReload);
             });
         }
     </script>

@@ -1,37 +1,32 @@
-const CACHE_NAME = 'albatracker-v2';
-const SHELL = ['/', '/index.html'];
+const CACHE_NAME = 'albatracker-v1';
 
 self.addEventListener('install', event => {
-  event.waitUntil(
-    caches.open(CACHE_NAME).then(cache => cache.addAll(SHELL))
-  );
   self.skipWaiting();
 });
 
 self.addEventListener('activate', event => {
+  // 이전 캐시 모두 삭제 후 즉시 제어권 획득
   event.waitUntil(
-    caches.keys().then(keys =>
-      Promise.all(keys.filter(k => k !== CACHE_NAME).map(k => caches.delete(k)))
-    )
+    caches.keys()
+      .then(keys => Promise.all(keys.map(k => caches.delete(k))))
+      .then(() => self.clients.claim())
   );
-  self.clients.claim();
 });
 
 self.addEventListener('fetch', event => {
-  // 같은 origin(GitHub Pages)의 요청만 처리, 외부 CDN·Firebase는 그냥 통과
+  // 외부 CDN·Firebase API는 그냥 통과
   if (!event.request.url.startsWith(self.location.origin)) return;
 
+  // 항상 네트워크 우선, 오프라인일 때만 캐시 사용
   event.respondWith(
-    caches.match(event.request).then(cached => {
-      const networkFetch = fetch(event.request).then(response => {
+    fetch(event.request)
+      .then(response => {
         if (response.ok) {
           const cloned = response.clone();
           caches.open(CACHE_NAME).then(cache => cache.put(event.request, cloned));
         }
         return response;
-      });
-      // 캐시 있으면 즉시 반환하되, 백그라운드에서 최신 버전 갱신
-      return cached || networkFetch;
-    })
+      })
+      .catch(() => caches.match(event.request))
   );
 });

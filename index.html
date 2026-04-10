@@ -3609,10 +3609,10 @@
 
             // 급여명세서 실시간 로드
             useEffect(() => {
-                if (!firebaseUser || !empAccount?.bossUid || !empAccount?.employeeId) return;
+                if (!firebaseUser || !empAccount?.bossUid) return;
                 const unsub = fbDb.collection('workspaces').doc(empAccount.bossUid)
                     .collection('payslips')
-                    .where('empId', '==', String(empAccount.employeeId))
+                    .where('empUid', '==', firebaseUser.uid)
                     .limit(24)
                     .onSnapshot(snap => {
                         const list = [];
@@ -3623,7 +3623,7 @@
                         if (unread) setPayslipBanner({ year: unread.year, month: unread.month, docId: unread.docId, payslip: unread });
                     }, () => {});
                 return () => unsub();
-            }, [firebaseUser, empAccount?.bossUid, empAccount?.employeeId]);
+            }, [firebaseUser, empAccount?.bossUid]);
 
             const handlePayslipBannerClick = async () => {
                 if (!payslipBanner) return;
@@ -8790,11 +8790,25 @@
         root.render(<AlbaTracker />);
     </script>
 
-    <!-- 서비스 워커 등록 (PWA 설치 지원) -->
+    <!-- 서비스 워커 등록 (PWA 설치 지원) + 자동 업데이트 -->
     <script>
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('./sw.js');
+                navigator.serviceWorker.register('./sw.js').then(reg => {
+                    // 새 서비스 워커가 대기 중이면 즉시 활성화 후 새로고침
+                    reg.addEventListener('updatefound', () => {
+                        const newWorker = reg.installing;
+                        newWorker.addEventListener('statechange', () => {
+                            if (newWorker.state === 'activated' && navigator.serviceWorker.controller) {
+                                window.location.reload();
+                            }
+                        });
+                    });
+                });
+                // 다른 탭에서 새 SW가 활성화되면 이 탭도 새로고침
+                navigator.serviceWorker.addEventListener('controllerchange', () => {
+                    window.location.reload();
+                });
             });
         }
     </script>

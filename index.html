@@ -5812,8 +5812,20 @@
 
             const handleDeleteDay = (dayToDel) => {
                 showConfirm(`${year}년 ${month}월 ${dayToDel}일의 정보를 정말 삭제하시겠습니까?`, () => {
-                    // 삭제 전 해당 날짜의 entries에서 empUid 수집 (submissions 삭제용)
+                    // 삭제 전 해당 날짜의 entries에서 empUid 수집 (submissions 삭제 + 알림용)
                     const dayEntries = monthlyData[monthKey]?.days?.[dayToDel]?.entries || {};
+                    const dateStr = `${year}-${String(month).padStart(2,'0')}-${String(dayToDel).padStart(2,'0')}`;
+                    // 직원들에게 삭제 알림 발송
+                    Object.values(dayEntries).forEach(entry => {
+                        const empUid = entry.empUid;
+                        if (empUid && entry.hours > 0) {
+                            sendChangeNotification(empUid, {
+                                type: 'hours_deleted',
+                                date: dateStr,
+                                oldHours: entry.hours
+                            }).catch(() => {});
+                        }
+                    });
                     setMonthlyData(prev => {
                         const newData = { ...prev };
                         if (newData[monthKey] && newData[monthKey].days) {
@@ -6032,6 +6044,20 @@
                         <button
                             onClick={() => {
                                 showConfirm(`${year}년 ${month}월 정보를 정말 초기화하시겠습니까?`, () => {
+                                    // 해당 월의 모든 직원에게 삭제 알림 발송
+                                    const monthDays = monthlyData[monthKey]?.days || {};
+                                    Object.entries(monthDays).forEach(([d, dayData]) => {
+                                        Object.values(dayData.entries || {}).forEach(entry => {
+                                            if (entry.empUid && entry.hours > 0) {
+                                                const dateStr = `${year}-${String(month).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+                                                sendChangeNotification(entry.empUid, {
+                                                    type: 'hours_deleted',
+                                                    date: dateStr,
+                                                    oldHours: entry.hours
+                                                }).catch(() => {});
+                                            }
+                                        });
+                                    });
                                     const newData = { ...monthlyData };
                                     delete newData[monthKey];
                                     // Firestore 동기화 전 새로고침 시 데이터 복원 방지

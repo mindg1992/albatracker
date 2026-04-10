@@ -50,7 +50,7 @@
         const fbDb = firebase.firestore();
         // WebSocket 시도 없이 처음부터 Long Polling(HTTP)만 사용
         // AutoDetect는 WebSocket이 hang하면 전환을 못 함 → Force로 변경
-        fbDb.settings({ experimentalForceLongPolling: true, merge: true });
+        fbDb.settings({ experimentalForceLongPolling: true, experimentalAutoDetectLongPolling: false, merge: true });
     </script>
 
     <style>

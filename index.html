@@ -6369,20 +6369,20 @@
 
                         if (hours > 0) {
                             const empUid = existingEntry?.empUid || emp.empUid;
-                            if (empUid) {
-                                if (existingEntry?.submittedByEmp && existingEntry.hours !== hours) {
-                                    // 직원이 제출한 시간을 관리자가 변경 → 변경 알림
+                            if (empUid && (!existingEntry || existingEntry.hours !== hours)) {
+                                if (!existingEntry) {
+                                    // 관리자가 빈 칸에 새로 입력
+                                    sendChangeNotification(empUid, {
+                                        type: 'hours_entered',
+                                        date: dateStr,
+                                        newHours: hours
+                                    }).catch(() => {});
+                                } else {
+                                    // 기존 시간을 변경 (직원 제출이든 관리자 입력이든)
                                     sendChangeNotification(empUid, {
                                         type: 'hours_modified',
                                         date: dateStr,
                                         oldHours: existingEntry.hours,
-                                        newHours: hours
-                                    }).catch(() => {});
-                                } else if (!existingEntry && hours > 0) {
-                                    // 관리자가 빈 칸에 새로 입력 → 입력 알림
-                                    sendChangeNotification(empUid, {
-                                        type: 'hours_entered',
-                                        date: dateStr,
                                         newHours: hours
                                     }).catch(() => {});
                                 }

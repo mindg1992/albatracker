@@ -3929,7 +3929,7 @@
                                     <div key={n.id} className={`bg-white rounded-xl border p-4 ${n.read ? 'border-gray-200' : n.type === 'payslip' ? 'border-emerald-300 bg-emerald-50' : 'border-yellow-300 bg-yellow-50'}`}>
                                         <div className="flex items-start justify-between mb-1">
                                             <p className="text-sm font-bold text-gray-800">
-                                                {n.type === 'payslip' ? '급여명세서 도착' : n.type === 'status_change' ? '근무 상태 변경' : n.type === 'wage_change' ? '시급 변경' : n.type === 'hours_entered' ? `${n.date} 근무시간 등록` : `${n.date} 근무시간 변경`}
+                                                {n.type === 'payslip' ? '급여명세서 도착' : n.type === 'status_change' ? '근무 상태 변경' : n.type === 'wage_change' ? '시급 변경' : n.type === 'hours_entered' ? `${n.date} 근무시간 등록` : n.type === 'hours_deleted' ? `${n.date} 근무시간 삭제` : `${n.date} 근무시간 변경`}
                                             </p>
                                             {!n.read && <span className={`text-xs px-2 py-0.5 rounded-full font-bold ${n.type === 'payslip' ? 'bg-emerald-400 text-emerald-900' : 'bg-yellow-400 text-yellow-900'}`}>새 알림</span>}
                                         </div>
@@ -3948,6 +3948,8 @@
                                         ) : (
                                         n.type === 'hours_entered' ? (
                                             <p className="text-sm text-gray-600">관리자가 <span className="font-bold text-blue-600">{fmtHours(n.newHours)}</span>을 등록했습니다</p>
+                                        ) : n.type === 'hours_deleted' ? (
+                                            <p className="text-sm text-gray-600"><span className="font-bold text-red-600">{fmtHours(n.oldHours)}</span>이 삭제되었습니다</p>
                                         ) : (
                                             <>
                                                 <p className="text-sm text-gray-600">{fmtHours(n.oldHours)} → <span className="font-bold text-blue-600">{fmtHours(n.newHours)}</span> 로 변경되었습니다</p>
@@ -6366,6 +6368,17 @@
                                 bossModified: existingEntry?.submittedByEmp ? (existingEntry.hours !== hours) : false
                             };
                         } else {
+                            // 기존 시간이 있었는데 삭제된 경우 → 직원에게 알림
+                            if (existingEntry?.hours > 0) {
+                                const empUid = existingEntry?.empUid || emp.empUid;
+                                if (empUid) {
+                                    sendChangeNotification(empUid, {
+                                        type: 'hours_deleted',
+                                        date: dateStr,
+                                        oldHours: existingEntry.hours
+                                    }).catch(() => {});
+                                }
+                            }
                             delete newData[monthKey].days[day].entries[emp.id];
                         }
                     });
@@ -6385,9 +6398,8 @@
                             }, { merge: true }).catch(() => {});
                         } else {
                             // 시간 0이면 submissions에서도 삭제
-                            subsRef.where('date', '==', dateStr).where('empUid', '==', empUid)
-                                .get().then(snap => { snap.forEach(doc => doc.ref.delete().catch(() => {})); })
-                                .catch(() => {});
+                            const docId = `${empUid}_${dateStr}`;
+                            subsRef.doc(docId).delete().catch(() => {});
                         }
                     });
                 }

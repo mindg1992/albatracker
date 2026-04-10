@@ -6586,8 +6586,10 @@
                         ? `매월 ${employees.find(e => e.id.toString() === item.id).payDay}일`
                         : `${year}년 ${month}월`);
                 const docId = `${item.id}_${year}_${month}`;
+                const emp = employees.find(e => e.id.toString() === item.id);
                 const payslipData = {
                     empId: String(item.id), empName: item.name, year, month,
+                    empUid: emp?.empUid || '',
                     totalPay: item.totalPay, holidayPay: item.holidayPay,
                     includeHoliday: sendIncludeHoliday, finalAmount,
                     wage: item.wage, totalHours: item.totalHours,
@@ -6602,7 +6604,6 @@
                     await fbDb.collection('workspaces').doc(workspaceId)
                         .collection('payslips').doc(docId).set(payslipData);
                     // Google 직원이면 알림도 발송
-                    const emp = employees.find(e => e.id.toString() === item.id);
                     if (emp?.empUid) {
                         await fbDb.collection('employeeAccounts').doc(emp.empUid)
                             .collection('notifications').add({

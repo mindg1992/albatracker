@@ -5808,6 +5808,8 @@
 
             const handleDeleteDay = (dayToDel) => {
                 showConfirm(`${year}년 ${month}월 ${dayToDel}일의 정보를 정말 삭제하시겠습니까?`, () => {
+                    // 삭제 전 해당 날짜의 entries에서 empUid 수집 (submissions 삭제용)
+                    const dayEntries = monthlyData[monthKey]?.days?.[dayToDel]?.entries || {};
                     setMonthlyData(prev => {
                         const newData = { ...prev };
                         if (newData[monthKey] && newData[monthKey].days) {
@@ -5817,6 +5819,28 @@
                         }
                         return newData;
                     });
+                    // submissions 컬렉션에서도 해당 날짜 데이터 삭제
+                    if (workspaceId) {
+                        const dateStr = `${year}-${String(month).padStart(2,'0')}-${String(dayToDel).padStart(2,'0')}`;
+                        Object.values(dayEntries).forEach(entry => {
+                            const empUid = entry.empUid;
+                            if (empUid) {
+                                fbDb.collection('workspaces').doc(workspaceId)
+                                    .collection('submissions').doc(`${empUid}_${dateStr}`)
+                                    .delete().catch(() => {});
+                            }
+                        });
+                        // empUid 없는 경우도 커버: 날짜 기준 쿼리 삭제
+                        fbDb.collection('workspaces').doc(workspaceId)
+                            .collection('submissions')
+                            .where('date', '==', dateStr)
+                            .get().then(snap => {
+                                if (snap.empty) return;
+                                const batch = fbDb.batch();
+                                snap.forEach(doc => batch.delete(doc.ref));
+                                return batch.commit();
+                            }).catch(() => {});
+                    }
                     setEditDayModal(null); // 삭제 후 모달 닫기
                 }, "데이터 삭제");
             };

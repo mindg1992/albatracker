@@ -1,5 +1,5 @@
 const CACHE_NAME = 'albatracker-v2';
-const SHELL = ['/albatracker/', '/albatracker/index.html'];
+const SHELL = ['/', '/index.html'];
 
 self.addEventListener('install', event => {
   event.waitUntil(

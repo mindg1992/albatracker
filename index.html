@@ -1385,6 +1385,8 @@
                             if (change.type !== 'added' && change.type !== 'modified') return;
                             const sub = change.doc.data();
                             if (!sub.date || sub.employeeId == null || !sub.hours) return;
+                            // 관리자가 직접 입력한 submissions는 무시 (이미 monthlyData에 반영됨)
+                            if (sub.bossEntered) return;
                             const parts = sub.date.split('-').map(Number);
                             const mk = `${parts[0]}-${String(parts[1]).padStart(2,'0')}`;
                             const day = parts[2];
@@ -3927,7 +3929,7 @@
                                     <div key={n.id} className={`bg-white rounded-xl border p-4 ${n.read ? 'border-gray-200' : n.type === 'payslip' ? 'border-emerald-300 bg-emerald-50' : 'border-yellow-300 bg-yellow-50'}`}>
                                         <div className="flex items-start justify-between mb-1">
                                             <p className="text-sm font-bold text-gray-800">
-                                                {n.type === 'payslip' ? '급여명세서 도착' : n.type === 'status_change' ? '근무 상태 변경' : n.type === 'wage_change' ? '시급 변경' : `${n.date} 근무시간 변경`}
+                                                {n.type === 'payslip' ? '급여명세서 도착' : n.type === 'status_change' ? '근무 상태 변경' : n.type === 'wage_change' ? '시급 변경' : n.type === 'hours_entered' ? `${n.date} 근무시간 등록` : `${n.date} 근무시간 변경`}
                                             </p>
                                             {!n.read && <span className={`text-xs px-2 py-0.5 rounded-full font-bold ${n.type === 'payslip' ? 'bg-emerald-400 text-emerald-900' : 'bg-yellow-400 text-yellow-900'}`}>새 알림</span>}
                                         </div>
@@ -3944,10 +3946,14 @@
                                                 시급이 <span className="font-medium">{Number(n.oldWage).toLocaleString()}원</span> → <span className="font-bold text-blue-600">{Number(n.newWage).toLocaleString()}원</span>으로 변경되었습니다.
                                             </p>
                                         ) : (
+                                        n.type === 'hours_entered' ? (
+                                            <p className="text-sm text-gray-600">관리자가 <span className="font-bold text-blue-600">{fmtHours(n.newHours)}</span>을 등록했습니다</p>
+                                        ) : (
                                             <>
                                                 <p className="text-sm text-gray-600">{fmtHours(n.oldHours)} → <span className="font-bold text-blue-600">{fmtHours(n.newHours)}</span> 로 변경되었습니다</p>
                                                 {n.reason && <p className="text-xs text-gray-400 mt-1">사유: {n.reason}</p>}
                                             </>
+                                        )
                                         )}
                                         <p className="text-xs text-gray-400 mt-1">{n.createdAt?.toDate ? n.createdAt.toDate().toLocaleDateString('ko-KR') : ''}</p>
                                     </div>
@@ -6332,14 +6338,24 @@
                         const existingEntry = prev[monthKey]?.days[day]?.entries[emp.id];
 
                         if (hours > 0) {
-                            // 직원이 제출했고 관리자가 시간을 변경한 경우 → 알림 전송
-                            if (existingEntry?.submittedByEmp && existingEntry?.empUid &&
-                                existingEntry.hours !== hours) {
-                                sendChangeNotification(existingEntry.empUid, {
-                                    date: dateStr,
-                                    oldHours: existingEntry.hours,
-                                    newHours: hours
-                                }).catch(() => {});
+                            const empUid = existingEntry?.empUid || emp.empUid;
+                            if (empUid) {
+                                if (existingEntry?.submittedByEmp && existingEntry.hours !== hours) {
+                                    // 직원이 제출한 시간을 관리자가 변경 → 변경 알림
+                                    sendChangeNotification(empUid, {
+                                        type: 'hours_modified',
+                                        date: dateStr,
+                                        oldHours: existingEntry.hours,
+                                        newHours: hours
+                                    }).catch(() => {});
+                                } else if (!existingEntry && hours > 0) {
+                                    // 관리자가 빈 칸에 새로 입력 → 입력 알림
+                                    sendChangeNotification(empUid, {
+                                        type: 'hours_entered',
+                                        date: dateStr,
+                                        newHours: hours
+                                    }).catch(() => {});
+                                }
                             }
                             newData[monthKey].days[day].entries[emp.id] = {
                                 hours, pay: Math.round(hours * emp.wage), name: emp.name, wage: emp.wage,

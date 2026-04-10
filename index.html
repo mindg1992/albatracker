@@ -6564,6 +6564,15 @@
             const [bulkModal, setBulkModal] = useState(false);
             const [bulkIncludeHoliday, setBulkIncludeHoliday] = useState(true);
             const [bulkSending, setBulkSending] = useState(false);
+            const [bulkPayDate, setBulkPayDate] = useState('');
+            const [sendPayDate, setSendPayDate] = useState('');
+
+            const todayDateVal = () => new Date().toISOString().split('T')[0];
+            const fmtPayDate = (val) => {
+                if (!val) return '';
+                const [y, m, d] = val.split('-');
+                return `${y}년 ${m}월 ${d}일`;
+            };
 
             const handleBulkSend = async () => {
                 if (!workspaceId || payrollList.length === 0) return;
@@ -6583,7 +6592,7 @@
                             includeHoliday: bulkIncludeHoliday, finalAmount,
                             wage: item.wage, totalHours: item.totalHours,
                             calcMethod: calcLines.join('\n'),
-                            payDate: `${year}년 ${month}월`,
+                            payDate: fmtPayDate(bulkPayDate) || fmtPayDate(todayDateVal()),
                             shopName: workspaceInfo?.shopName || '',
                             bossName: workspaceInfo?.bossName || '',
                             bossSignature: workspaceInfo?.bossSignature || '',
@@ -6610,6 +6619,7 @@
 
             const handleOpenSend = (item) => {
                 setSendIncludeHoliday(true);
+                setSendPayDate(todayDateVal());
                 setSendModal({ item });
             };
 
@@ -6621,7 +6631,7 @@
                 const calcLines = [`시급: ${Number(item.wage).toLocaleString()}원`, `근무시간: ${fmtHours(item.totalHours)}`, `${sendIncludeHoliday ? '순수급여' : '총 급여'}: ${Number(item.totalPay).toLocaleString()}원`];
                 if (sendIncludeHoliday && item.holidayPay > 0) calcLines.push(`주휴수당: ${Number(item.holidayPay).toLocaleString()}원`);
                 const calcMethod = calcLines.join('\n');
-                const payDate = `${year}년 ${month}월`;
+                const payDate = fmtPayDate(sendPayDate) || fmtPayDate(todayDateVal());
                 const docId = `${item.id}_${year}_${month}`;
                 const emp = employees.find(e => e.id.toString() === item.id);
                 const payslipData = {
@@ -6743,7 +6753,7 @@
                         {payrollList.length > 0 && (
                             <div className="flex flex-col md:flex-row gap-2 w-full md:w-auto">
                                 {workspaceId && (
-                                    <button onClick={() => { setBulkIncludeHoliday(true); setBulkModal(true); }} className="flex items-center gap-2 text-sm font-bold bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-xl transition shadow-sm whitespace-nowrap w-full md:w-auto justify-center">
+                                    <button onClick={() => { setBulkIncludeHoliday(true); setBulkPayDate(todayDateVal()); setBulkModal(true); }} className="flex items-center gap-2 text-sm font-bold bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-xl transition shadow-sm whitespace-nowrap w-full md:w-auto justify-center">
                                         <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>
                                         급여명세서 일괄발송
                                     </button>
@@ -6899,6 +6909,11 @@
                                 <p className="text-gray-500">{year}년 {month}월 급여</p>
                                 <p className="text-purple-700 font-bold text-base">{formatCurrency(sendIncludeHoliday ? sendModal.item.totalPay + sendModal.item.holidayPay : sendModal.item.totalPay)}</p>
                             </div>
+                            <div>
+                                <p className="text-sm font-bold text-gray-700 mb-1">임금지급일</p>
+                                <input type="date" value={sendPayDate} onChange={e => setSendPayDate(e.target.value)}
+                                    className="w-full border-2 border-gray-300 rounded-xl py-2.5 px-4 focus:border-emerald-500 outline-none text-sm" />
+                            </div>
                             <label className="flex items-center gap-3 cursor-pointer bg-blue-50 rounded-xl p-4 border border-blue-100">
                                 <input type="checkbox" checked={sendIncludeHoliday} onChange={e => setSendIncludeHoliday(e.target.checked)} className="w-4 h-4 accent-blue-600" />
                                 <div>
@@ -6924,6 +6939,11 @@
                                 <p className="text-gray-500">{year}년 {month}월</p>
                                 <p className="font-bold text-gray-800">대상: {payrollList.length}명</p>
                                 <p className="text-xs text-gray-400">급여가 발생한 전원에게 발송됩니다.</p>
+                            </div>
+                            <div>
+                                <p className="text-sm font-bold text-gray-700 mb-1">임금지급일</p>
+                                <input type="date" value={bulkPayDate} onChange={e => setBulkPayDate(e.target.value)}
+                                    className="w-full border-2 border-gray-300 rounded-xl py-2.5 px-4 focus:border-blue-500 outline-none text-sm" />
                             </div>
                             <label className="flex items-center gap-3 cursor-pointer bg-blue-50 rounded-xl p-4 border border-blue-100">
                                 <input type="checkbox" checked={bulkIncludeHoliday} onChange={e => setBulkIncludeHoliday(e.target.checked)} className="w-4 h-4 accent-blue-600" />

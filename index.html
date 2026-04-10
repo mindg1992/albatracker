@@ -2223,7 +2223,7 @@
                                 {[
                                     { id: 'employees', label: '현재 근무자 정보', icon: Users },
                                     { id: 'calendar', label: '월별 근무현황', icon: CalendarIcon },
-                                    { id: 'payroll', label: '인건비 지급', icon: Wallet },
+                                    { id: 'payroll', label: '급여명세서', icon: Wallet },
                                     { id: 'chart', label: '인건비 차트', icon: BarChart3 },
                                     { id: 'predict', label: '주휴수당 예측', icon: Search },
                                     { id: 'invite', label: '직원 초대', icon: Users },
@@ -2455,7 +2455,7 @@
                             {[
                                 { id: 'employees', label: '근무자', icon: Users },
                                 { id: 'calendar', label: '근무현황', icon: CalendarIcon },
-                                { id: 'payroll', label: '인건비', icon: Wallet },
+                                { id: 'payroll', label: '급여명세서', icon: Wallet },
                                 { id: 'chart', label: '차트', icon: BarChart3 },
                                 { id: 'predict', label: '주휴예측', icon: Search },
                                 { id: 'invite', label: '직원초대', icon: Users },
@@ -6574,6 +6574,10 @@
             const handleOpenSend = (item) => {
                 const defaultInclude = workspaceInfo?.payslipSettings?.includeHoliday !== false;
                 setSendIncludeHoliday(defaultInclude);
+                const autoMode = workspaceInfo?.payslipSettings?.mode;
+                if (autoMode && autoMode !== 'manual') {
+                    if (!window.confirm('자동발송 설정이 되어있습니다.\n그래도 발송하시겠습니까?')) return;
+                }
                 setSendModal({ item });
             };
 

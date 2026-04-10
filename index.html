@@ -6577,7 +6577,7 @@
                 setSending(true);
                 const { item } = sendModal;
                 const finalAmount = sendIncludeHoliday ? (item.totalPay + item.holidayPay) : item.totalPay;
-                const calcLines = [`시급: ${Number(item.wage).toLocaleString()}원`, `근무시간: ${fmtHours(item.totalHours)}`, `순수급여: ${Number(item.totalPay).toLocaleString()}원`];
+                const calcLines = [`시급: ${Number(item.wage).toLocaleString()}원`, `근무시간: ${fmtHours(item.totalHours)}`, `${sendIncludeHoliday ? '순수급여' : '총 급여'}: ${Number(item.totalPay).toLocaleString()}원`];
                 if (sendIncludeHoliday && item.holidayPay > 0) calcLines.push(`주휴수당: ${Number(item.holidayPay).toLocaleString()}원`);
                 const calcMethod = calcLines.join('\n');
                 const payslipSettings = workspaceInfo?.payslipSettings || {};

@@ -6305,14 +6305,16 @@
             const handleSave = () => {
                 const dateStr = `${year}-${String(month).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
 
-                // 직원 제출 기록이 있는 항목의 Firestore submissions 동기화용 목록
+                // Google 연동 직원의 submissions 동기화용 목록
                 const submissionUpdates = [];
                 combinedEmployees.forEach(emp => {
                     const existingEntry = currentDayData.entries[emp.id];
-                    if (existingEntry?.submittedByEmp && existingEntry?.empUid) {
+                    const empUid = existingEntry?.empUid || emp.empUid;
+                    if (empUid) {
                         const h = Number(hoursData[emp.id]) || 0;
                         const m = Number(minsData[emp.id]) || 0;
-                        submissionUpdates.push({ empUid: existingEntry.empUid, hours: h + m / 60 });
+                        const hours = h + m / 60;
+                        submissionUpdates.push({ empUid, employeeId: emp.id, empName: emp.name, hours, isNew: !existingEntry?.submittedByEmp });
                     }
                 });
 
@@ -6343,7 +6345,7 @@
                                 hours, pay: Math.round(hours * emp.wage), name: emp.name, wage: emp.wage,
                                 note: deletedNotes[emp.id] ? '' : (existingEntry?.note || ''),
                                 submittedByEmp: existingEntry?.submittedByEmp || false,
-                                empUid: existingEntry?.empUid || null,
+                                empUid: existingEntry?.empUid || emp.empUid || null,
                                 submittedHours: existingEntry?.submittedHours || null,
                                 bossModified: existingEntry?.submittedByEmp ? (existingEntry.hours !== hours) : false
                             };
@@ -6354,18 +6356,23 @@
                     return newData;
                 });
 
-                // 근무자 달력에도 반영: submissions 컬렉션 hours 동기화
+                // 근무자 달력에도 반영: submissions 컬렉션 동기화 (기존 업데이트 + 신규 생성)
                 if (workspaceId && submissionUpdates.length > 0) {
-                    submissionUpdates.forEach(({ empUid, hours }) => {
-                        fbDb.collection('workspaces').doc(workspaceId)
-                            .collection('submissions')
-                            .where('date', '==', dateStr)
-                            .where('empUid', '==', empUid)
-                            .get()
-                            .then(snap => {
-                                snap.forEach(doc => doc.ref.update({ hours }).catch(() => {}));
-                            })
-                            .catch(() => {});
+                    submissionUpdates.forEach(({ empUid, employeeId, empName, hours, isNew }) => {
+                        const subsRef = fbDb.collection('workspaces').doc(workspaceId).collection('submissions');
+                        if (hours > 0) {
+                            const docId = `${empUid}_${dateStr}`;
+                            subsRef.doc(docId).set({
+                                empUid, employeeId, empName, date: dateStr, hours,
+                                locked: true, bossEntered: isNew,
+                                submittedAt: firebase.firestore.FieldValue.serverTimestamp()
+                            }, { merge: true }).catch(() => {});
+                        } else {
+                            // 시간 0이면 submissions에서도 삭제
+                            subsRef.where('date', '==', dateStr).where('empUid', '==', empUid)
+                                .get().then(snap => { snap.forEach(doc => doc.ref.delete().catch(() => {})); })
+                                .catch(() => {});
+                        }
                     });
                 }
 

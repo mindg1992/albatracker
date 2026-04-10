@@ -6337,8 +6337,7 @@
                                     date: dateStr,
                                     oldHours: existingEntry.hours,
                                     newHours: hours
-                                }).then(() => console.log('[알림] 전송 성공:', existingEntry.empUid))
-                                  .catch((e) => console.error('[알림] 전송 실패:', e.message, 'empUid:', existingEntry.empUid));
+                                }).catch(() => {});
                             }
                             newData[monthKey].days[day].entries[emp.id] = {
                                 hours, pay: Math.round(hours * emp.wage), name: emp.name, wage: emp.wage,

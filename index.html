@@ -5,15 +5,22 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>알바트래커 v2.0</title>
 
-    <!-- PWA -->
-    <link rel="manifest" href="manifest.json">
+    <!-- PWA 설치 차단: manifest 링크와 standalone 메타태그 제거 (TWA 빌드는 manifest.json 파일 직접 참조) -->
     <meta name="theme-color" content="#22c55e">
     <link rel="icon" type="image/svg+xml" href="icon.svg">
     <link rel="apple-touch-icon" href="icon.svg">
-    <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="default">
-    <meta name="apple-mobile-web-app-title" content="알바트래커">
+
+    <!-- 기존 설치 PWA 차단 감지 (TWA는 허용) -->
+    <script>
+        (function() {
+            var isStandalone = window.matchMedia('(display-mode: standalone)').matches
+                || window.matchMedia('(display-mode: fullscreen)').matches
+                || window.matchMedia('(display-mode: minimal-ui)').matches
+                || window.navigator.standalone === true;
+            var isTWA = document.referrer.indexOf('android-app://') === 0;
+            window.__PWA_BLOCKED__ = isStandalone && !isTWA;
+        })();
+    </script>
 
     <!-- React & ReactDOM -->
     <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
@@ -32,15 +39,17 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
 
     <!-- Firebase -->
-    <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-check-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-check-compat.js"></script>
     <script>
         // 사용자님의 고유 Firebase 설정 (시스템 오버라이드 제거하여 충돌 방지)
         const firebaseConfig = {
             apiKey: "AIzaSyCnBN1m-QkG7hTwFAji48yPKDp78OlcXvQ",
-            authDomain: "albatracker-9e90e.firebaseapp.com",
+            // authDomain을 호스팅 도메인과 동일하게 — same-origin 리다이렉트로
+            // Chrome Storage Partitioning/Safari ITP 우회
+            authDomain: "albatracker-9e90e.web.app",
             projectId: "albatracker-9e90e",
             storageBucket: "albatracker-9e90e.firebasestorage.app",
             messagingSenderId: "1042360867233",
@@ -78,6 +87,79 @@
 </head>
 <body>
     <div id="root"></div>
+
+    <!-- 기존 설치 PWA 차단 화면 주입 -->
+    <script>
+        (function() {
+            if (!window.__PWA_BLOCKED__) return;
+            var root = document.getElementById('root');
+            if (!root) return;
+            var appUrl = 'https://albatracker-9e90e.web.app/';
+            var chromeIntent = 'intent://albatracker-9e90e.web.app/#Intent;scheme=https;package=com.android.chrome;S.browser_fallback_url=' + encodeURIComponent(appUrl) + ';end';
+            var sectionStyle = 'background:#f9fafb;border-radius:12px;padding:16px 18px;margin-bottom:12px;border:1px solid #e5e7eb;';
+            var sectionTitleStyle = 'font-size:15px;font-weight:700;color:#111;margin:0 0 10px;display:flex;align-items:center;gap:6px;';
+            var olStyle = 'font-size:13px;color:#333;line-height:1.7;padding-left:18px;margin:0 0 12px;';
+            var androidBtnStyle = 'display:block;background:#22c55e;color:#fff;text-align:center;padding:12px;border-radius:8px;text-decoration:none;font-weight:600;font-size:14px;';
+            var iosBtnStyle = 'display:block;background:#3b82f6;color:#fff;text-align:center;padding:12px;border-radius:8px;text-decoration:none;font-weight:600;font-size:14px;';
+            root.innerHTML =
+                '<div style="position:fixed;inset:0;background:#f3f4f6;z-index:99999;display:flex;align-items:flex-start;justify-content:center;padding:20px;font-family:-apple-system,BlinkMacSystemFont,system-ui,sans-serif;overflow-y:auto;">' +
+                  '<div style="background:#fff;border-radius:16px;box-shadow:0 10px 40px rgba(0,0,0,0.08);max-width:460px;width:100%;padding:28px 24px;margin:20px 0;">' +
+                    '<div style="font-size:44px;text-align:center;margin-bottom:10px;">⚠️</div>' +
+                    '<h1 style="font-size:20px;font-weight:700;color:#111;text-align:center;margin:0 0 10px;">앱이 업데이트되었습니다</h1>' +
+                    '<p style="font-size:13px;color:#555;text-align:center;line-height:1.6;margin:0 0 20px;">현재 설치된 알바트래커는 더 이상 사용할 수 없습니다.<br>사용하시는 기기에 맞게 교체해 주세요.</p>' +
+
+                    '<div style="' + sectionStyle + '">' +
+                      '<h2 style="' + sectionTitleStyle + '"><span style="font-size:18px;">🤖</span> Android 사용자</h2>' +
+                      '<ol style="' + olStyle + '">' +
+                        '<li>홈 화면에서 <b>알바트래커 아이콘을 길게 누르기</b></li>' +
+                        '<li><b>"삭제"</b> 또는 <b>"제거"</b> 선택</li>' +
+                        '<li>아래 <b>Chrome으로 열기</b> 버튼 탭</li>' +
+                        '<li>Chrome 우측 상단 메뉴(⋮) → <b>"홈 화면에 추가"</b></li>' +
+                      '</ol>' +
+                      '<a href="' + chromeIntent + '" style="' + androidBtnStyle + '">Chrome으로 열기</a>' +
+                    '</div>' +
+
+                    '<div style="' + sectionStyle + '">' +
+                      '<h2 style="' + sectionTitleStyle + '"><span style="font-size:18px;">🍎</span> iPhone / iPad 사용자</h2>' +
+                      '<ol style="' + olStyle + '">' +
+                        '<li>홈 화면에서 <b>알바트래커 아이콘 길게 누르기</b></li>' +
+                        '<li><b>"북마크 삭제"</b> 또는 <b>"앱 제거"</b> 선택</li>' +
+                        '<li><b>Safari</b> 앱을 직접 열기</li>' +
+                        '<li>아래 주소를 <b>복사해서 Safari 주소창에 붙여넣기</b></li>' +
+                        '<li>Safari 하단 공유 버튼(⬆) → <b>"홈 화면에 추가"</b></li>' +
+                      '</ol>' +
+                      '<a href="' + appUrl + '" target="_blank" rel="noopener" style="' + iosBtnStyle + '">Safari로 열기 시도</a>' +
+                      '<p style="font-size:11px;color:#9ca3af;text-align:center;margin:8px 0 0;">버튼이 동작하지 않으면 아래 주소를 복사하세요</p>' +
+                    '</div>' +
+
+                    '<button id="__pwa_copy_btn__" style="display:block;width:100%;background:#111;color:#fff;text-align:center;padding:14px;border-radius:10px;border:none;font-weight:600;font-size:14px;cursor:pointer;margin-top:8px;">📋 주소 복사하기</button>' +
+                    '<p style="font-size:12px;color:#6b7280;text-align:center;margin:10px 0 0;font-family:ui-monospace,Menlo,monospace;word-break:break-all;">albatracker-9e90e.web.app</p>' +
+                  '</div>' +
+                '</div>';
+            var copyBtn = document.getElementById('__pwa_copy_btn__');
+            if (copyBtn) {
+                copyBtn.addEventListener('click', function() {
+                    var doCopy = function() {
+                        var ta = document.createElement('textarea');
+                        ta.value = appUrl;
+                        ta.style.position = 'fixed';
+                        ta.style.opacity = '0';
+                        document.body.appendChild(ta);
+                        ta.select();
+                        try { document.execCommand('copy'); } catch(e) {}
+                        document.body.removeChild(ta);
+                    };
+                    if (navigator.clipboard && navigator.clipboard.writeText) {
+                        navigator.clipboard.writeText(appUrl).catch(doCopy);
+                    } else {
+                        doCopy();
+                    }
+                    copyBtn.textContent = '✓ 복사되었습니다';
+                    copyBtn.style.background = '#22c55e';
+                });
+            }
+        })();
+    </script>
 
     <!-- App Check: 봇/스크립트 차단 (reCAPTCHA Enterprise) -->
     <script>
@@ -822,6 +904,42 @@
 
             // Firebase 로그인 상태 감지
             useEffect(() => {
+                // 리다이렉트 복귀 시점 처리 + 디버그 로깅 (PWA 테스트용)
+                const pendingLoginRole = localStorage.getItem('albaLoginRole');
+                const fbKeysOnReturn = Object.keys(sessionStorage).filter(k => k.includes('firebase'));
+                fbAuth.getRedirectResult()
+                    .then(result => {
+                        if (pendingLoginRole) {
+                            localStorage.setItem('albaAuthDebug', JSON.stringify({
+                                stage: 'return-ok',
+                                hasUser: !!result?.user,
+                                userEmail: result?.user?.email || null,
+                                loginRole: pendingLoginRole,
+                                fbSessionKeys: fbKeysOnReturn,
+                                standalone: (() => { try { return window.matchMedia('(display-mode: standalone)').matches; } catch(_) { return false; } })(),
+                                time: new Date().toLocaleTimeString()
+                            }));
+                        }
+                    })
+                    .catch(e => {
+                        localStorage.setItem('albaAuthDebug', JSON.stringify({
+                            stage: 'return-error',
+                            code: e?.code || '',
+                            message: e?.message || '',
+                            loginRole: pendingLoginRole,
+                            fbSessionKeys: fbKeysOnReturn,
+                            time: new Date().toLocaleTimeString()
+                        }));
+                        if (!pendingLoginRole) return;
+                        localStorage.removeItem('albaLoginRole');
+                        setFbLoading(false);
+                        setModalConfig({
+                            type: 'error', title: '오류',
+                            message: 'Google 로그인에 실패했습니다.\n' + (e?.message || ''),
+                            onConfirm: () => setModalConfig(null)
+                        });
+                    });
+
                 const unsubscribeAuth = fbAuth.onAuthStateChanged((user) => {
                     setFirebaseUser(user);
                     if (!user) {
@@ -842,11 +960,29 @@
                 // Google 계정: loginRole로 역할 결정 (같은 계정으로 관리자/직원 모두 사용 가능)
                 const loginRole = localStorage.getItem('albaLoginRole');
                 if (loginRole === 'employee') {
-                    // 직원 역할로 로그인
-                    fbDb.collection('employeeAccounts').doc(firebaseUser.uid).get()
-                        .then(doc => {
+                    // 직원 역할로 로그인 — 계정 문서 없으면 자동 생성 (최초 로그인 대응)
+                    const docRef = fbDb.collection('employeeAccounts').doc(firebaseUser.uid);
+                    docRef.get()
+                        .then(async doc => {
                             if (cancelled) return;
-                            const data = doc.exists ? doc.data() : {};
+                            let data = doc.exists ? doc.data() : null;
+                            if (!data) {
+                                try {
+                                    await ensureGoogleEmpAccount(
+                                        firebaseUser.uid,
+                                        firebaseUser.email,
+                                        firebaseUser.displayName
+                                    );
+                                    data = {
+                                        isGoogleEmployee: true,
+                                        googleEmail: firebaseUser.email || '',
+                                        googleDisplayName: firebaseUser.displayName || ''
+                                    };
+                                } catch(_) {
+                                    data = {};
+                                }
+                            }
+                            if (cancelled) return;
                             setUserRole('employee');
                             setEmpAccount({ ...data, isGoogleEmployee: true, uid: firebaseUser.uid });
                             setFbLoading(false);
@@ -1061,6 +1197,15 @@
                     .catch(() => {});
             };
 
+            // PWA 스탠드얼론 모드 감지 — 이 경우 signInWithPopup은 opener 관계가 끊겨 동작 불가
+            // (홈 화면에 설치된 앱에서 실행 중)
+            const isStandalonePWA = () => {
+                try {
+                    return window.matchMedia('(display-mode: standalone)').matches
+                        || window.navigator.standalone === true;
+                } catch(_) { return false; }
+            };
+
             const checkInAppBrowser = () => {
                 const ua = navigator.userAgent;
                 const isInApp = /KAKAOTALK|Instagram|FBAN|FBAV|Line\/|Twitter|NAVER|DaumApps|Whale/i.test(ua)
@@ -1085,25 +1230,50 @@
                 setFbLoading(true);
                 const provider = new firebase.auth.GoogleAuthProvider();
                 try {
+                    // PWA 스탠드얼론은 popup의 opener 관계가 끊김 → redirect 사용
+                    if (isStandalonePWA()) {
+                        await fbAuth.signInWithRedirect(provider);
+                        return;
+                    }
                     await fbAuth.signInWithPopup(provider);
                 } catch(e) {
+                    localStorage.removeItem('albaLoginRole');
                     setFbLoading(false);
                     showAlert('Google 로그인에 실패했습니다.\n' + e.message, '오류', 'error');
                 }
             };
 
             // Google 직원 로그인 — loginRole='employee' 저장 후 동일한 Google OAuth 사용
+            // 계정 문서 생성은 역할 감지 useEffect에서 처리
+            // - 브라우저 탭: signInWithPopup (postMessage 기반, 빠름)
+            // - PWA 스탠드얼론: signInWithRedirect (popup은 opener 관계 끊겨 동작 불가)
             const handleEmpGoogleLogin = async () => {
                 if (checkInAppBrowser()) return;
-                localStorage.setItem('albaLoginRole', 'employee');  // 역할 선택: 직원
+                localStorage.setItem('albaLoginRole', 'employee');
                 setFbLoading(true);
                 const provider = new firebase.auth.GoogleAuthProvider();
+                const standalone = isStandalonePWA();
+                // 디버그: 로그인 시도 시점 기록
+                localStorage.setItem('albaAuthDebugBefore', JSON.stringify({
+                    stage: standalone ? 'before-redirect(pwa)' : 'before-popup(browser)',
+                    role: 'employee',
+                    standalone,
+                    time: new Date().toLocaleTimeString()
+                }));
                 try {
-                    const result = await fbAuth.signInWithPopup(provider);
-                    // 직원 계정 문서 보장 (없을 경우 생성)
-                    await ensureGoogleEmpAccount(result.user.uid, result.user.email, result.user.displayName);
+                    if (standalone) {
+                        await fbAuth.signInWithRedirect(provider);
+                        return; // 페이지 이동됨
+                    }
+                    await fbAuth.signInWithPopup(provider);
                 } catch(e) {
-                    localStorage.removeItem('albaLoginRole');  // 실패시 롤백
+                    localStorage.setItem('albaAuthDebug', JSON.stringify({
+                        stage: standalone ? 'redirect-throw' : 'popup-error',
+                        code: e?.code || '',
+                        message: e?.message || '',
+                        time: new Date().toLocaleTimeString()
+                    }));
+                    localStorage.removeItem('albaLoginRole');
                     setFbLoading(false);
                     showAlert('Google 로그인에 실패했습니다.\n' + e.message, '오류', 'error');
                 }
@@ -2593,6 +2763,8 @@
         // ============================================================
 
         function LandingScreen({ onBossLogin, onEmpGoogleLogin, modalConfig }) {
+            const debugBefore = (() => { try { return JSON.parse(localStorage.getItem('albaAuthDebugBefore') || 'null'); } catch(_) { return null; } })();
+            const debugReturn = (() => { try { return JSON.parse(localStorage.getItem('albaAuthDebug') || 'null'); } catch(_) { return null; } })();
             return (
                 <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-4">
                     <CustomModal config={modalConfig} />
@@ -2630,6 +2802,32 @@
 
                         </div>
                     </div>
+
+                    {(debugBefore || debugReturn) && (
+                        <div className="mt-4 bg-yellow-50 border border-yellow-300 rounded-xl p-3 w-full max-w-sm text-left space-y-2">
+                            <p className="text-xs font-bold text-yellow-900">로그인 디버그 정보</p>
+                            {debugBefore && (
+                                <div>
+                                    <p className="text-[10px] font-bold text-yellow-800">① 로그인 직전:</p>
+                                    <pre className="text-[10px] text-yellow-900 whitespace-pre-wrap break-all">{JSON.stringify(debugBefore, null, 2)}</pre>
+                                </div>
+                            )}
+                            {debugReturn && (
+                                <div>
+                                    <p className="text-[10px] font-bold text-yellow-800">② 복귀 직후:</p>
+                                    <pre className="text-[10px] text-yellow-900 whitespace-pre-wrap break-all">{JSON.stringify(debugReturn, null, 2)}</pre>
+                                </div>
+                            )}
+                            <button
+                                onClick={() => {
+                                    localStorage.removeItem('albaAuthDebug');
+                                    localStorage.removeItem('albaAuthDebugBefore');
+                                    location.reload();
+                                }}
+                                className="text-[10px] text-yellow-800 underline"
+                            >디버그 정보 지우기</button>
+                        </div>
+                    )}
                 </div>
             );
         }
@@ -8786,8 +8984,10 @@
             );
         }
 
-        const root = ReactDOM.createRoot(document.getElementById('root'));
-        root.render(<AlbaTracker />);
+        if (!window.__PWA_BLOCKED__) {
+            const root = ReactDOM.createRoot(document.getElementById('root'));
+            root.render(<AlbaTracker />);
+        }
     </script>
 
     <!-- 서비스 워커 등록 (PWA 설치 지원) + 자동 업데이트 (A' 절충안) -->

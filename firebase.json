@@ -28,6 +28,7 @@
       "**/*.sh",
       "**/*.jar",
       "twa-manifest.json",
+      "manifest.json",
       "manifest-checksum.txt",
       "feature-graphic.html",
       "store_icon.png"

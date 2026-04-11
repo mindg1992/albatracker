@@ -2763,8 +2763,6 @@
         // ============================================================
 
         function LandingScreen({ onBossLogin, onEmpGoogleLogin, modalConfig }) {
-            const debugBefore = (() => { try { return JSON.parse(localStorage.getItem('albaAuthDebugBefore') || 'null'); } catch(_) { return null; } })();
-            const debugReturn = (() => { try { return JSON.parse(localStorage.getItem('albaAuthDebug') || 'null'); } catch(_) { return null; } })();
             return (
                 <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-4">
                     <CustomModal config={modalConfig} />
@@ -2803,31 +2801,6 @@
                         </div>
                     </div>
 
-                    {(debugBefore || debugReturn) && (
-                        <div className="mt-4 bg-yellow-50 border border-yellow-300 rounded-xl p-3 w-full max-w-sm text-left space-y-2">
-                            <p className="text-xs font-bold text-yellow-900">로그인 디버그 정보</p>
-                            {debugBefore && (
-                                <div>
-                                    <p className="text-[10px] font-bold text-yellow-800">① 로그인 직전:</p>
-                                    <pre className="text-[10px] text-yellow-900 whitespace-pre-wrap break-all">{JSON.stringify(debugBefore, null, 2)}</pre>
-                                </div>
-                            )}
-                            {debugReturn && (
-                                <div>
-                                    <p className="text-[10px] font-bold text-yellow-800">② 복귀 직후:</p>
-                                    <pre className="text-[10px] text-yellow-900 whitespace-pre-wrap break-all">{JSON.stringify(debugReturn, null, 2)}</pre>
-                                </div>
-                            )}
-                            <button
-                                onClick={() => {
-                                    localStorage.removeItem('albaAuthDebug');
-                                    localStorage.removeItem('albaAuthDebugBefore');
-                                    location.reload();
-                                }}
-                                className="text-[10px] text-yellow-800 underline"
-                            >디버그 정보 지우기</button>
-                        </div>
-                    )}
                 </div>
             );
         }

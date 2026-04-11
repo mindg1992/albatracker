@@ -17,7 +17,16 @@
                 || window.matchMedia('(display-mode: fullscreen)').matches
                 || window.matchMedia('(display-mode: minimal-ui)').matches
                 || window.navigator.standalone === true;
-            var isTWA = document.referrer.indexOf('android-app://') === 0;
+            // TWA 최초 런치 시에만 referrer가 android-app://로 시작함.
+            // OAuth 리다이렉트 왕복 후에는 referrer가 accounts.google.com 등으로 바뀌므로
+            // 첫 감지 시 localStorage에 캐시해 이후 재진입에서도 TWA로 판정 유지.
+            var referrerIsTWA = document.referrer.indexOf('android-app://') === 0;
+            var cachedIsTWA = false;
+            try { cachedIsTWA = localStorage.getItem('isTWA') === '1'; } catch(_) {}
+            if (referrerIsTWA) {
+                try { localStorage.setItem('isTWA', '1'); } catch(_) {}
+            }
+            var isTWA = referrerIsTWA || cachedIsTWA;
             window.__PWA_BLOCKED__ = isStandalone && !isTWA;
         })();
     </script>
@@ -890,6 +899,36 @@
                 // 리다이렉트 복귀 시점 처리 + 디버그 로깅 (PWA 테스트용)
                 const pendingLoginRole = localStorage.getItem('albaLoginRole');
                 const fbKeysOnReturn = Object.keys(sessionStorage).filter(k => k.includes('firebase'));
+                // 복귀 URL과 pendingRedirect 값을 그대로 저장 (진단용)
+                const entryUrl = (window.location.href || '').substring(0, 200);
+                const hasHash = !!window.location.hash;
+                const hasSearch = !!window.location.search;
+                const pendingRedirectKey = fbKeysOnReturn.find(k => k.indexOf('pendingRedirect') !== -1);
+                const pendingRedirectVal = pendingRedirectKey ? sessionStorage.getItem(pendingRedirectKey) : null;
+                const allSessKeys = Object.keys(sessionStorage);
+                const allLocalKeys = Object.keys(localStorage);
+                // IndexedDB 상태 확인 (Firebase 기본 persistence)
+                let idbState = 'unknown';
+                try {
+                    if (window.indexedDB && indexedDB.databases) {
+                        indexedDB.databases().then(dbs => {
+                            const entry = JSON.parse(localStorage.getItem('albaAuthDebugEntry') || '{}');
+                            entry.idbDbs = dbs.map(d => d.name).slice(0, 10);
+                            localStorage.setItem('albaAuthDebugEntry', JSON.stringify(entry));
+                        }).catch(() => {});
+                    } else {
+                        idbState = window.indexedDB ? 'no-databases-api' : 'no-idb';
+                    }
+                } catch(_) { idbState = 'error'; }
+                localStorage.setItem('albaAuthDebugEntry', JSON.stringify({
+                    entryUrl, hasHash, hasSearch,
+                    sessKeyCount: allSessKeys.length,
+                    localKeyCount: allLocalKeys.length,
+                    sessKeys: allSessKeys.slice(0, 10),
+                    pendingRedirectVal: pendingRedirectVal ? pendingRedirectVal.substring(0, 80) : null,
+                    idbState,
+                    time: new Date().toLocaleTimeString()
+                }));
                 fbAuth.getRedirectResult()
                     .then(result => {
                         if (pendingLoginRole) {
@@ -1207,58 +1246,81 @@
                 return false;
             };
 
-            const handleGoogleLogin = async () => {
-                if (checkInAppBrowser()) return;
-                localStorage.setItem('albaLoginRole', 'boss');  // 역할 선택: 관리자
-                setFbLoading(true);
+            // Google 로그인 공통 헬퍼: popup 먼저 시도 → 실패 시 redirect fallback
+            // TWA에서도 popup이 동작하는지 테스트하기 위해 display-mode 분기를 제거함
+            // (과거에는 standalone이면 바로 redirect 사용 → TWA에서 스토리지 파티셔닝 문제로 복원 실패)
+            const POPUP_FALLBACK_CODES = new Set([
+                'auth/popup-blocked',
+                'auth/web-storage-unsupported',
+                'auth/operation-not-supported-in-this-environment',
+                'auth/internal-error'
+            ]);
+            const tryGoogleSignIn = async (role) => {
                 const provider = new firebase.auth.GoogleAuthProvider();
+                const standalone = isStandalonePWA();
+                localStorage.setItem('albaAuthDebugBefore', JSON.stringify({
+                    stage: 'try-popup',
+                    role, standalone,
+                    time: new Date().toLocaleTimeString()
+                }));
                 try {
-                    // PWA 스탠드얼론은 popup의 opener 관계가 끊김 → redirect 사용
-                    if (isStandalonePWA()) {
-                        await fbAuth.signInWithRedirect(provider);
-                        return;
-                    }
                     await fbAuth.signInWithPopup(provider);
+                    localStorage.setItem('albaAuthDebug', JSON.stringify({
+                        stage: 'popup-ok', role, standalone,
+                        time: new Date().toLocaleTimeString()
+                    }));
+                    return;
                 } catch(e) {
-                    localStorage.removeItem('albaLoginRole');
-                    setFbLoading(false);
-                    showAlert('Google 로그인에 실패했습니다.\n' + e.message, '오류', 'error');
+                    const code = e?.code || '';
+                    const msg = e?.message || '';
+                    localStorage.setItem('albaAuthDebug', JSON.stringify({
+                        stage: 'popup-error', code, message: msg, role, standalone,
+                        time: new Date().toLocaleTimeString()
+                    }));
+                    // 사용자가 직접 닫은 경우는 fallback 안 함 (실제 취소)
+                    if (code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') {
+                        throw e;
+                    }
+                    // popup을 열 수 없는 환경이면 redirect로 폴백
+                    if (POPUP_FALLBACK_CODES.has(code) || !code) {
+                        localStorage.setItem('albaAuthDebugBefore', JSON.stringify({
+                            stage: 'fallback-redirect', role, standalone, prevCode: code,
+                            time: new Date().toLocaleTimeString()
+                        }));
+                        await fbAuth.signInWithRedirect(provider);
+                        return; // 페이지 이동
+                    }
+                    throw e;
                 }
             };
 
-            // Google 직원 로그인 — loginRole='employee' 저장 후 동일한 Google OAuth 사용
-            // 계정 문서 생성은 역할 감지 useEffect에서 처리
-            // - 브라우저 탭: signInWithPopup (postMessage 기반, 빠름)
-            // - PWA 스탠드얼론: signInWithRedirect (popup은 opener 관계 끊겨 동작 불가)
+            const handleGoogleLogin = async () => {
+                if (checkInAppBrowser()) return;
+                localStorage.setItem('albaLoginRole', 'boss');
+                setFbLoading(true);
+                try {
+                    await tryGoogleSignIn('boss');
+                } catch(e) {
+                    localStorage.removeItem('albaLoginRole');
+                    setFbLoading(false);
+                    if (e?.code !== 'auth/popup-closed-by-user' && e?.code !== 'auth/cancelled-popup-request') {
+                        showAlert('Google 로그인에 실패했습니다.\n' + (e?.message || ''), '오류', 'error');
+                    }
+                }
+            };
+
             const handleEmpGoogleLogin = async () => {
                 if (checkInAppBrowser()) return;
                 localStorage.setItem('albaLoginRole', 'employee');
                 setFbLoading(true);
-                const provider = new firebase.auth.GoogleAuthProvider();
-                const standalone = isStandalonePWA();
-                // 디버그: 로그인 시도 시점 기록
-                localStorage.setItem('albaAuthDebugBefore', JSON.stringify({
-                    stage: standalone ? 'before-redirect(pwa)' : 'before-popup(browser)',
-                    role: 'employee',
-                    standalone,
-                    time: new Date().toLocaleTimeString()
-                }));
                 try {
-                    if (standalone) {
-                        await fbAuth.signInWithRedirect(provider);
-                        return; // 페이지 이동됨
-                    }
-                    await fbAuth.signInWithPopup(provider);
+                    await tryGoogleSignIn('employee');
                 } catch(e) {
-                    localStorage.setItem('albaAuthDebug', JSON.stringify({
-                        stage: standalone ? 'redirect-throw' : 'popup-error',
-                        code: e?.code || '',
-                        message: e?.message || '',
-                        time: new Date().toLocaleTimeString()
-                    }));
                     localStorage.removeItem('albaLoginRole');
                     setFbLoading(false);
-                    showAlert('Google 로그인에 실패했습니다.\n' + e.message, '오류', 'error');
+                    if (e?.code !== 'auth/popup-closed-by-user' && e?.code !== 'auth/cancelled-popup-request') {
+                        showAlert('Google 로그인에 실패했습니다.\n' + (e?.message || ''), '오류', 'error');
+                    }
                 }
             };
 
@@ -2746,6 +2808,41 @@
         // ============================================================
 
         function LandingScreen({ onBossLogin, onEmpGoogleLogin, modalConfig }) {
+            // 임시 디버그: TWA 로그인 리다이렉트 실패 원인 파악용
+            const [debugInfo, setDebugInfo] = React.useState(() => {
+                try {
+                    const before = localStorage.getItem('albaAuthDebugBefore');
+                    const after = localStorage.getItem('albaAuthDebug');
+                    const entry = localStorage.getItem('albaAuthDebugEntry');
+                    const role = localStorage.getItem('albaLoginRole');
+                    const isTWA = localStorage.getItem('isTWA');
+                    const standalone = window.matchMedia('(display-mode: standalone)').matches;
+                    const referrer = document.referrer || '(empty)';
+                    const fbSess = Object.keys(sessionStorage).filter(k => k.toLowerCase().includes('firebase'));
+                    const fbLocal = Object.keys(localStorage).filter(k => k.toLowerCase().includes('firebase'));
+                    return {
+                        before: before ? JSON.parse(before) : null,
+                        after: after ? JSON.parse(after) : null,
+                        entry: entry ? JSON.parse(entry) : null,
+                        role,
+                        isTWA,
+                        standalone,
+                        referrer: referrer.substring(0, 80),
+                        fbSessKeys: fbSess.length,
+                        fbLocalKeys: fbLocal.length,
+                    };
+                } catch(e) {
+                    return { error: e.message };
+                }
+            });
+            const clearDebug = () => {
+                try {
+                    localStorage.removeItem('albaAuthDebug');
+                    localStorage.removeItem('albaAuthDebugBefore');
+                    localStorage.removeItem('albaAuthDebugEntry');
+                    setDebugInfo(null);
+                } catch(_) {}
+            };
             return (
                 <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-4">
                     <CustomModal config={modalConfig} />
@@ -2753,6 +2850,22 @@
                         <ATLogo className="w-16 h-16 mx-auto mb-4 rounded-2xl shadow-md" />
                         <h2 className="text-2xl font-bold text-gray-800 mb-2">알바트래커</h2>
                         <p className="text-gray-500 mb-8 text-sm">근무 관리를 시작해볼까요?</p>
+                        {debugInfo && (
+                            <div className="bg-yellow-50 border border-yellow-300 rounded-lg p-3 mb-4 text-left text-[10px] font-mono text-yellow-900 overflow-auto max-h-60">
+                                <div className="flex justify-between items-center mb-1">
+                                    <b>DEBUG</b>
+                                    <button onClick={clearDebug} className="text-red-600 underline text-[10px]">clear</button>
+                                </div>
+                                <div>standalone: {String(debugInfo.standalone)}</div>
+                                <div>isTWA(cache): {debugInfo.isTWA || 'null'}</div>
+                                <div>referrer: {debugInfo.referrer}</div>
+                                <div>role: {debugInfo.role || 'null'}</div>
+                                <div>fbSessKeys: {debugInfo.fbSessKeys} / fbLocalKeys: {debugInfo.fbLocalKeys}</div>
+                                <div className="mt-1 break-all">before: {debugInfo.before ? JSON.stringify(debugInfo.before) : 'null'}</div>
+                                <div className="mt-1 break-all">entry: {debugInfo.entry ? JSON.stringify(debugInfo.entry) : 'null'}</div>
+                                <div className="mt-1 break-all">after: {debugInfo.after ? JSON.stringify(debugInfo.after) : 'null'}</div>
+                            </div>
+                        )}
                         <div className="space-y-3">
                             {/* 관리자 Google 로그인 */}
                             <button onClick={onBossLogin} className="w-full flex items-center justify-center gap-3 border border-gray-300 rounded-xl py-3 px-4 hover:bg-gray-50 transition font-medium text-gray-700 shadow-sm">
@@ -8946,39 +9059,19 @@
         }
     </script>
 
-    <!-- 서비스 워커 등록 (PWA 설치 지원) + 자동 업데이트 (A' 절충안) -->
+    <!-- PWA 설치 차단: 과거에 등록된 SW/캐시 정리 -->
+    <!-- SW가 살아있으면 Chrome이 PWA 설치 조건을 충족시켜 "홈 화면에 추가" 시 standalone 앱이 만들어짐.
+         SW를 제거하면 단순 바로가기만 가능 → display-mode: browser → 차단 로직 우회 + 정상 사용. -->
     <script>
         if ('serviceWorker' in navigator) {
-            window.addEventListener('load', () => {
-                // 페이지 로드 시점의 controller 존재 여부 — 첫 방문 guard 용
-                const hadController = !!navigator.serviceWorker.controller;
-                let reloaded = false;
-
-                const tryReload = () => {
-                    if (reloaded) return;
-                    // 첫 방문(이전 controller 없음) → 리로드 금지 (깜빡임 방지)
-                    if (!hadController) return;
-                    // 사용자가 화면 보고 있을 때는 리로드 금지 (데이터 손실 방지)
-                    if (!document.hidden) return;
-                    reloaded = true;
-                    window.location.reload();
-                };
-
-                navigator.serviceWorker.register('./sw.js', { updateViaCache: 'none' }).then(reg => {
-                    // 포커스/가시성 복귀 시 새 SW 체크
-                    const checkUpdate = () => { reg.update().catch(() => {}); };
-                    window.addEventListener('focus', checkUpdate);
-                    document.addEventListener('visibilitychange', () => {
-                        if (document.hidden) tryReload(); // 숨김 전환 시 대기 중인 리로드 처리
-                        else checkUpdate();
-                    });
-                    // 주기적 체크 (5분마다)
-                    setInterval(checkUpdate, 5 * 60 * 1000);
-                }).catch(() => {});
-
-                // 새 SW가 control 권한을 잡으면 리로드 시도 (hidden 상태에서만 실행됨)
-                navigator.serviceWorker.addEventListener('controllerchange', tryReload);
-            });
+            navigator.serviceWorker.getRegistrations()
+                .then(regs => regs.forEach(reg => reg.unregister()))
+                .catch(() => {});
+        }
+        if (window.caches) {
+            caches.keys()
+                .then(keys => keys.forEach(k => caches.delete(k)))
+                .catch(() => {});
         }
     </script>
 </body>

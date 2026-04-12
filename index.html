@@ -1482,6 +1482,46 @@
                 return () => unsub();
             }, [firebaseUser, userRole, currentWorkspaceId]);
 
+            // 사장: 각 Google 직원의 workplaces 문서에서 contractStatus/pendingRewrite/contractDeleteRequest를 sync
+            // (사장의 users 도큐먼트 employees 배열은 사장 측에서만 관리되므로, 직원이 자기 측에서 갱신한 contract 상태가
+            //  사장 employees 배열에 자동으로 반영되지 않음. empPending 실시간 알림이 사장이 페이지를 비운 사이에는
+            //  처리되지 않을 수 있어, 페이지 진입/employees 변경 시 한 번 보강 sync.)
+            useEffect(() => {
+                if (!firebaseUser || userRole !== 'boss' || !currentWorkspaceId) return;
+                const empUids = employees.filter(e => e.empUid).map(e => e.empUid);
+                if (empUids.length === 0) return;
+                let cancelled = false;
+                Promise.all(empUids.map(uid =>
+                    fbDb.collection('employeeAccounts').doc(uid).collection('workplaces').doc(currentWorkspaceId).get()
+                        .then(doc => doc.exists ? { uid, ...doc.data() } : null)
+                        .catch(() => null)
+                )).then(results => {
+                    if (cancelled) return;
+                    const valid = results.filter(Boolean);
+                    if (valid.length === 0) return;
+                    setEmployees(prev => {
+                        let changed = false;
+                        const next = prev.map(e => {
+                            if (!e.empUid) return e;
+                            const r = valid.find(v => v.uid === e.empUid);
+                            if (!r) return e;
+                            const newCs = r.contractStatus !== undefined ? r.contractStatus : (e.contractStatus || null);
+                            const newPr = !!r.pendingRewrite;
+                            const newCdr = r.contractDeleteRequest || null;
+                            if ((e.contractStatus || null) !== newCs
+                                || !!e.pendingRewrite !== newPr
+                                || (e.contractDeleteRequest || null) !== newCdr) {
+                                changed = true;
+                                return { ...e, contractStatus: newCs, pendingRewrite: newPr, contractDeleteRequest: newCdr };
+                            }
+                            return e;
+                        });
+                        return changed ? next : prev;
+                    });
+                });
+                return () => { cancelled = true; };
+            }, [firebaseUser?.uid, userRole, currentWorkspaceId, employees.length]);
+
             // 직원 제출 근무시간 실시간 수신 → 월별 현황 자동 반영 (관리자)
             useEffect(() => {
                 if (!firebaseUser || userRole !== 'boss' || !isAuthenticated || !currentWorkspaceId) return;

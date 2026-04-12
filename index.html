@@ -5426,7 +5426,7 @@
                                 const stats = getEmployeeStats(emp.id);
                                 const statusVal = emp.status || (emp.isWorking === false ? 'resigned' : 'working');
                                 const contractStatus = emp.contractStatus || null;
-                                const isContractBlocked = contractStatus === 'needs_resign' || contractStatus === 'pending_boss' || !!empAccount?.contractUpdateRequired;
+                                const isContractBlocked = contractStatus === 'needs_resign' || contractStatus === 'pending_boss';
                                 const isLowWage = emp.wage && Number(emp.wage) > 0 && Number(emp.wage) < Number(globalMinWage);
                                 const needsContractUpdate = pendingContractUpdateEmpIds.has(emp.id) || !!emp.contractUpdateRequired;
                                 return (

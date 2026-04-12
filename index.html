@@ -1548,18 +1548,13 @@
                                 const de = dd[day] || {};
                                 const ee = de.entries || {};
                                 if (ee[sub.employeeId]?.bossModified) return prev; // 관리자가 수정한 경우 유지
-                                // 현재 employees에 등록된 이름 우선 사용 (재가입 이름 변경 시 구 이름 복원 방지)
-                                // 폴백 순서: ①관리자 등록 이름 → ②기존 엔트리 이름(이미 업데이트됐을 경우 보존) → ③제출 시 이름
-                                const currentEmp = employeesRef.current.find(e => e.empUid === sub.empUid);
-                                const existingEntryName = ee[sub.employeeId]?.name;
-                                const displayName = currentEmp?.name || existingEntryName || sub.empName;
                                 return {
                                     ...prev,
                                     [mk]: { ...md, days: { ...dd, [day]: { ...de, entries: { ...ee,
                                         [sub.employeeId]: {
                                             hours: sub.hours,
                                             pay: Math.round(sub.hours * wage),
-                                            name: displayName,
+                                            name: sub.empName,
                                             wage,
                                             note: sub.note || '',
                                             submittedByEmp: true,
@@ -1687,53 +1682,6 @@
                             return { ...e, status: 'resigned' };
                         }));
                         await approveGoogleEmpJoinRequest(currentWorkspaceId || firebaseUser.uid, empUid, approvedId, hasContract);
-                        // 이름이 변경된 경우 기존 근무 기록(monthlyData + submissions)의 이름도 업데이트
-                        if (existingEmp.name !== empData.name) {
-                            const newName = empData.name;
-                            const empIdStr = String(approvedId);
-                            setMonthlyData(prev => {
-                                let changed = false;
-                                const result = {};
-                                for (const [mk, mData] of Object.entries(prev)) {
-                                    if (!mData?.days) { result[mk] = mData; continue; }
-                                    const newDays = {};
-                                    let dayChanged = false;
-                                    for (const [d, dData] of Object.entries(mData.days)) {
-                                        if (!dData?.entries) { newDays[d] = dData; continue; }
-                                        const newEntries = {};
-                                        let entryChanged = false;
-                                        for (const [eid, entry] of Object.entries(dData.entries)) {
-                                            // empUid 매칭(직원 제출) 또는 직원 ID 매칭(관리자 직접 입력) 둘 다 처리
-                                            const isMatch = (entry?.empUid === empUid) || (eid === empIdStr);
-                                            if (isMatch && entry?.name !== newName) {
-                                                newEntries[eid] = { ...entry, name: newName };
-                                                entryChanged = true;
-                                            } else {
-                                                newEntries[eid] = entry;
-                                            }
-                                        }
-                                        newDays[d] = entryChanged ? { ...dData, entries: newEntries } : dData;
-                                        if (entryChanged) dayChanged = true;
-                                    }
-                                    result[mk] = dayChanged ? { ...mData, days: newDays } : mData;
-                                    if (dayChanged) changed = true;
-                                }
-                                return changed ? result : prev;
-                            });
-                            if (currentWorkspaceId) {
-                                fbDb.collection('workspaces').doc(currentWorkspaceId)
-                                    .collection('submissions')
-                                    .where('empUid', '==', empUid)
-                                    .get()
-                                    .then(snap => {
-                                        if (snap.empty) return;
-                                        const batch = fbDb.batch();
-                                        snap.forEach(doc => batch.update(doc.ref, { empName: newName }));
-                                        return batch.commit();
-                                    })
-                                    .catch(() => {});
-                            }
-                        }
                         showAlert(`${empData.name}님이 재입사 승인되었습니다.\n기존 근무 기록이 이어집니다.`, '재입사 승인', 'success');
                     } else {
                         approvedId = nextEmpId;
@@ -7462,17 +7410,17 @@
 
                     <div className="hidden md:block bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
                         <div className="overflow-x-auto">
-                            <table className="w-full text-left border-collapse min-w-max">
+                            <table className="w-full text-center border-collapse min-w-max">
                                 <thead className="bg-gray-50 border-b">
                                     <tr>
                                         <th className="px-4 py-4 font-bold text-gray-600 whitespace-nowrap">구분번호</th>
                                         <th className="px-4 py-4 font-bold text-gray-600 whitespace-nowrap">이름</th>
-                                        <th className="px-4 py-4 font-bold text-gray-600 text-right whitespace-nowrap">시급</th>
-                                        <th className="px-4 py-4 font-bold text-gray-600 text-right whitespace-nowrap">이번달 근무시간</th>
-                                        <th className="px-4 py-4 font-bold text-gray-600 text-right whitespace-nowrap">순수 급여</th>
-                                        <th className="px-4 py-4 font-bold text-blue-600 text-right whitespace-nowrap">주휴수당</th>
-                                        <th className="px-4 py-4 font-bold text-purple-600 text-right whitespace-nowrap">{month}월 총 지급액</th>
-                                        {workspaceId && <th className="px-4 py-4 font-bold text-emerald-600 text-center whitespace-nowrap">급여명세서</th>}
+                                        <th className="px-4 py-4 font-bold text-gray-600 whitespace-nowrap">시급</th>
+                                        <th className="px-4 py-4 font-bold text-gray-600 whitespace-nowrap">이번달 근무시간</th>
+                                        <th className="px-4 py-4 font-bold text-gray-600 whitespace-nowrap">순수 급여</th>
+                                        <th className="px-4 py-4 font-bold text-blue-600 whitespace-nowrap">주휴수당</th>
+                                        <th className="px-4 py-4 font-bold text-purple-600 whitespace-nowrap">{month}월 총 지급액</th>
+                                        {workspaceId && <th className="px-4 py-4 font-bold text-emerald-600 whitespace-nowrap">급여명세서</th>}
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-gray-100">
@@ -7485,13 +7433,13 @@
                                                     {item.displayId === 99999 ? '- (삭제됨)' : `No. ${item.displayId}`}
                                                 </td>
                                                 <td className="px-4 py-4 font-bold text-gray-800 whitespace-nowrap">{item.name}</td>
-                                                <td className="px-4 py-4 text-right text-gray-600 font-medium whitespace-nowrap">{formatCurrency(item.wage)}</td>
-                                                <td className="px-4 py-4 text-right text-gray-600 font-bold whitespace-nowrap">{fmtHours(item.totalHours) || '0시간'}</td>
-                                                <td className="px-4 py-4 text-right font-bold text-green-600 whitespace-nowrap">
+                                                <td className="px-4 py-4 text-gray-600 font-medium whitespace-nowrap">{formatCurrency(item.wage)}</td>
+                                                <td className="px-4 py-4 text-gray-600 font-bold whitespace-nowrap">{fmtHours(item.totalHours) || '0시간'}</td>
+                                                <td className="px-4 py-4 font-bold text-green-600 whitespace-nowrap">
                                                     <div className="text-[11px] text-gray-400 font-normal">{formatCurrency(item.wage)} × {fmtHours(item.totalHours)}</div>
                                                     <div>{formatCurrency(item.totalPay)}</div>
                                                 </td>
-                                                <td className="px-4 py-4 text-right font-bold text-blue-600 whitespace-nowrap">
+                                                <td className="px-4 py-4 font-bold text-blue-600 whitespace-nowrap">
                                                     {item.holidayPay > 0 ? (
                                                         <>
                                                             {item.holidayWeeks.length === 1 ? (
@@ -7505,7 +7453,7 @@
                                                         </>
                                                     ) : <span className="text-gray-300 font-normal">-</span>}
                                                 </td>
-                                                <td className="px-4 py-4 text-right font-black text-purple-700 whitespace-nowrap">
+                                                <td className="px-4 py-4 font-black text-purple-700 whitespace-nowrap">
                                                     {formatCurrency(item.totalPay + item.holidayPay)}
                                                 </td>
                                                 {workspaceId && (

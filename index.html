@@ -27,10 +27,7 @@
                 try { localStorage.setItem('isTWA', '1'); } catch(_) {}
             }
             var isTWA = referrerIsTWA || cachedIsTWA;
-            // 디버그 우회: PWA 로그인 검증용. sessionStorage라 PWA 종료 시 자동 만료.
-            var debugBypass = false;
-            try { debugBypass = sessionStorage.getItem('pwaDebugBypass') === '1'; } catch(_) {}
-            window.__PWA_BLOCKED__ = isStandalone && !isTWA && !debugBypass;
+            window.__PWA_BLOCKED__ = isStandalone && !isTWA;
         })();
     </script>
 
@@ -100,67 +97,95 @@
 <body>
     <div id="root"></div>
 
-    <!-- 기존 설치 PWA 차단 화면 주입 -->
+    <!-- PWA standalone 사용자 권장 안내 화면 -->
     <script>
         (function() {
             if (!window.__PWA_BLOCKED__) return;
             var root = document.getElementById('root');
             if (!root) return;
+
+            // Play Store TWA 출시 후 true로 변경하면 즉시 활성화됨
+            var PLAY_STORE_AVAILABLE = false;
+            var PLAY_STORE_URL = 'https://play.google.com/store/apps/details?id=com.albatracker.app';
             var appUrl = 'https://albatracker-9e90e.web.app/';
+
+            var ua = navigator.userAgent || '';
+            var isAndroid = /Android/i.test(ua);
+            var isIOS = /iPhone|iPad|iPod/i.test(ua);
+            var showBoth = !isAndroid && !isIOS;
+
             var sectionStyle = 'background:#f9fafb;border-radius:12px;padding:16px 18px;margin-bottom:14px;border:1px solid #e5e7eb;';
             var sectionTitleStyle = 'font-size:15px;font-weight:700;color:#111;margin:0 0 10px;';
-            var olStyle = 'font-size:13px;color:#333;line-height:1.8;padding-left:18px;margin:0;';
+            var olStyle = 'font-size:13px;color:#333;line-height:1.8;padding-left:18px;margin:0 0 10px;';
+            var btnPrimary = 'display:block;width:100%;background:#22c55e;color:#fff;text-align:center;padding:13px;border-radius:10px;border:none;font-weight:600;font-size:14px;cursor:pointer;margin-top:6px;text-decoration:none;box-sizing:border-box;';
+            var btnSecondary = 'display:block;width:100%;background:#111;color:#fff;text-align:center;padding:13px;border-radius:10px;border:none;font-weight:600;font-size:14px;cursor:pointer;margin-top:6px;box-sizing:border-box;';
+            var btnDisabled = 'display:block;width:100%;background:#e5e7eb;color:#6b7280;text-align:center;padding:13px;border-radius:10px;border:none;font-weight:600;font-size:14px;cursor:default;margin-top:6px;box-sizing:border-box;';
+
+            var androidSection = '';
+            if (isAndroid || showBoth) {
+                var playBtn = PLAY_STORE_AVAILABLE
+                    ? '<a href="' + PLAY_STORE_URL + '" style="' + btnPrimary + '">📲 Play Store에서 받기</a>'
+                    : '<button disabled style="' + btnDisabled + '">📲 Play Store 출시 준비 중</button>';
+                androidSection =
+                    '<div style="' + sectionStyle + '">' +
+                      '<h2 style="' + sectionTitleStyle + '">📱 안드로이드 사용자</h2>' +
+                      '<ol style="' + olStyle + '">' +
+                        '<li><b>권장</b>: Play Store에서 알바트래커 앱 다운로드</li>' +
+                        '<li><b>대안</b>: 주소를 복사해 Chrome 브라우저에서 열기</li>' +
+                      '</ol>' +
+                      playBtn +
+                      '<button id="__pwa_copy_btn_aos__" style="' + btnSecondary + '">📋 주소 복사 (Chrome용)</button>' +
+                    '</div>';
+            }
+
+            var iosSection = '';
+            if (isIOS || showBoth) {
+                iosSection =
+                    '<div style="' + sectionStyle + '">' +
+                      '<h2 style="' + sectionTitleStyle + '">🍎 iPhone / iPad 사용자</h2>' +
+                      '<ol style="' + olStyle + '">' +
+                        '<li><b>Safari 브라우저</b>에서 알바트래커 열기</li>' +
+                        '<li>하단 공유 버튼 → <b>"홈 화면에 추가"</b> 선택</li>' +
+                      '</ol>' +
+                      '<button id="__pwa_copy_btn_ios__" style="' + btnSecondary + '">📋 주소 복사 (Safari용)</button>' +
+                    '</div>';
+            }
+
             root.innerHTML =
                 '<div style="position:fixed;inset:0;background:#f3f4f6;z-index:99999;display:flex;align-items:flex-start;justify-content:center;padding:20px;font-family:-apple-system,BlinkMacSystemFont,system-ui,sans-serif;overflow-y:auto;">' +
                   '<div style="background:#fff;border-radius:16px;box-shadow:0 10px 40px rgba(0,0,0,0.08);max-width:460px;width:100%;padding:28px 24px;margin:20px 0;">' +
-                    '<div style="font-size:44px;text-align:center;margin-bottom:10px;">⚠️</div>' +
-                    '<h1 style="font-size:20px;font-weight:700;color:#111;text-align:center;margin:0 0 10px;">앱이 업데이트되었습니다</h1>' +
-                    '<p style="font-size:13px;color:#555;text-align:center;line-height:1.6;margin:0 0 20px;">현재 설치된 알바트래커는 더 이상 사용할 수 없습니다.<br>아래 순서대로 교체해 주세요.</p>' +
-
-                    '<div style="' + sectionStyle + '">' +
-                      '<h2 style="' + sectionTitleStyle + '">교체 방법</h2>' +
-                      '<ol style="' + olStyle + '">' +
-                        '<li>아래 <b>주소 복사하기</b> 버튼 누르기</li>' +
-                        '<li>홈 화면의 <b>알바트래커 아이콘을 길게 눌러 삭제</b></li>' +
-                        '<li>브라우저를 열고 주소창에 <b>붙여넣기 후 접속</b></li>' +
-                        '<li>브라우저 메뉴에서 <b>"홈 화면에 추가"</b> 선택</li>' +
-                      '</ol>' +
-                    '</div>' +
-
-                    '<button id="__pwa_copy_btn__" style="display:block;width:100%;background:#111;color:#fff;text-align:center;padding:14px;border-radius:10px;border:none;font-weight:600;font-size:14px;cursor:pointer;">📋 주소 복사하기</button>' +
-                    '<p style="font-size:12px;color:#6b7280;text-align:center;margin:10px 0 0;font-family:ui-monospace,Menlo,monospace;word-break:break-all;">albatracker-9e90e.web.app</p>' +
-                    '<button id="__pwa_debug_bypass__" style="display:block;width:100%;background:transparent;color:#9ca3af;text-align:center;padding:8px;border:none;font-size:11px;cursor:pointer;margin-top:18px;text-decoration:underline;">디버그: PWA 로그인 검증용 우회 (PWA 종료 시 자동 만료)</button>' +
+                    '<div style="font-size:44px;text-align:center;margin-bottom:10px;">💡</div>' +
+                    '<h1 style="font-size:20px;font-weight:700;color:#111;text-align:center;margin:0 0 10px;">알바트래커를 더 편하게 사용하기</h1>' +
+                    '<p style="font-size:13px;color:#555;text-align:center;line-height:1.6;margin:0 0 20px;">아래 권장 방법으로 사용하시면<br>가장 안정적으로 이용하실 수 있어요.</p>' +
+                    androidSection +
+                    iosSection +
+                    '<p style="font-size:12px;color:#6b7280;text-align:center;margin:16px 0 0;font-family:ui-monospace,Menlo,monospace;word-break:break-all;">albatracker-9e90e.web.app</p>' +
                   '</div>' +
                 '</div>';
-            var bypassBtn = document.getElementById('__pwa_debug_bypass__');
-            if (bypassBtn) {
-                bypassBtn.addEventListener('click', function() {
-                    try { sessionStorage.setItem('pwaDebugBypass', '1'); } catch(_) {}
-                    location.reload();
-                });
-            }
-            var copyBtn = document.getElementById('__pwa_copy_btn__');
-            if (copyBtn) {
-                copyBtn.addEventListener('click', function() {
-                    var doCopy = function() {
-                        var ta = document.createElement('textarea');
-                        ta.value = appUrl;
-                        ta.style.position = 'fixed';
-                        ta.style.opacity = '0';
-                        document.body.appendChild(ta);
-                        ta.select();
-                        try { document.execCommand('copy'); } catch(e) {}
-                        document.body.removeChild(ta);
-                    };
-                    if (navigator.clipboard && navigator.clipboard.writeText) {
-                        navigator.clipboard.writeText(appUrl).catch(doCopy);
-                    } else {
-                        doCopy();
-                    }
-                    copyBtn.textContent = '✓ 복사되었습니다';
-                    copyBtn.style.background = '#22c55e';
-                });
-            }
+
+            var doCopy = function(btn) {
+                var fallback = function() {
+                    var ta = document.createElement('textarea');
+                    ta.value = appUrl;
+                    ta.style.position = 'fixed';
+                    ta.style.opacity = '0';
+                    document.body.appendChild(ta);
+                    ta.select();
+                    try { document.execCommand('copy'); } catch(e) {}
+                    document.body.removeChild(ta);
+                };
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    navigator.clipboard.writeText(appUrl).catch(fallback);
+                } else {
+                    fallback();
+                }
+                btn.textContent = '✓ 복사되었습니다';
+                btn.style.background = '#22c55e';
+            };
+            ['__pwa_copy_btn_aos__', '__pwa_copy_btn_ios__'].forEach(function(id) {
+                var b = document.getElementById(id);
+                if (b) b.addEventListener('click', function() { doCopy(b); });
+            });
         })();
     </script>
 

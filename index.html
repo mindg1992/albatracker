@@ -5252,7 +5252,7 @@
                         ? dataToSave.wage
                         : (Number(globalMinWage) > 0 ? Number(globalMinWage) : '');
                     let finalData = { ...dataToSave, wage: resolvedWage };
-                    if (wageChanged && (editingEmp.contractStatus === 'completed' || editingEmp.contractStatus === 'needs_resign')) {
+                    if (wageChanged && (editingEmp.contractStatus === 'completed' || editingEmp.contractStatus === 'needs_resign' || editingEmp.contractStatus === 'pending_boss')) {
                         const hadPersonalWage = editingEmp.wage && Number(editingEmp.wage) > 0;
                         const hasPersonalWage = dataToSave.wage && Number(dataToSave.wage) > 0;
                         if (hasPersonalWage) {
@@ -5565,10 +5565,17 @@
                                                     </button>
                                                 )}
                                                 {contractStatus === 'pending_boss' && (
-                                                    <button onClick={() => handleViewContract(emp)}
-                                                        className="flex-1 text-xs bg-green-600 text-white py-1.5 rounded-lg font-bold hover:bg-green-700 transition">
-                                                        서명하기
-                                                    </button>
+                                                    isLowWage ? (
+                                                        <button onClick={() => showAlert('시급을 수정한 후 근로계약서를 다시 작성하세요.', '안내', 'info')}
+                                                            className="flex-1 text-xs bg-gray-300 text-gray-500 py-1.5 rounded-lg font-bold cursor-not-allowed">
+                                                            서명하기
+                                                        </button>
+                                                    ) : (
+                                                        <button onClick={() => handleViewContract(emp)}
+                                                            className="flex-1 text-xs bg-green-600 text-white py-1.5 rounded-lg font-bold hover:bg-green-700 transition">
+                                                            서명하기
+                                                        </button>
+                                                    )
                                                 )}
                                             </div>
                                         )}
@@ -5622,7 +5629,7 @@
                             contract={viewingContract.contract}
                             onClose={() => setViewingContract(null)}
                             viewerRole="boss"
-                            bossCanSign={viewingContract?.emp?.contractStatus === 'pending_boss'}
+                            bossCanSign={viewingContract?.emp?.contractStatus === 'pending_boss' && !(viewingContract?.emp?.wage && Number(viewingContract?.emp?.wage) > 0 && Number(viewingContract?.emp?.wage) < Number(globalMinWage))}
                             onSign={async () => {
                                 const emp = viewingContract.emp;
                                 await bossCompleteContract(currentWorkspaceId || firebaseUser.uid, emp.empUid);

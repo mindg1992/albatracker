@@ -4929,13 +4929,13 @@
                         empsWithUid.forEach(emp => {
                             batch.update(
                                 fbDb.collection('employeeAccounts').doc(emp.empUid).collection('workplaces').doc(bossUid),
-                                { contractTemplate: template, contractStatus: 'needs_resign', pendingRewrite: true, contractDeleteRequest: firebase.firestore.FieldValue.delete() }
+                                { contractTemplate: template, contractStatus: 'needs_resign', pendingRewrite: true, contractDeleteRequest: firebase.firestore.FieldValue.delete(), contractUpdateRequired: firebase.firestore.FieldValue.delete() }
                             );
                         });
                         await batch.commit();
                         setEmployees(prev => prev.map(e =>
                             empsWithUid.some(a => a.id === e.id)
-                                ? { ...e, contractStatus: 'needs_resign', pendingRewrite: true, contractDeleteRequest: null }
+                                ? { ...e, contractStatus: 'needs_resign', pendingRewrite: true, contractDeleteRequest: null, contractUpdateRequired: false }
                                 : e
                         ));
                         const names = empsWithUid.map(e => e.name).join(', ');
@@ -5153,35 +5153,34 @@
                 });
                 if (affectedEmps.length === 0) return;
 
+                // 사장 측 카드 표시 (메모리)
+                setPendingContractUpdateEmpIds(new Set(affectedEmps.map(e => e.id)));
+
+                // 직원 측에도 동일한 신호 전달 — 글로벌 템플릿 유무와 무관하게 contractUpdateRequired=true 저장.
+                // 글로벌 템플릿이 있어 모달이 떠도, 사장이 그 모달을 닫으면 직원의 시급은 이미 바뀐 채로
+                // 계약서가 미수정 상태가 되므로 직원 측 안내·입력 차단이 필요함.
+                // 사장이 모달을 정상 저장하거나 개별 작성요청을 보내면 두 모달의 handleSave가 이 필드를 클리어함.
+                const empsWithUid = affectedEmps.filter(emp => emp.empUid);
+                if (currentWorkspaceId && empsWithUid.length > 0) {
+                    const batch = fbDb.batch();
+                    empsWithUid.forEach(emp => {
+                        batch.update(
+                            fbDb.collection('employeeAccounts').doc(emp.empUid).collection('workplaces').doc(currentWorkspaceId),
+                            { contractUpdateRequired: true }
+                        );
+                    });
+                    batch.commit().catch(e => {
+                        console.error('contractUpdateRequired update failed:', e);
+                        showAlert('근로계약서 수정필요 신호 저장 실패: ' + (e?.message || '알 수 없음'), '저장 실패', 'error');
+                    });
+                    setEmployees(prev => prev.map(e =>
+                        empsWithUid.some(a => a.id === e.id) ? { ...e, contractUpdateRequired: true } : e
+                    ));
+                }
+
+                // 글로벌 템플릿이 있는 경우: 일괄 재작성 요청 모달 표시 (저장 시 contractUpdateRequired 자동 클리어)
                 if (workspaceInfo?.contractTemplate) {
-                    // 글로벌 템플릿이 있는 경우: 일괄 재작성 요청 모달 표시
                     setMinWageTemplateAfterSave({ affectedEmps });
-                    setPendingContractUpdateEmpIds(new Set(affectedEmps.map(e => e.id)));
-                } else {
-                    // 글로벌 템플릿이 없는 경우: 근로자별로 개별 계약서가 다를 수 있어 일괄 재작성은 부적절.
-                    // 카드 순서 변경 + "📋 근로계약서 수정필요" 표시만 트리거. 재작성은 사장이 개별 처리.
-                    setPendingContractUpdateEmpIds(new Set(affectedEmps.map(e => e.id)));
-                    // Firestore에 contractUpdateRequired=true 저장 — 직원 측에도 동일 신호 전달
-                    const empsWithUid = affectedEmps.filter(emp => emp.empUid);
-                    if (currentWorkspaceId && empsWithUid.length > 0) {
-                        const batch = fbDb.batch();
-                        empsWithUid.forEach(emp => {
-                            batch.update(
-                                fbDb.collection('employeeAccounts').doc(emp.empUid).collection('workplaces').doc(currentWorkspaceId),
-                                { contractUpdateRequired: true }
-                            );
-                        });
-                        batch.commit().then(() => {
-                            console.log('contractUpdateRequired set for', empsWithUid.length, 'employees:', empsWithUid.map(e => e.name));
-                            showAlert(`${empsWithUid.map(e => e.name).join(', ')}님(${empsWithUid.length}명)에게 근로계약서 수정 안내가 전송되었습니다.`, '저장 완료', 'success');
-                        }).catch(e => {
-                            console.error('contractUpdateRequired update failed:', e);
-                            showAlert('근로계약서 수정필요 신호 저장 실패: ' + (e?.message || '알 수 없음') + '\n\n직원 화면에는 안내가 뜨지 않을 수 있습니다.', '저장 실패', 'error');
-                        });
-                        setEmployees(prev => prev.map(e =>
-                            empsWithUid.some(a => a.id === e.id) ? { ...e, contractUpdateRequired: true } : e
-                        ));
-                    }
                 }
             };
 

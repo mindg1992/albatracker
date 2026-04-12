@@ -739,6 +739,7 @@
             const [globalMinWage, setGlobalMinWage] = useState(''); // 최저시급 기본값 비워둠
             const [workSubmitBanner, setWorkSubmitBanner] = useState(null); // 근무자 제출 알림 배너
             const [unseenDates, setUnseenDates] = useState(new Set()); // 관리자가 아직 열어보지 않은 날짜
+            const [pendingContractUpdateEmpIds, setPendingContractUpdateEmpIds] = useState(new Set()); // 카드 위 "근로계약서 수정필요" 표시 대상 — 입력 제한도 함께 발동
 
             const [modalConfig, setModalConfig] = useState(null);
 
@@ -2465,6 +2466,21 @@
                             >확인</button>
                         </div>
                     )}
+                    {pendingContractUpdateEmpIds.size > 0 && (
+                        <div className="bg-orange-50 border-b border-orange-200 px-4 py-3 flex items-center justify-between gap-3">
+                            <div className="flex items-center gap-2 min-w-0">
+                                <span className="text-orange-500 text-base flex-shrink-0">📋</span>
+                                <div className="min-w-0">
+                                    <p className="text-orange-700 font-bold text-sm">근로계약서 수정 필요</p>
+                                    <p className="text-orange-500 text-xs truncate">{pendingContractUpdateEmpIds.size}명의 근로계약서 수정이 필요합니다. 해당 근무자의 근로시간 입력이 제한됩니다.</p>
+                                </div>
+                            </div>
+                            <button
+                                onClick={() => handleTabChange('employees')}
+                                className="flex-shrink-0 bg-orange-600 text-white text-xs font-bold px-3 py-2 rounded-xl hover:bg-orange-700 transition"
+                            >확인</button>
+                        </div>
+                    )}
                     {allPendingEmployees.length > dismissedInviteCount && (
                         <div className="bg-blue-50 border-b border-blue-200 px-4 py-3 flex items-center justify-between gap-3">
                             <div className="flex items-center gap-2 min-w-0">
@@ -2501,6 +2517,8 @@
                                 currentWorkspaceId={currentWorkspaceId}
                                 workspaceInfo={workspaceInfo}
                                 setActiveTab={setActiveTab}
+                                pendingContractUpdateEmpIds={pendingContractUpdateEmpIds}
+                                setPendingContractUpdateEmpIds={setPendingContractUpdateEmpIds}
                             />
                         )}
                         {activeTab === 'calendar' && (
@@ -2514,6 +2532,7 @@
                                 globalMinWage={globalMinWage}
                                 workspaceId={currentWorkspaceId}
                                 onImmediateSaveMonthly={handleImmediateSaveMonthly}
+                                pendingContractUpdateEmpIds={pendingContractUpdateEmpIds}
                             />
                         )}
                         {activeTab === 'payroll' && (
@@ -5034,7 +5053,7 @@
             );
         }
 
-        function TabEmployees({ employees, setEmployees, nextEmpId, setNextEmpId, getEmployeeStats, globalMinWage, setGlobalMinWage, showAlert, showConfirm, firebaseUser, currentWorkspaceId, workspaceInfo, setActiveTab }) {
+        function TabEmployees({ employees, setEmployees, nextEmpId, setNextEmpId, getEmployeeStats, globalMinWage, setGlobalMinWage, showAlert, showConfirm, firebaseUser, currentWorkspaceId, workspaceInfo, setActiveTab, pendingContractUpdateEmpIds, setPendingContractUpdateEmpIds }) {
             const [searchTerm, setSearchTerm] = useState('');
             const [isModalOpen, setIsModalOpen] = useState(false);
             const [editingEmp, setEditingEmp] = useState(null);
@@ -5045,7 +5064,7 @@
             const [personalTemplateReason, setPersonalTemplateReason] = useState('wage_change'); // 'wage_change' | 'rewrite_request' | 'boss_rewrite' | 'new_contract'
             const [minWageModalOpen, setMinWageModalOpen] = useState(false);
             const [minWageTemplateAfterSave, setMinWageTemplateAfterSave] = useState(null); // { affectedEmps }
-            const [pendingContractUpdateEmpIds, setPendingContractUpdateEmpIds] = useState(new Set()); // 최저시급 변경 후 계약서 수정 필요 근무자 ID
+            // pendingContractUpdateEmpIds는 부모 컴포넌트에서 lift된 prop으로 받음 (TabCalendar/배너에서도 사용)
 
             // 팝업 열려있는 동안 해당 직원 workplaces 문서 실시간 감지
             // → 근무자가 동의하면 즉시 employees 상태 반영 (팝업 닫기 전에도 갱신)
@@ -5937,7 +5956,7 @@
             );
         }
 
-        function TabCalendar({ employees, monthlyData, setMonthlyData, showConfirm, unseenDates, onMarkSeen, globalMinWage, workspaceId, onImmediateSaveMonthly }) {
+        function TabCalendar({ employees, monthlyData, setMonthlyData, showConfirm, unseenDates, onMarkSeen, globalMinWage, workspaceId, onImmediateSaveMonthly, pendingContractUpdateEmpIds }) {
             const [currentDate, setCurrentDate] = useState(new Date());
             const [isBulkInputOpen, setIsBulkInputOpen] = useState(false);
             const [editDayModal, setEditDayModal] = useState(null);
@@ -5951,7 +5970,8 @@
                 const statusVal = e.status || (e.isWorking === false ? 'resigned' : 'working');
                 const cStatus = e.contractStatus || null;
                 const isLow = e.wage && Number(e.wage) > 0 && Number(e.wage) < Number(globalMinWage);
-                return statusVal === 'working' && cStatus !== 'needs_resign' && cStatus !== 'pending_boss';
+                const needsContractUpdate = pendingContractUpdateEmpIds && pendingContractUpdateEmpIds.has(e.id);
+                return statusVal === 'working' && cStatus !== 'needs_resign' && cStatus !== 'pending_boss' && !needsContractUpdate;
             }).sort((a,b) => a.displayId - b.displayId);
 
             const prevMonth = () => setCurrentDate(new Date(year, month - 2, 1));

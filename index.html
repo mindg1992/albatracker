@@ -4952,7 +4952,7 @@
                                 : e
                         ));
                         const names = empsWithUid.map(e => e.name).join(', ');
-                        showAlert(`${names}님에게 근로계약서 재작성이 요청되었습니다.${saveTemplate ? '\n글로벌 템플릿도 업데이트되었습니다.' : ''}`, '요청 완료', 'success');
+                        showAlert(`${names}님에게 근로계약서 재작성이 요청되었습니다.${saveTemplate ? '\n근로계약서 템플릿도 업데이트되었습니다.' : ''}`, '요청 완료', 'success');
                     } else {
                         showAlert('연동된 계정이 있는 근무자가 없어 재작성 요청을 보내지 않았습니다.', '안내');
                     }
@@ -5825,7 +5825,7 @@
                     }
 
                     const names = empsToSend.map(e => e.name).join(', ');
-                    showAlert(`${names}님(${empsToSend.length}명)에게 근로계약서가 발송되었습니다.${saveTemplate ? '\n글로벌 템플릿도 업데이트되었습니다.' : ''}`, '발송 완료', 'success');
+                    showAlert(`${names}님(${empsToSend.length}명)에게 근로계약서가 발송되었습니다.${saveTemplate ? '\n근로계약서 템플릿도 업데이트되었습니다.' : ''}`, '발송 완료', 'success');
                     onClose();
                 } catch(e) {
                     showAlert('발송 실패: ' + e.message, '오류', 'error');

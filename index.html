@@ -681,7 +681,8 @@
                 .collection('workplaces').doc(bossUid)
                 .update({
                     contractStatus: 'completed',
-                    contractDeleteRequest: firebase.firestore.FieldValue.delete()
+                    contractDeleteRequest: firebase.firestore.FieldValue.delete(),
+                    pendingRewrite: firebase.firestore.FieldValue.delete()
                 });
             const pendingDocId = `${empUid}_${bossUid}`;
             await fbDb.collection('empPending').doc(pendingDocId).delete().catch(() => {});
@@ -5062,16 +5063,20 @@
                     });
                     batch.commit().catch(() => {});
                 }
-                // 최저시급 적용 중인 근무자(시급 미설정 또는 이전 최저시급과 동일) 중 계약 완료자만.
-                // 글로벌 템플릿 유무와 무관하게 모달을 띄움 — 글로벌 템플릿이 없는 경우엔
-                // 빈 폼에서 시작하고, 모달의 handleSave는 각 근무자 workplaces 문서에만
-                // contractTemplate을 저장하므로 글로벌 템플릿은 건드리지 않음.
+                // 최저시급 적용 중인 근무자(시급 미설정 또는 이전 최저시급과 동일) 중 계약 완료자만
                 const affectedEmps = employees.filter(emp => {
                     const usesMinWage = !emp.wage || Number(emp.wage) === 0 || Number(emp.wage) === Number(oldVal);
                     return usesMinWage && emp.contractStatus === 'completed';
                 });
-                if (affectedEmps.length > 0) {
+                if (affectedEmps.length === 0) return;
+
+                if (workspaceInfo?.contractTemplate) {
+                    // 글로벌 템플릿이 있는 경우: 일괄 재작성 요청 모달 표시
                     setMinWageTemplateAfterSave({ affectedEmps });
+                    setPendingContractUpdateEmpIds(new Set(affectedEmps.map(e => e.id)));
+                } else {
+                    // 글로벌 템플릿이 없는 경우: 근로자별로 개별 계약서가 다를 수 있어 일괄 재작성은 부적절.
+                    // 카드 순서 변경 + "📋 근로계약서 수정필요" 표시만 트리거. 재작성은 사장이 개별 처리.
                     setPendingContractUpdateEmpIds(new Set(affectedEmps.map(e => e.id)));
                 }
             };
@@ -5264,7 +5269,13 @@
                 showConfirm(`${emp.name}님의 근로계약서에 서명 완료 처리하시겠습니까?\n서명 후 근무자 기능이 정상화됩니다.`, async () => {
                     try {
                         await bossCompleteContract(currentWorkspaceId || firebaseUser.uid, emp.empUid);
-                        setEmployees(prev => prev.map(e => e.id === emp.id ? { ...e, contractStatus: 'completed', contractDeleteRequest: null } : e));
+                        setEmployees(prev => prev.map(e => e.id === emp.id ? { ...e, contractStatus: 'completed', contractDeleteRequest: null, pendingRewrite: false } : e));
+                        setPendingContractUpdateEmpIds(prev => {
+                            if (!prev.has(emp.id)) return prev;
+                            const next = new Set(prev);
+                            next.delete(emp.id);
+                            return next;
+                        });
                         showAlert('서명이 완료되었습니다. 기능이 정상화되었습니다.', '서명 완료', 'success');
                     } catch(e) { showAlert('서명 실패: ' + e.message, '오류', 'error'); }
                 }, '근로계약서 서명');

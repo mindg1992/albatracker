@@ -3665,7 +3665,7 @@
                 return notices.filter(n => !confirmed.includes(n.id)).length;
             })();
             const workStatus = empAccount?.workStatus || 'working';
-            const isBlocked = workStatus === 'leave' || workStatus === 'resigned';
+            const isBlocked = workStatus === 'leave' || workStatus === 'resigned' || workStatus === 'deleted';
             const contractStatus = empAccount?.contractStatus || null;
             const isContractBlocked = contractStatus === 'needs_resign' || contractStatus === 'pending_boss' || !!empAccount?.contractUpdateRequired;
             const isWageBlocked = !!empAccount?.wageBelowMin;
@@ -3878,13 +3878,13 @@
                         {activeTab === 'calendar' && (
                             <div>
                                 {isFullyBlocked && !isWageBlocked && !isPendingRewrite && (
-                                    <div className={`mb-4 p-3 rounded-xl text-sm font-medium flex items-center gap-2 ${(workStatus === 'resigned' || contractStatus === 'needs_resign') ? 'bg-red-50 text-red-700 border border-red-200' : 'bg-yellow-50 text-yellow-700 border border-yellow-200'}`}>
+                                    <div className={`mb-4 p-3 rounded-xl text-sm font-medium flex items-center gap-2 ${(workStatus === 'resigned' || workStatus === 'deleted' || contractStatus === 'needs_resign') ? 'bg-red-50 text-red-700 border border-red-200' : 'bg-yellow-50 text-yellow-700 border border-yellow-200'}`}>
                                         <AlertCircle className="w-4 h-4 flex-shrink-0"/>
                                         {isWageBlocked
                                             ? '관리자가 시급 조정을 완료할때까지 근무시간 입력이 불가능합니다.'
                                             : isContractBlocked
                                             ? (contractStatus === 'needs_resign' ? '근로계약서 미작성으로 입력이 불가합니다. 내 정보 탭에서 재작성해주세요.' : '관리자 서명 대기 중입니다. 서명 완료 후 이용 가능합니다.')
-                                            : (workStatus === 'resigned' ? '퇴사 처리되어 근무시간 입력이 불가합니다.' : '휴직 중으로 근무시간 입력이 불가합니다.')}
+                                            : (workStatus === 'deleted' ? '관리자가 근무자 카드를 삭제하여 앱 사용이 제한됩니다.' : workStatus === 'resigned' ? '퇴사 처리되어 근무시간 입력이 불가합니다.' : '휴직 중으로 근무시간 입력이 불가합니다.')}
                                     </div>
                                 )}
                                 <div className="flex items-center justify-between mb-4">
@@ -3973,7 +3973,7 @@
                                             </div>
                                         ) : n.type === 'status_change' ? (
                                             <p className="text-sm text-gray-600">
-                                                {n.newStatus === 'leave' ? '휴직 처리되었습니다.' : n.newStatus === 'resigned' ? '퇴사 처리되었습니다.' : '근무 중 상태로 변경되었습니다.'}
+                                                {n.newStatus === 'leave' ? '휴직 처리되었습니다.' : n.newStatus === 'resigned' ? '퇴사 처리되었습니다.' : n.newStatus === 'deleted' ? '근무자 카��가 삭제되었습니다.' : '근무 중 상태로 변경되었습니다.'}
                                             </p>
                                         ) : n.type === 'wage_change' ? (
                                             <p className="text-sm text-gray-600">
@@ -5226,9 +5226,17 @@
                 setEditingEmp(null);
             };
 
-            const handleDelete = (id) => {
+            const handleDelete = (emp) => {
                 showConfirm('정말 이 근무자를 삭제하시겠습니까?\n(기존 근무 기록은 월별 현황에 유지됩니다)', () => {
-                    setEmployees(prev => prev.filter(e => e.id !== id));
+                    setEmployees(prev => prev.filter(e => e.id !== emp.id));
+                    // Google 직원이면 workplaces workStatus를 'deleted'로 업데이트 + 알림
+                    if (emp.empUid && currentWorkspaceId) {
+                        fbDb.collection('employeeAccounts').doc(emp.empUid)
+                            .collection('workplaces').doc(currentWorkspaceId)
+                            .update({ workStatus: 'deleted' })
+                            .catch(() => {});
+                        sendStatusChangeNotification(emp.empUid, currentWorkspaceId, 'deleted').catch(() => {});
+                    }
                 }, '근무자 삭제');
             };
 
@@ -5406,7 +5414,7 @@
                                                 <button onClick={() => { setEditingEmp(emp); setIsModalOpen(true); }} className="text-gray-400 hover:text-green-600 p-1">
                                                     <Edit2 className="w-4 h-4" />
                                                 </button>
-                                                <button onClick={() => handleDelete(emp.id)} className="text-gray-400 hover:text-red-600 p-1">
+                                                <button onClick={() => handleDelete(emp)} className="text-gray-400 hover:text-red-600 p-1">
                                                     <Trash2 className="w-4 h-4" />
                                                 </button>
                                             </div>

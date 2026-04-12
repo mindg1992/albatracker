@@ -1509,11 +1509,13 @@
                             const newCs = r.contractStatus !== undefined ? r.contractStatus : (e.contractStatus || null);
                             const newPr = !!r.pendingRewrite;
                             const newCdr = r.contractDeleteRequest || null;
+                            const newCur = !!r.contractUpdateRequired;
                             if ((e.contractStatus || null) !== newCs
                                 || !!e.pendingRewrite !== newPr
-                                || (e.contractDeleteRequest || null) !== newCdr) {
+                                || (e.contractDeleteRequest || null) !== newCdr
+                                || !!e.contractUpdateRequired !== newCur) {
                                 changed = true;
-                                return { ...e, contractStatus: newCs, pendingRewrite: newPr, contractDeleteRequest: newCdr };
+                                return { ...e, contractStatus: newCs, pendingRewrite: newPr, contractDeleteRequest: newCdr, contractUpdateRequired: newCur };
                             }
                             return e;
                         });
@@ -1608,7 +1610,8 @@
                             contractDeleteRequest: data.contractDeleteRequest || null,
                             workStatus: data.workStatus || prev.workStatus,
                             wageBelowMin: data.wageBelowMin || false,
-                            pendingRewrite: data.pendingRewrite || false
+                            pendingRewrite: data.pendingRewrite || false,
+                            contractUpdateRequired: !!data.contractUpdateRequired
                         }));
                     }, () => {});
                 return () => unsub();
@@ -2463,21 +2466,6 @@
                             <button
                                 onClick={() => { setDismissedSubmitCount(contractSubmitCount); handleTabChange('employees'); }}
                                 className="flex-shrink-0 bg-purple-600 text-white text-xs font-bold px-3 py-2 rounded-xl hover:bg-purple-700 transition"
-                            >확인</button>
-                        </div>
-                    )}
-                    {pendingContractUpdateEmpIds.size > 0 && (
-                        <div className="bg-orange-50 border-b border-orange-200 px-4 py-3 flex items-center justify-between gap-3">
-                            <div className="flex items-center gap-2 min-w-0">
-                                <span className="text-orange-500 text-base flex-shrink-0">📋</span>
-                                <div className="min-w-0">
-                                    <p className="text-orange-700 font-bold text-sm">근로계약서 수정 필요</p>
-                                    <p className="text-orange-500 text-xs truncate">{pendingContractUpdateEmpIds.size}명의 근로계약서 수정이 필요합니다. 해당 근무자의 근로시간 입력이 제한됩니다.</p>
-                                </div>
-                            </div>
-                            <button
-                                onClick={() => handleTabChange('employees')}
-                                className="flex-shrink-0 bg-orange-600 text-white text-xs font-bold px-3 py-2 rounded-xl hover:bg-orange-700 transition"
                             >확인</button>
                         </div>
                     )}
@@ -3800,7 +3788,7 @@
             const workStatus = empAccount?.workStatus || 'working';
             const isBlocked = workStatus === 'leave' || workStatus === 'resigned';
             const contractStatus = empAccount?.contractStatus || null;
-            const isContractBlocked = contractStatus === 'needs_resign' || contractStatus === 'pending_boss';
+            const isContractBlocked = contractStatus === 'needs_resign' || contractStatus === 'pending_boss' || !!empAccount?.contractUpdateRequired;
             const isWageBlocked = !!empAccount?.wageBelowMin;
             const isPendingRewrite = !!empAccount?.pendingRewrite;
             const isFullyBlocked = isBlocked || isContractBlocked || isWageBlocked || isPendingRewrite;
@@ -3997,6 +3985,15 @@
                             </div>
                         );
                     })()}
+                    {empAccount?.contractUpdateRequired && !empAccount?.pendingRewrite && (
+                        <div className="bg-orange-50 border-b border-orange-300 px-4 py-3 flex items-center gap-3">
+                            <AlertCircle className="w-5 h-5 text-orange-500 flex-shrink-0" />
+                            <div className="min-w-0">
+                                <p className="text-orange-700 font-bold text-sm">근로계약서 수정 필요</p>
+                                <p className="text-orange-500 text-xs">관리자가 근로계약서 수정을 처리할 때까지 근로시간 입력이 제한됩니다.</p>
+                            </div>
+                        </div>
+                    )}
 
                     <main className="max-w-lg mx-auto px-3 py-4">
                         {activeTab === 'calendar' && (
@@ -4212,7 +4209,7 @@
             const [infoExpanded, setInfoExpanded] = useState(false);
 
             const contractStatus = empAccount?.contractStatus || null;
-            const isContractBlocked = contractStatus === 'needs_resign' || contractStatus === 'pending_boss';
+            const isContractBlocked = contractStatus === 'needs_resign' || contractStatus === 'pending_boss' || !!empAccount?.contractUpdateRequired;
 
             const formatResidentId = (raw) => {
                 const digits = raw.replace(/[^0-9]/g, '').slice(0, 13);
@@ -4701,9 +4698,10 @@
                                 contractTemplate: template,
                                 contractStatus: 'needs_resign',
                                 pendingRewrite: true,
-                                contractDeleteRequest: firebase.firestore.FieldValue.delete()
+                                contractDeleteRequest: firebase.firestore.FieldValue.delete(),
+                                contractUpdateRequired: firebase.firestore.FieldValue.delete()
                             });
-                        setEmployees(prev => prev.map(e => e.id === emp.id ? { ...emp, contractStatus: 'needs_resign', pendingRewrite: true, contractDeleteRequest: null } : e));
+                        setEmployees(prev => prev.map(e => e.id === emp.id ? { ...emp, contractStatus: 'needs_resign', pendingRewrite: true, contractDeleteRequest: null, contractUpdateRequired: false } : e));
                         const verb = reason === 'new_contract' ? '작성' : '재작성';
                         showAlert(`${emp.name}님에게 근로계약서 ${verb}이 요청되었습니다.`, '요청 완료', 'success');
                     }
@@ -5163,6 +5161,21 @@
                     // 글로벌 템플릿이 없는 경우: 근로자별로 개별 계약서가 다를 수 있어 일괄 재작성은 부적절.
                     // 카드 순서 변경 + "📋 근로계약서 수정필요" 표시만 트리거. 재작성은 사장이 개별 처리.
                     setPendingContractUpdateEmpIds(new Set(affectedEmps.map(e => e.id)));
+                    // Firestore에 contractUpdateRequired=true 저장 — 직원 측에도 동일 신호 전달
+                    const empsWithUid = affectedEmps.filter(emp => emp.empUid);
+                    if (currentWorkspaceId && empsWithUid.length > 0) {
+                        const batch = fbDb.batch();
+                        empsWithUid.forEach(emp => {
+                            batch.update(
+                                fbDb.collection('employeeAccounts').doc(emp.empUid).collection('workplaces').doc(currentWorkspaceId),
+                                { contractUpdateRequired: true }
+                            );
+                        });
+                        batch.commit().catch(() => {});
+                        setEmployees(prev => prev.map(e =>
+                            empsWithUid.some(a => a.id === e.id) ? { ...e, contractUpdateRequired: true } : e
+                        ));
+                    }
                 }
             };
 
@@ -5413,9 +5426,9 @@
                                 const stats = getEmployeeStats(emp.id);
                                 const statusVal = emp.status || (emp.isWorking === false ? 'resigned' : 'working');
                                 const contractStatus = emp.contractStatus || null;
-                                const isContractBlocked = contractStatus === 'needs_resign' || contractStatus === 'pending_boss';
+                                const isContractBlocked = contractStatus === 'needs_resign' || contractStatus === 'pending_boss' || !!empAccount?.contractUpdateRequired;
                                 const isLowWage = emp.wage && Number(emp.wage) > 0 && Number(emp.wage) < Number(globalMinWage);
-                                const needsContractUpdate = pendingContractUpdateEmpIds.has(emp.id);
+                                const needsContractUpdate = pendingContractUpdateEmpIds.has(emp.id) || !!emp.contractUpdateRequired;
                                 return (
                                     <div key={emp.id} className={`bg-white rounded-xl border shadow-sm p-5 relative transition ${isLowWage ? 'border-red-400 ring-1 ring-red-300' : needsContractUpdate ? 'border-orange-400 ring-1 ring-orange-300' : ''} ${(statusVal !== 'working' || (isContractBlocked && !isLowWage)) ? 'opacity-75 bg-gray-50' : ''}`}>
                                         {needsContractUpdate && !isContractBlocked && (
@@ -5970,7 +5983,7 @@
                 const statusVal = e.status || (e.isWorking === false ? 'resigned' : 'working');
                 const cStatus = e.contractStatus || null;
                 const isLow = e.wage && Number(e.wage) > 0 && Number(e.wage) < Number(globalMinWage);
-                const needsContractUpdate = pendingContractUpdateEmpIds && pendingContractUpdateEmpIds.has(e.id);
+                const needsContractUpdate = (pendingContractUpdateEmpIds && pendingContractUpdateEmpIds.has(e.id)) || !!e.contractUpdateRequired;
                 return statusVal === 'working' && cStatus !== 'needs_resign' && cStatus !== 'pending_boss' && !needsContractUpdate;
             }).sort((a,b) => a.displayId - b.displayId);
 

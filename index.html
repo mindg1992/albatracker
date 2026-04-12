@@ -4587,7 +4587,7 @@
             const [saving, setSaving] = useState(false);
             const [loadingPersonal, setLoadingPersonal] = useState(!!emp.empUid);
 
-            // 기존에 저장된 개인 템플릿이 있으면 우선 로드 (이전 수정 내용 유지)
+            // 기존에 저장된 개인 템플릿이 있으면 우선 로드 (이전 수정 내용 + 서명 유지)
             useEffect(() => {
                 if (!emp.empUid) { setLoadingPersonal(false); return; }
                 const bossUid = workspaceId || firebaseUser.uid;
@@ -4598,7 +4598,8 @@
                         if (personal) {
                             setTitle(personal.title || '근로계약서');
                             setSections(personal.sections?.length >= 1 ? personal.sections.map(s => ({ ...s })) : [{ content: '', instruction: '' }]);
-                            setOwnerInfo(personal.ownerInfo ? { ...personal.ownerInfo, signatureData: '' } : (baseTemplate?.ownerInfo ? { ...baseTemplate.ownerInfo, signatureData: '' } : { shopName: '', phone: '', address: '', representative: '', signatureData: '' }));
+                            // signatureData도 그대로 가져옴 — 새로 그리면 덮어쓰고, 안 그리면 기존 유지
+                            setOwnerInfo(personal.ownerInfo ? { ...personal.ownerInfo } : (baseTemplate?.ownerInfo ? { ...baseTemplate.ownerInfo } : { shopName: '', phone: '', address: '', representative: '', signatureData: '' }));
                         }
                     })
                     .catch(() => {})
@@ -4754,7 +4755,7 @@
                                     <SignatureCanvas onSave={sig => setOwnerInfo(p => ({...p, signatureData: sig}))} width={360} height={100} />
                                     {ownerInfo.signatureData && (
                                         <div className="mt-2">
-                                            <p className="text-xs text-gray-500 mb-1">새 서명 미리보기:</p>
+                                            <p className="text-xs text-gray-500 mb-1">서명 미리보기:</p>
                                             <img src={ownerInfo.signatureData} alt="서명" className="h-12 border rounded-lg bg-white p-1 object-contain" />
                                         </div>
                                     )}
@@ -4955,7 +4956,7 @@
                                     <SignatureCanvas onSave={sig => setOwnerInfo(p => ({...p, signatureData: sig}))} width={360} height={100} />
                                     {ownerInfo.signatureData && (
                                         <div className="mt-2">
-                                            <p className="text-xs text-gray-500 mb-1">새 서명 미리보기:</p>
+                                            <p className="text-xs text-gray-500 mb-1">서명 미리보기:</p>
                                             <img src={ownerInfo.signatureData} alt="서명" className="h-12 border rounded-lg bg-white p-1 object-contain" />
                                         </div>
                                     )}
@@ -8510,7 +8511,7 @@
                                     <SignatureCanvas onSave={sig => setOwnerInfo(p => ({...p, signatureData: sig}))} width={360} height={100} />
                                     {ownerInfo.signatureData && (
                                         <div className="mt-2">
-                                            <p className="text-xs text-gray-500 mb-1">새 서명 미리보기:</p>
+                                            <p className="text-xs text-gray-500 mb-1">서명 미리보기:</p>
                                             <img src={ownerInfo.signatureData} alt="서명" className="h-12 border rounded-lg bg-white p-1 object-contain" />
                                         </div>
                                     )}

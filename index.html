@@ -4814,6 +4814,12 @@
                                     닫기 (시급 변경 취소)
                                 </button>
                             )}
+                            {reason === 'new_contract' && (
+                                <button onClick={onClose} disabled={saving}
+                                    className="w-full bg-gray-100 text-gray-600 py-2.5 rounded-xl font-medium hover:bg-gray-200 transition text-sm disabled:opacity-50">
+                                    작성 취소
+                                </button>
+                            )}
                         </div>
                     </div>
                 </div>

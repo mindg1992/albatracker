@@ -4612,11 +4612,16 @@
             const handleSave = async () => {
                 if (!title.trim()) { showAlert('제목을 입력해주세요.', '입력 오류', 'alert'); return; }
                 if (sections.some(s => !s.content.trim())) { showAlert('모든 내용칸을 입력해주세요.', '입력 오류', 'alert'); return; }
+                const fallbackSig = globalTemplate?.ownerInfo?.signatureData || '';
+                if (!ownerInfo.signatureData && !fallbackSig) {
+                    showAlert('관리자 서명을 먼저 그려주세요.', '입력 오류', 'alert');
+                    return;
+                }
                 setSaving(true);
                 try {
                     const finalOwnerInfo = ownerInfo.signatureData
                         ? ownerInfo
-                        : { ...ownerInfo, signatureData: globalTemplate?.ownerInfo?.signatureData || '' };
+                        : { ...ownerInfo, signatureData: fallbackSig };
                     const template = { title: title.trim(), sections, ownerInfo: finalOwnerInfo };
                     const bossUid = workspaceId || firebaseUser.uid;
                     if (emp.empUid) {
@@ -4833,11 +4838,16 @@
             const handleSave = async () => {
                 if (!title.trim()) { showAlert('제목을 입력해주세요.', '입력 오류', 'alert'); return; }
                 if (sections.some(s => !s.content.trim())) { showAlert('모든 내용칸을 입력해주세요.', '입력 오류', 'alert'); return; }
+                const fallbackSig = globalTemplate?.ownerInfo?.signatureData || '';
+                if (!ownerInfo.signatureData && !fallbackSig) {
+                    showAlert('관리자 서명을 먼저 그려주세요.', '입력 오류', 'alert');
+                    return;
+                }
                 setSaving(true);
                 try {
                     const finalOwnerInfo = ownerInfo.signatureData
                         ? ownerInfo
-                        : { ...ownerInfo, signatureData: globalTemplate?.ownerInfo?.signatureData || '' };
+                        : { ...ownerInfo, signatureData: fallbackSig };
                     const template = { title: title.trim(), sections, ownerInfo: finalOwnerInfo };
                     const bossUid = workspaceId || firebaseUser.uid;
                     const empsWithUid = affectedEmps.filter(emp => emp.empUid);
@@ -5470,7 +5480,13 @@
                             onSign={async () => {
                                 const emp = viewingContract.emp;
                                 await bossCompleteContract(currentWorkspaceId || firebaseUser.uid, emp.empUid);
-                                setEmployees(prev => prev.map(e => e.id === emp.id ? { ...e, contractStatus: 'completed', contractDeleteRequest: null } : e));
+                                setEmployees(prev => prev.map(e => e.id === emp.id ? { ...e, contractStatus: 'completed', contractDeleteRequest: null, pendingRewrite: false } : e));
+                                setPendingContractUpdateEmpIds(prev => {
+                                    if (!prev.has(emp.id)) return prev;
+                                    const next = new Set(prev);
+                                    next.delete(emp.id);
+                                    return next;
+                                });
                                 setViewingContract(null);
                                 showAlert('서명이 완료되었습니다. 기능이 정상화되었습니다.', '서명 완료', 'success');
                             }}

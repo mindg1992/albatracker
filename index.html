@@ -3959,21 +3959,25 @@
                         </div>
                     )}
 
-                    {empAccount?.pendingRewrite && (
-                        <div className="bg-red-50 border-b border-red-300 px-4 py-3 flex items-center justify-between gap-3">
-                            <div className="flex items-center gap-2 min-w-0">
-                                <AlertCircle className="w-5 h-5 text-red-500 flex-shrink-0" />
-                                <div className="min-w-0">
-                                    <p className="text-red-700 font-bold text-sm">근로계약서를 작성해주세요.</p>
-                                    <p className="text-red-500 text-xs">근로계약서 재작성 및 관리자 서명까지 앱 기능이 제한됩니다.</p>
+                    {empAccount?.pendingRewrite && (() => {
+                        const isFirstContract = !empAccount?.contract;
+                        const verb = isFirstContract ? '작성' : '재작성';
+                        return (
+                            <div className="bg-red-50 border-b border-red-300 px-4 py-3 flex items-center justify-between gap-3">
+                                <div className="flex items-center gap-2 min-w-0">
+                                    <AlertCircle className="w-5 h-5 text-red-500 flex-shrink-0" />
+                                    <div className="min-w-0">
+                                        <p className="text-red-700 font-bold text-sm">근로계약서를 작성해주세요.</p>
+                                        <p className="text-red-500 text-xs">근로계약서 {verb} 및 관리자 서명까지 앱 기능이 제한됩니다.</p>
+                                    </div>
                                 </div>
+                                <button onClick={handleOpenTopRewrite}
+                                    className="flex-shrink-0 bg-red-600 text-white text-xs font-bold py-2 px-3 rounded-xl hover:bg-red-700 transition whitespace-nowrap">
+                                    {verb}하기
+                                </button>
                             </div>
-                            <button onClick={handleOpenTopRewrite}
-                                className="flex-shrink-0 bg-red-600 text-white text-xs font-bold py-2 px-3 rounded-xl hover:bg-red-700 transition whitespace-nowrap">
-                                재작성하기
-                            </button>
-                        </div>
-                    )}
+                        );
+                    })()}
 
                     <main className="max-w-lg mx-auto px-3 py-4">
                         {activeTab === 'calendar' && (
@@ -4311,22 +4315,26 @@
             return (
                 <div className="max-w-lg mx-auto space-y-4">
                     {/* 근로계약서 상태 배너 */}
-                    {isContractBlocked && !empAccount?.pendingRewrite && (
-                        <div className={`rounded-xl p-4 border ${contractStatus === 'needs_resign' ? 'bg-red-50 border-red-200' : 'bg-yellow-50 border-yellow-200'}`}>
-                            <p className={`font-bold text-sm ${contractStatus === 'needs_resign' ? 'text-red-700' : 'text-yellow-700'}`}>
-                                {contractStatus === 'needs_resign' ? '⚠️ 근로계약서를 작성해주세요' : '⏳ 관리자 서명 대기 중'}
-                            </p>
-                            <p className="text-xs text-gray-600 mt-1">
-                                {contractStatus === 'needs_resign' ? '근로계약서 재작성 및 관리자 서명까지 앱 기능이 제한됩니다.' : '관리자가 서명하면 기능이 정상화됩니다.'}
-                            </p>
-                            {contractStatus === 'needs_resign' && (
-                                <button onClick={handleStartRewrite}
-                                    className="mt-2 w-full bg-purple-600 text-white py-2.5 rounded-xl font-bold hover:bg-purple-700 transition text-sm">
-                                    근로계약서 재작성하기
-                                </button>
-                            )}
-                        </div>
-                    )}
+                    {isContractBlocked && !empAccount?.pendingRewrite && (() => {
+                        const isFirstContract = !empAccount?.contract;
+                        const verb = isFirstContract ? '작성' : '재작성';
+                        return (
+                            <div className={`rounded-xl p-4 border ${contractStatus === 'needs_resign' ? 'bg-red-50 border-red-200' : 'bg-yellow-50 border-yellow-200'}`}>
+                                <p className={`font-bold text-sm ${contractStatus === 'needs_resign' ? 'text-red-700' : 'text-yellow-700'}`}>
+                                    {contractStatus === 'needs_resign' ? '⚠️ 근로계약서를 작성해주세요' : '⏳ 관리자 서명 대기 중'}
+                                </p>
+                                <p className="text-xs text-gray-600 mt-1">
+                                    {contractStatus === 'needs_resign' ? `근로계약서 ${verb} 및 관리자 서명까지 앱 기능이 제한됩니다.` : '관리자가 서명하면 기능이 정상화됩니다.'}
+                                </p>
+                                {contractStatus === 'needs_resign' && (
+                                    <button onClick={handleStartRewrite}
+                                        className="mt-2 w-full bg-purple-600 text-white py-2.5 rounded-xl font-bold hover:bg-purple-700 transition text-sm">
+                                        근로계약서 {verb}하기
+                                    </button>
+                                )}
+                            </div>
+                        );
+                    })()}
 
                     <div className="bg-white rounded-xl border border-blue-200 shadow-sm">
                         <button onClick={() => setInfoExpanded(p => !p)} className="w-full flex items-center justify-between p-6 text-left">
@@ -4677,7 +4685,8 @@
                                 contractDeleteRequest: firebase.firestore.FieldValue.delete()
                             });
                         setEmployees(prev => prev.map(e => e.id === emp.id ? { ...emp, contractStatus: 'needs_resign', pendingRewrite: true, contractDeleteRequest: null } : e));
-                        showAlert(`${emp.name}님에게 근로계약서 재작성이 요청되었습니다.`, '요청 완료', 'success');
+                        const verb = reason === 'new_contract' ? '작성' : '재작성';
+                        showAlert(`${emp.name}님에게 근로계약서 ${verb}이 요청되었습니다.`, '요청 완료', 'success');
                     }
                     (onSaveComplete || onClose)();
                 } catch(e) { showAlert('저장 실패: ' + e.message, '오류', 'error'); }
@@ -5405,7 +5414,7 @@
                                         {isContractBlocked && (
                                             <div className={`mb-2 px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1 ${contractStatus === 'needs_resign' ? 'bg-red-50 text-red-700 border border-red-200' : 'bg-yellow-50 text-yellow-700 border border-yellow-200'}`}>
                                                 <AlertCircle className="w-3.5 h-3.5 flex-shrink-0" />
-                                                {contractStatus === 'needs_resign' ? '⏳ 근로계약서 재작성 대기중' : '⏳ 근로계약서 서명 대기 중'}
+                                                {contractStatus === 'needs_resign' ? (emp.contract ? '⏳ 근로계약서 재작성 대기중' : '⏳ 근로계약서 작성 대기중') : '⏳ 근로계약서 서명 대기 중'}
                                             </div>
                                         )}
                                         <div className="flex justify-between items-start mb-3">

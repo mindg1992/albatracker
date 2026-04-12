@@ -5428,7 +5428,7 @@
                             next.delete(emp.id);
                             return next;
                         });
-                        showAlert('서명이 완료되었습니다. 근무자의 사용제한이 해제되었습니다.', '서명 완료', 'success');
+                        showAlert('서명이 완료되었습니다. 근무자의 앱 사용제한이 해제되었습니다.', '서명 완료', 'success');
                     } catch(e) { showAlert('서명 실패: ' + e.message, '오류', 'error'); }
                 }, '근로계약서 서명');
             };
@@ -5639,7 +5639,7 @@
                                     return next;
                                 });
                                 setViewingContract(null);
-                                showAlert('서명이 완료되었습니다. 근무자의 사용제한이 해제되었습니다.', '서명 완료', 'success');
+                                showAlert('서명이 완료되었습니다. 근무자의 앱 사용제한이 해제되었습니다.', '서명 완료', 'success');
                             }}
                             contractDeleteRequest={modalDeleteReq}
                             onRequestDelete={() => {

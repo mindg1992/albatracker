@@ -8725,27 +8725,6 @@
             const removeSection = (i) => { if (sections.length <= 1) return; setSections(prev => prev.filter((_, j) => j !== i)); };
             const updateSection = (i, key, val) => setSections(prev => prev.map((s, j) => j === i ? { ...s, [key]: val } : s));
 
-            const handleClearContract = (emp) => {
-                if (!firebaseUser || !emp.empUid) return;
-                showConfirm(
-                    `${emp.name}님의 근로계약서 상태를 초기화하시겠습니까?\n\n근무자가 제출한 계약서 원본에는 영향이 없습니다.`,
-                    async () => {
-                        try {
-                            const bossUid = workspaceId || firebaseUser.uid;
-                            await fbDb.collection('employeeAccounts').doc(emp.empUid)
-                                .collection('workplaces').doc(bossUid)
-                                .update({
-                                    contractStatus: firebase.firestore.FieldValue.delete(),
-                                    contractDeleteRequest: firebase.firestore.FieldValue.delete()
-                                });
-                            setEmployees(prev => prev.map(e => e.id === emp.id ? { ...e, contractStatus: null, contractDeleteRequest: null } : e));
-                            showAlert(`${emp.name}님의 근로계약서 상태가 초기화되었습니다.`, '초기화 완료', 'success');
-                        } catch(err) { showAlert('처리 실패: ' + err.message, '오류', 'error'); }
-                    },
-                    '계약서 상태 초기화'
-                );
-            };
-
             const handleDeleteTemplate = () => {
                 if (!firebaseUser || !existing) return;
                 showConfirm(
@@ -8926,35 +8905,6 @@
                         </div>
                     )}
                 </div>
-                {/* 근무자 근로계약서 관리 (템플릿 미설정 시) */}
-                {!existing && employees && employees.some(e => e.empUid && e.contractStatus) && (
-                    <div className="max-w-md mx-auto mt-4 bg-white rounded-2xl shadow-sm border border-gray-200">
-                        <div className="p-5 border-b border-gray-100">
-                            <h3 className="text-base font-bold text-gray-800">근무자 근로계약서 관리</h3>
-                            <p className="text-xs text-gray-500 mt-0.5">계약서 상태를 초기화합니다. 근무자가 제출한 계약서 원본에는 영향이 없습니다.</p>
-                        </div>
-                        <div className="divide-y divide-gray-100">
-                            {employees.filter(e => e.empUid && e.contractStatus).map(emp => (
-                                <div key={emp.id} className="flex items-center justify-between px-5 py-3">
-                                    <div>
-                                        <p className="text-sm font-bold text-gray-800">{emp.name}</p>
-                                        <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
-                                            emp.contractStatus === 'completed' ? 'bg-purple-100 text-purple-700' :
-                                            emp.contractStatus === 'pending_boss' ? 'bg-yellow-100 text-yellow-700' :
-                                            'bg-red-100 text-red-700'
-                                        }`}>
-                                            {emp.contractStatus === 'completed' ? '계약 완료' : emp.contractStatus === 'pending_boss' ? '서명 대기' : '재작성 대기'}
-                                        </span>
-                                    </div>
-                                    <button onClick={() => handleClearContract(emp)}
-                                        className="text-xs text-red-600 border border-red-200 bg-red-50 hover:bg-red-100 px-3 py-1.5 rounded-lg font-bold transition">
-                                        초기화
-                                    </button>
-                                </div>
-                            ))}
-                        </div>
-                    </div>
-                )}
             </>
             );
         }

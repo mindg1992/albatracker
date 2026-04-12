@@ -5,29 +5,23 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>알바트래커 v2.0</title>
 
-    <!-- PWA 설치 차단: manifest 링크와 standalone 메타태그 제거 (TWA 빌드는 manifest.json 파일 직접 참조) -->
+    <link rel="manifest" href="/manifest.json">
     <meta name="theme-color" content="#22c55e">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="apple-mobile-web-app-title" content="알바트래커">
     <link rel="icon" type="image/svg+xml" href="icon.svg">
     <link rel="apple-touch-icon" href="icon.svg">
 
-    <!-- 기존 설치 PWA 차단 감지 (TWA는 허용) -->
+    <!-- isTWA 캐시: TWA 최초 런치 시에만 referrer가 android-app://로 시작함.
+         OAuth 리다이렉트 왕복 후에는 사라지므로 localStorage에 캐시해 유지. -->
     <script>
         (function() {
-            var isStandalone = window.matchMedia('(display-mode: standalone)').matches
-                || window.matchMedia('(display-mode: fullscreen)').matches
-                || window.matchMedia('(display-mode: minimal-ui)').matches
-                || window.navigator.standalone === true;
-            // TWA 최초 런치 시에만 referrer가 android-app://로 시작함.
-            // OAuth 리다이렉트 왕복 후에는 referrer가 accounts.google.com 등으로 바뀌므로
-            // 첫 감지 시 localStorage에 캐시해 이후 재진입에서도 TWA로 판정 유지.
             var referrerIsTWA = document.referrer.indexOf('android-app://') === 0;
-            var cachedIsTWA = false;
-            try { cachedIsTWA = localStorage.getItem('isTWA') === '1'; } catch(_) {}
             if (referrerIsTWA) {
                 try { localStorage.setItem('isTWA', '1'); } catch(_) {}
             }
-            var isTWA = referrerIsTWA || cachedIsTWA;
-            window.__PWA_BLOCKED__ = isStandalone && !isTWA;
         })();
     </script>
 
@@ -96,98 +90,6 @@
 </head>
 <body>
     <div id="root"></div>
-
-    <!-- PWA standalone 사용자 권장 안내 화면 -->
-    <script>
-        (function() {
-            if (!window.__PWA_BLOCKED__) return;
-            var root = document.getElementById('root');
-            if (!root) return;
-
-            // Play Store TWA 출시 후 true로 변경하면 즉시 활성화됨
-            var PLAY_STORE_AVAILABLE = false;
-            var PLAY_STORE_URL = 'https://play.google.com/store/apps/details?id=com.albatracker.app';
-            var appUrl = 'https://albatracker-9e90e.web.app/';
-
-            var ua = navigator.userAgent || '';
-            var isAndroid = /Android/i.test(ua);
-            var isIOS = /iPhone|iPad|iPod/i.test(ua);
-            var showBoth = !isAndroid && !isIOS;
-
-            var sectionStyle = 'background:#f9fafb;border-radius:12px;padding:16px 18px;margin-bottom:14px;border:1px solid #e5e7eb;';
-            var sectionTitleStyle = 'font-size:15px;font-weight:700;color:#111;margin:0 0 10px;';
-            var olStyle = 'font-size:13px;color:#333;line-height:1.8;padding-left:18px;margin:0 0 10px;';
-            var btnPrimary = 'display:block;width:100%;background:#22c55e;color:#fff;text-align:center;padding:13px;border-radius:10px;border:none;font-weight:600;font-size:14px;cursor:pointer;margin-top:6px;text-decoration:none;box-sizing:border-box;';
-            var btnSecondary = 'display:block;width:100%;background:#111;color:#fff;text-align:center;padding:13px;border-radius:10px;border:none;font-weight:600;font-size:14px;cursor:pointer;margin-top:6px;box-sizing:border-box;';
-            var btnDisabled = 'display:block;width:100%;background:#e5e7eb;color:#6b7280;text-align:center;padding:13px;border-radius:10px;border:none;font-weight:600;font-size:14px;cursor:default;margin-top:6px;box-sizing:border-box;';
-
-            var androidSection = '';
-            if (isAndroid || showBoth) {
-                var playBtn = PLAY_STORE_AVAILABLE
-                    ? '<a href="' + PLAY_STORE_URL + '" style="' + btnPrimary + '">📲 Play Store에서 받기</a>'
-                    : '<button disabled style="' + btnDisabled + '">📲 Play Store 출시 준비 중</button>';
-                androidSection =
-                    '<div style="' + sectionStyle + '">' +
-                      '<h2 style="' + sectionTitleStyle + '">📱 안드로이드 사용자</h2>' +
-                      '<ol style="' + olStyle + '">' +
-                        '<li><b>권장</b>: Play Store에서 알바트래커 앱 다운로드</li>' +
-                        '<li><b>대안</b>: 주소를 복사해 Chrome 브라우저에서 열기</li>' +
-                      '</ol>' +
-                      playBtn +
-                      '<button id="__pwa_copy_btn_aos__" style="' + btnSecondary + '">📋 주소 복사 (Chrome용)</button>' +
-                    '</div>';
-            }
-
-            var iosSection = '';
-            if (isIOS || showBoth) {
-                iosSection =
-                    '<div style="' + sectionStyle + '">' +
-                      '<h2 style="' + sectionTitleStyle + '">🍎 iPhone / iPad 사용자</h2>' +
-                      '<ol style="' + olStyle + '">' +
-                        '<li><b>Safari 브라우저</b>에서 알바트래커 열기</li>' +
-                        '<li>하단 공유 버튼 → <b>"홈 화면에 추가"</b> 선택</li>' +
-                      '</ol>' +
-                      '<button id="__pwa_copy_btn_ios__" style="' + btnSecondary + '">📋 주소 복사 (Safari용)</button>' +
-                    '</div>';
-            }
-
-            root.innerHTML =
-                '<div style="position:fixed;inset:0;background:#f3f4f6;z-index:99999;display:flex;align-items:flex-start;justify-content:center;padding:20px;font-family:-apple-system,BlinkMacSystemFont,system-ui,sans-serif;overflow-y:auto;">' +
-                  '<div style="background:#fff;border-radius:16px;box-shadow:0 10px 40px rgba(0,0,0,0.08);max-width:460px;width:100%;padding:28px 24px;margin:20px 0;">' +
-                    '<div style="font-size:44px;text-align:center;margin-bottom:10px;">💡</div>' +
-                    '<h1 style="font-size:20px;font-weight:700;color:#111;text-align:center;margin:0 0 10px;">알바트래커를 더 편하게 사용하기</h1>' +
-                    '<p style="font-size:13px;color:#555;text-align:center;line-height:1.6;margin:0 0 20px;">아래 권장 방법으로 사용하시면<br>가장 안정적으로 이용하실 수 있어요.</p>' +
-                    androidSection +
-                    iosSection +
-                    '<p style="font-size:12px;color:#6b7280;text-align:center;margin:16px 0 0;font-family:ui-monospace,Menlo,monospace;word-break:break-all;">albatracker-9e90e.web.app</p>' +
-                  '</div>' +
-                '</div>';
-
-            var doCopy = function(btn) {
-                var fallback = function() {
-                    var ta = document.createElement('textarea');
-                    ta.value = appUrl;
-                    ta.style.position = 'fixed';
-                    ta.style.opacity = '0';
-                    document.body.appendChild(ta);
-                    ta.select();
-                    try { document.execCommand('copy'); } catch(e) {}
-                    document.body.removeChild(ta);
-                };
-                if (navigator.clipboard && navigator.clipboard.writeText) {
-                    navigator.clipboard.writeText(appUrl).catch(fallback);
-                } else {
-                    fallback();
-                }
-                btn.textContent = '✓ 복사되었습니다';
-                btn.style.background = '#22c55e';
-            };
-            ['__pwa_copy_btn_aos__', '__pwa_copy_btn_ios__'].forEach(function(id) {
-                var b = document.getElementById(id);
-                if (b) b.addEventListener('click', function() { doCopy(b); });
-            });
-        })();
-    </script>
 
     <!-- App Check: 봇/스크립트 차단 (reCAPTCHA Enterprise) -->
     <script>
@@ -2844,41 +2746,6 @@
         // ============================================================
 
         function LandingScreen({ onBossLogin, onEmpGoogleLogin, modalConfig }) {
-            // 임시 디버그: TWA 로그인 리다이렉트 실패 원인 파악용
-            const [debugInfo, setDebugInfo] = React.useState(() => {
-                try {
-                    const before = localStorage.getItem('albaAuthDebugBefore');
-                    const after = localStorage.getItem('albaAuthDebug');
-                    const entry = localStorage.getItem('albaAuthDebugEntry');
-                    const role = localStorage.getItem('albaLoginRole');
-                    const isTWA = localStorage.getItem('isTWA');
-                    const standalone = window.matchMedia('(display-mode: standalone)').matches;
-                    const referrer = document.referrer || '(empty)';
-                    const fbSess = Object.keys(sessionStorage).filter(k => k.toLowerCase().includes('firebase'));
-                    const fbLocal = Object.keys(localStorage).filter(k => k.toLowerCase().includes('firebase'));
-                    return {
-                        before: before ? JSON.parse(before) : null,
-                        after: after ? JSON.parse(after) : null,
-                        entry: entry ? JSON.parse(entry) : null,
-                        role,
-                        isTWA,
-                        standalone,
-                        referrer: referrer.substring(0, 80),
-                        fbSessKeys: fbSess.length,
-                        fbLocalKeys: fbLocal.length,
-                    };
-                } catch(e) {
-                    return { error: e.message };
-                }
-            });
-            const clearDebug = () => {
-                try {
-                    localStorage.removeItem('albaAuthDebug');
-                    localStorage.removeItem('albaAuthDebugBefore');
-                    localStorage.removeItem('albaAuthDebugEntry');
-                    setDebugInfo(null);
-                } catch(_) {}
-            };
             return (
                 <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-4">
                     <CustomModal config={modalConfig} />
@@ -2886,22 +2753,6 @@
                         <ATLogo className="w-16 h-16 mx-auto mb-4 rounded-2xl shadow-md" />
                         <h2 className="text-2xl font-bold text-gray-800 mb-2">알바트래커</h2>
                         <p className="text-gray-500 mb-8 text-sm">근무 관리를 시작해볼까요?</p>
-                        {debugInfo && (
-                            <div className="bg-yellow-50 border border-yellow-300 rounded-lg p-3 mb-4 text-left text-[10px] font-mono text-yellow-900 overflow-auto max-h-60">
-                                <div className="flex justify-between items-center mb-1">
-                                    <b>DEBUG</b>
-                                    <button onClick={clearDebug} className="text-red-600 underline text-[10px]">clear</button>
-                                </div>
-                                <div>standalone: {String(debugInfo.standalone)}</div>
-                                <div>isTWA(cache): {debugInfo.isTWA || 'null'}</div>
-                                <div>referrer: {debugInfo.referrer}</div>
-                                <div>role: {debugInfo.role || 'null'}</div>
-                                <div>fbSessKeys: {debugInfo.fbSessKeys} / fbLocalKeys: {debugInfo.fbLocalKeys}</div>
-                                <div className="mt-1 break-all">before: {debugInfo.before ? JSON.stringify(debugInfo.before) : 'null'}</div>
-                                <div className="mt-1 break-all">entry: {debugInfo.entry ? JSON.stringify(debugInfo.entry) : 'null'}</div>
-                                <div className="mt-1 break-all">after: {debugInfo.after ? JSON.stringify(debugInfo.after) : 'null'}</div>
-                            </div>
-                        )}
                         <div className="space-y-3">
                             {/* 관리자 Google 로그인 */}
                             <button onClick={onBossLogin} className="w-full flex items-center justify-center gap-3 border border-gray-300 rounded-xl py-3 px-4 hover:bg-gray-50 transition font-medium text-gray-700 shadow-sm">
@@ -9089,25 +8940,17 @@
             );
         }
 
-        if (!window.__PWA_BLOCKED__) {
-            const root = ReactDOM.createRoot(document.getElementById('root'));
-            root.render(<AlbaTracker />);
-        }
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<AlbaTracker />);
     </script>
 
-    <!-- PWA 설치 차단: 과거에 등록된 SW/캐시 정리 -->
-    <!-- SW가 살아있으면 Chrome이 PWA 설치 조건을 충족시켜 "홈 화면에 추가" 시 standalone 앱이 만들어짐.
-         SW를 제거하면 단순 바로가기만 가능 → display-mode: browser → 차단 로직 우회 + 정상 사용. -->
+    <!-- Service Worker 등록: PWA installable 조건 충족용 빈 fetch handler.
+         가로채기·캐싱이 없어 OAuth 플로우와 페이지 갱신을 망치지 않음. -->
     <script>
         if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.getRegistrations()
-                .then(regs => regs.forEach(reg => reg.unregister()))
-                .catch(() => {});
-        }
-        if (window.caches) {
-            caches.keys()
-                .then(keys => keys.forEach(k => caches.delete(k)))
-                .catch(() => {});
+            window.addEventListener('load', function() {
+                navigator.serviceWorker.register('./sw.js').catch(function() {});
+            });
         }
     </script>
 </body>

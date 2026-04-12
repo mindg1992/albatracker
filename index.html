@@ -14,17 +14,6 @@
     <link rel="icon" type="image/svg+xml" href="icon.svg">
     <link rel="apple-touch-icon" href="icon.svg">
 
-    <!-- isTWA 캐시: TWA 최초 런치 시에만 referrer가 android-app://로 시작함.
-         OAuth 리다이렉트 왕복 후에는 사라지므로 localStorage에 캐시해 유지. -->
-    <script>
-        (function() {
-            var referrerIsTWA = document.referrer.indexOf('android-app://') === 0;
-            if (referrerIsTWA) {
-                try { localStorage.setItem('isTWA', '1'); } catch(_) {}
-            }
-        })();
-    </script>
-
     <!-- React & ReactDOM -->
     <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
@@ -834,62 +823,10 @@
 
             // Firebase 로그인 상태 감지
             useEffect(() => {
-                // 리다이렉트 복귀 시점 처리 + 디버그 로깅 (PWA 테스트용)
+                // 리다이렉트 복귀 시 에러 처리 (성공은 onAuthStateChanged가 처리)
                 const pendingLoginRole = localStorage.getItem('albaLoginRole');
-                const fbKeysOnReturn = Object.keys(sessionStorage).filter(k => k.includes('firebase'));
-                // 복귀 URL과 pendingRedirect 값을 그대로 저장 (진단용)
-                const entryUrl = (window.location.href || '').substring(0, 200);
-                const hasHash = !!window.location.hash;
-                const hasSearch = !!window.location.search;
-                const pendingRedirectKey = fbKeysOnReturn.find(k => k.indexOf('pendingRedirect') !== -1);
-                const pendingRedirectVal = pendingRedirectKey ? sessionStorage.getItem(pendingRedirectKey) : null;
-                const allSessKeys = Object.keys(sessionStorage);
-                const allLocalKeys = Object.keys(localStorage);
-                // IndexedDB 상태 확인 (Firebase 기본 persistence)
-                let idbState = 'unknown';
-                try {
-                    if (window.indexedDB && indexedDB.databases) {
-                        indexedDB.databases().then(dbs => {
-                            const entry = JSON.parse(localStorage.getItem('albaAuthDebugEntry') || '{}');
-                            entry.idbDbs = dbs.map(d => d.name).slice(0, 10);
-                            localStorage.setItem('albaAuthDebugEntry', JSON.stringify(entry));
-                        }).catch(() => {});
-                    } else {
-                        idbState = window.indexedDB ? 'no-databases-api' : 'no-idb';
-                    }
-                } catch(_) { idbState = 'error'; }
-                localStorage.setItem('albaAuthDebugEntry', JSON.stringify({
-                    entryUrl, hasHash, hasSearch,
-                    sessKeyCount: allSessKeys.length,
-                    localKeyCount: allLocalKeys.length,
-                    sessKeys: allSessKeys.slice(0, 10),
-                    pendingRedirectVal: pendingRedirectVal ? pendingRedirectVal.substring(0, 80) : null,
-                    idbState,
-                    time: new Date().toLocaleTimeString()
-                }));
                 fbAuth.getRedirectResult()
-                    .then(result => {
-                        if (pendingLoginRole) {
-                            localStorage.setItem('albaAuthDebug', JSON.stringify({
-                                stage: 'return-ok',
-                                hasUser: !!result?.user,
-                                userEmail: result?.user?.email || null,
-                                loginRole: pendingLoginRole,
-                                fbSessionKeys: fbKeysOnReturn,
-                                standalone: (() => { try { return window.matchMedia('(display-mode: standalone)').matches; } catch(_) { return false; } })(),
-                                time: new Date().toLocaleTimeString()
-                            }));
-                        }
-                    })
                     .catch(e => {
-                        localStorage.setItem('albaAuthDebug', JSON.stringify({
-                            stage: 'return-error',
-                            code: e?.code || '',
-                            message: e?.message || '',
-                            loginRole: pendingLoginRole,
-                            fbSessionKeys: fbKeysOnReturn,
-                            time: new Date().toLocaleTimeString()
-                        }));
                         if (!pendingLoginRole) return;
                         localStorage.removeItem('albaLoginRole');
                         setFbLoading(false);
@@ -1193,38 +1130,19 @@
                 'auth/operation-not-supported-in-this-environment',
                 'auth/internal-error'
             ]);
-            const tryGoogleSignIn = async (role) => {
+            const tryGoogleSignIn = async () => {
                 const provider = new firebase.auth.GoogleAuthProvider();
-                const standalone = isStandalonePWA();
-                localStorage.setItem('albaAuthDebugBefore', JSON.stringify({
-                    stage: 'try-popup',
-                    role, standalone,
-                    time: new Date().toLocaleTimeString()
-                }));
                 try {
                     await fbAuth.signInWithPopup(provider);
-                    localStorage.setItem('albaAuthDebug', JSON.stringify({
-                        stage: 'popup-ok', role, standalone,
-                        time: new Date().toLocaleTimeString()
-                    }));
                     return;
                 } catch(e) {
                     const code = e?.code || '';
-                    const msg = e?.message || '';
-                    localStorage.setItem('albaAuthDebug', JSON.stringify({
-                        stage: 'popup-error', code, message: msg, role, standalone,
-                        time: new Date().toLocaleTimeString()
-                    }));
                     // 사용자가 직접 닫은 경우는 fallback 안 함 (실제 취소)
                     if (code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') {
                         throw e;
                     }
                     // popup을 열 수 없는 환경이면 redirect로 폴백
                     if (POPUP_FALLBACK_CODES.has(code) || !code) {
-                        localStorage.setItem('albaAuthDebugBefore', JSON.stringify({
-                            stage: 'fallback-redirect', role, standalone, prevCode: code,
-                            time: new Date().toLocaleTimeString()
-                        }));
                         await fbAuth.signInWithRedirect(provider);
                         return; // 페이지 이동
                     }
@@ -1237,7 +1155,7 @@
                 localStorage.setItem('albaLoginRole', 'boss');
                 setFbLoading(true);
                 try {
-                    await tryGoogleSignIn('boss');
+                    await tryGoogleSignIn();
                 } catch(e) {
                     localStorage.removeItem('albaLoginRole');
                     setFbLoading(false);
@@ -1252,7 +1170,7 @@
                 localStorage.setItem('albaLoginRole', 'employee');
                 setFbLoading(true);
                 try {
-                    await tryGoogleSignIn('employee');
+                    await tryGoogleSignIn();
                 } catch(e) {
                     localStorage.removeItem('albaLoginRole');
                     setFbLoading(false);

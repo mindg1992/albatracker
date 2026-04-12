@@ -1,7 +1,7 @@
 {
   "id": "/",
-  "name": "알바트래커",
-  "short_name": "알바트래커",
+  "name": "알바트래커(PWA.ver)",
+  "short_name": "알바트래커(PWA.ver)",
   "description": "소규모 사업장을 위한 아르바이트생 근무 및 급여 관리 앱. 근무시간 기록, 급여 자동 계산, 급여명세서 발송까지.",
   "start_url": "/",
   "scope": "/",

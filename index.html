@@ -5062,15 +5062,40 @@
                     });
                     batch.commit().catch(() => {});
                 }
-                if (!workspaceInfo?.contractTemplate) return;
                 // 최저시급 적용 중인 근무자(시급 미설정 또는 이전 최저시급과 동일) 중 계약 완료자만
                 const affectedEmps = employees.filter(emp => {
                     const usesMinWage = !emp.wage || Number(emp.wage) === 0 || Number(emp.wage) === Number(oldVal);
                     return usesMinWage && emp.contractStatus === 'completed';
                 });
-                if (affectedEmps.length > 0) {
+                if (affectedEmps.length === 0) return;
+
+                if (workspaceInfo?.contractTemplate) {
+                    // 글로벌 템플릿이 있는 경우: 템플릿 수정 모달을 띄우고, 저장 시 각 근무자에게 새 템플릿 + 재작성 요청
                     setMinWageTemplateAfterSave({ affectedEmps });
                     setPendingContractUpdateEmpIds(new Set(affectedEmps.map(e => e.id)));
+                } else {
+                    // 글로벌 템플릿이 없는 경우: 개별 계약서 보유 근무자에게 모달 없이 즉시 재작성 요청
+                    // (개별 계약서는 근무자 화면에서 기존 데이터를 기반으로 다시 작성됨)
+                    const empsToUpdate = affectedEmps.filter(emp => emp.empUid);
+                    if (empsToUpdate.length === 0) return;
+                    if (currentWorkspaceId) {
+                        const batch = fbDb.batch();
+                        empsToUpdate.forEach(emp => {
+                            batch.update(
+                                fbDb.collection('employeeAccounts').doc(emp.empUid).collection('workplaces').doc(currentWorkspaceId),
+                                { contractStatus: 'needs_resign', pendingRewrite: true }
+                            );
+                        });
+                        batch.commit().catch(() => {});
+                    }
+                    setEmployees(prev => prev.map(e =>
+                        empsToUpdate.some(a => a.id === e.id)
+                            ? { ...e, contractStatus: 'needs_resign', pendingRewrite: true }
+                            : e
+                    ));
+                    setPendingContractUpdateEmpIds(new Set(empsToUpdate.map(e => e.id)));
+                    const names = empsToUpdate.map(e => e.name).join(', ');
+                    showAlert(`${names}님에게 근로계약서 재작성이 요청되었습니다.`, '요청 완료', 'success');
                 }
             };
 

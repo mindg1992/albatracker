@@ -467,25 +467,27 @@
         }
 
         // 직원 상태 변경 알림 발송
-        async function sendStatusChangeNotification(empUid, newStatus) {
+        async function sendStatusChangeNotification(empUid, bossUid, newStatus) {
             const notifId = `status_${Date.now()}`;
             await fbDb.collection('employeeAccounts').doc(empUid)
                 .collection('notifications').doc(notifId).set({
                     type: 'status_change',
                     newStatus,
+                    bossUid: bossUid || null,
                     read: false,
                     createdAt: firebase.firestore.FieldValue.serverTimestamp()
                 });
         }
 
         // 직원 시급 변경 알림 발송
-        async function sendWageChangeNotification(empUid, oldWage, newWage) {
+        async function sendWageChangeNotification(empUid, bossUid, oldWage, newWage) {
             const notifId = `wage_${Date.now()}`;
             await fbDb.collection('employeeAccounts').doc(empUid)
                 .collection('notifications').doc(notifId).set({
                     type: 'wage_change',
                     oldWage,
                     newWage,
+                    bossUid: bossUid || null,
                     read: false,
                     createdAt: firebase.firestore.FieldValue.serverTimestamp()
                 });
@@ -2028,7 +2030,7 @@
                                 }}
                                 firebaseUser={firebaseUser}
                                 mySubmissions={mySubmissions}
-                                notifications={empNotifications}
+                                notifications={empNotifications.filter(n => !n.bossUid || n.bossUid === selectedEmpBossUid)}
                                 onLogout={handleLogout}
                                 onLock={handleLogout}
                                 showAlert={showAlert}
@@ -5037,7 +5039,7 @@
                     if (currentWorkspaceId) {
                         equalWageEmps.forEach(emp => {
                             if (emp.empUid) {
-                                sendWageChangeNotification(emp.empUid, Number(oldVal), newMin).catch(() => {});
+                                sendWageChangeNotification(emp.empUid, currentWorkspaceId, Number(oldVal), newMin).catch(() => {});
                                 fbDb.collection('employeeAccounts').doc(emp.empUid)
                                     .collection('workplaces').doc(currentWorkspaceId)
                                     .update({ wageBelowMin: firebase.firestore.FieldValue.delete() })
@@ -5144,6 +5146,7 @@
                     if (wageChanged && dataToSave.empUid) {
                         sendWageChangeNotification(
                             dataToSave.empUid,
+                            currentWorkspaceId,
                             Number(editingEmp.wage) || Number(globalMinWage),
                             Number(finalData.wage) || Number(globalMinWage)
                         ).catch(() => {});
@@ -5164,7 +5167,7 @@
                                 .collection('workplaces').doc(currentWorkspaceId)
                                 .update({ workStatus: newStatus })
                                 .catch(() => {});
-                            sendStatusChangeNotification(empUid, newStatus).catch(() => {});
+                            sendStatusChangeNotification(empUid, currentWorkspaceId, newStatus).catch(() => {});
                         }
 
                         if (oldStatus === 'working' && newStatus === 'leave') {
@@ -5912,7 +5915,8 @@
                             sendChangeNotification(empUid, {
                                 type: 'hours_deleted',
                                 date: dateStr,
-                                oldHours: entry.hours
+                                oldHours: entry.hours,
+                                bossUid: workspaceId || null
                             }).catch(() => {});
                         }
                     });
@@ -6143,7 +6147,8 @@
                                                 sendChangeNotification(entry.empUid, {
                                                     type: 'hours_deleted',
                                                     date: dateStr,
-                                                    oldHours: entry.hours
+                                                    oldHours: entry.hours,
+                                                    bossUid: workspaceId || null
                                                 }).catch(() => {});
                                             }
                                         });
@@ -6491,7 +6496,8 @@
                                     sendChangeNotification(empUid, {
                                         type: 'hours_entered',
                                         date: dateStr,
-                                        newHours: hours
+                                        newHours: hours,
+                                        bossUid: workspaceId || null
                                     }).catch(() => {});
                                 } else {
                                     // 기존 시간을 변경 (직원 제출이든 관리자 입력이든)
@@ -6499,7 +6505,8 @@
                                         type: 'hours_modified',
                                         date: dateStr,
                                         oldHours: existingEntry.hours,
-                                        newHours: hours
+                                        newHours: hours,
+                                        bossUid: workspaceId || null
                                     }).catch(() => {});
                                 }
                             }
@@ -6519,7 +6526,8 @@
                                     sendChangeNotification(empUid, {
                                         type: 'hours_deleted',
                                         date: dateStr,
-                                        oldHours: existingEntry.hours
+                                        oldHours: existingEntry.hours,
+                                        bossUid: workspaceId || null
                                     }).catch(() => {});
                                 }
                             }

@@ -1938,12 +1938,14 @@
             const contractRewriteBannerMsg = contractRewriteRequestCount === 1
                 ? `${contractRewriteRequests[0].name}님이 재작성을 요청했습니다.`
                 : `${contractRewriteRequests[0]?.name}님 외 ${contractRewriteRequestCount - 1}명이 재작성을 요청했습니다.`;
-            // 뱃지: 재작성 요청 ~ 작성 완료 전까지 유지 (동의 대기 + 재작성 대기 + 서명 대기)
+            // 뱃지: 재작성 요청 ~ 작성 완료 전까지 유지 + 시급 미달 + 수정 필요 신호
             const contractPendingBadgeCount = employees.filter(e =>
                 e.contractDeleteRequest === 'employee' ||
                 e.contractStatus === 'needs_resign' ||
                 e.contractStatus === 'pending_boss' ||
-                e.pendingRewrite
+                e.pendingRewrite ||
+                e.contractUpdateRequired ||
+                (e.wage && Number(e.wage) > 0 && Number(globalMinWage) > 0 && Number(e.wage) < Number(globalMinWage))
             ).length;
             // 계약서 제출 알림 (pending_boss 상태)
             const contractSubmitRequests = employees.filter(e => e.contractStatus === 'pending_boss');

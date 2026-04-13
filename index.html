@@ -4446,10 +4446,24 @@
                         {payslipOpen && (
                             <div className="mt-3 space-y-2">
                                 {myPayslips.length > 0 ? (
-                                    myPayslips.slice(0, 6).sort((a, b) => {
-                                        if (a.year !== b.year) return b.year - a.year;
-                                        return b.month - a.month;
-                                    }).map(p => (
+                                    (() => {
+                                        // 월별 최신 1건만 (같은 월 중복 발송 시 마지막 것)
+                                        const sorted = [...myPayslips].sort((a, b) => {
+                                            if (a.year !== b.year) return b.year - a.year;
+                                            if (a.month !== b.month) return b.month - a.month;
+                                            const ta = a.sentAt?.toDate ? a.sentAt.toDate().getTime() : 0;
+                                            const tb = b.sentAt?.toDate ? b.sentAt.toDate().getTime() : 0;
+                                            return tb - ta;
+                                        });
+                                        const seen = new Set();
+                                        const unique = sorted.filter(p => {
+                                            const key = `${p.year}-${p.month}`;
+                                            if (seen.has(key)) return false;
+                                            seen.add(key);
+                                            return true;
+                                        });
+                                        return unique.slice(0, 6);
+                                    })().map(p => (
                                         <button key={p.docId} onClick={async () => {
                                             onViewPayslip(p);
                                             if (!p.read) {

@@ -4073,20 +4073,28 @@
                                     {(() => {
                                         const subs = Object.values(mySubmissions).filter(s => s.date?.startsWith(monthKey));
                                         const totalH = subs.reduce((a,s) => a+(s.hours||0), 0);
-                                        const empWage = empAccount?.wage || Number(globalMinWage) || MIN_WAGE;
+                                        const empWage = Number(empAccount?.wage) || Number(globalMinWage || 0) || MIN_WAGE;
                                         // 시급별 분류
                                         const wageMap = {};
                                         subs.forEach(s => {
-                                            const w = s.wage || empWage;
+                                            const w = Number(s.wage) || empWage;
                                             if (!wageMap[w]) wageMap[w] = { days: 0, hours: 0 };
                                             wageMap[w].days += 1;
                                             wageMap[w].hours += (s.hours || 0);
                                         });
                                         const wages = Object.entries(wageMap).sort((a,b) => Number(a[0]) - Number(b[0]));
                                         const totalPay = wages.reduce((sum, [w, info]) => sum + Math.round(info.hours * Number(w)), 0);
-                                        return (
-                                            <div className="space-y-3">
+                                        if (subs.length === 0) {
+                                            return (
                                                 <div className="flex gap-4 text-sm">
+                                                    <div><p className="text-gray-500">근무일</p><p className="font-bold text-gray-800">0일</p></div>
+                                                    <div><p className="text-gray-500">총 시간</p><p className="font-bold text-gray-800">0시간</p></div>
+                                                </div>
+                                            );
+                                        }
+                                        return (
+                                            <div className="space-y-2">
+                                                <div className="flex flex-wrap gap-4 text-sm">
                                                     <div><p className="text-gray-500">근무일</p><p className="font-bold text-gray-800">{subs.length}일</p></div>
                                                     {wages.length <= 1 ? (
                                                         <div><p className="text-gray-500">시급</p><p className="font-bold text-gray-800">{Number(wages[0]?.[0] || empWage).toLocaleString()}원</p></div>

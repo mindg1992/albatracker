@@ -5320,12 +5320,14 @@
                             setPersonalTemplateTarget(finalData);
                             setIsModalOpen(false);
                             setEditingEmp(null);
-                            // early return 전에 wageBelowMin 즉시 반영
+                            // early return 전에 wageBelowMin + 이름 변경 즉시 반영
                             if (dataToSave.empUid && currentWorkspaceId) {
                                 const isLow = Number(finalData.wage) > 0 && Number(finalData.wage) < Number(globalMinWage);
+                                const wpUpdate = { wageBelowMin: isLow ? true : firebase.firestore.FieldValue.delete() };
+                                if (editingEmp.name !== dataToSave.name) wpUpdate.name = dataToSave.name;
                                 fbDb.collection('employeeAccounts').doc(dataToSave.empUid)
                                     .collection('workplaces').doc(currentWorkspaceId)
-                                    .update({ wageBelowMin: isLow ? true : firebase.firestore.FieldValue.delete() })
+                                    .update(wpUpdate)
                                     .catch(() => {});
                             }
                             return;

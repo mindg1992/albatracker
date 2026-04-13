@@ -4283,7 +4283,7 @@
             });
             const [saving, setSaving] = useState(false);
             const [viewingContract, setViewingContract] = useState(null);
-            const [payslipIdx, setPayslipIdx] = useState(0);
+            const [payslipOpen, setPayslipOpen] = useState(false);
             const [showContractWrite, setShowContractWrite] = useState(false);
             const [contractTemplate, setContractTemplate] = useState(null);
             const [liveDeleteReq, setLiveDeleteReq] = useState(empAccount?.contractDeleteRequest || null);
@@ -4433,43 +4433,41 @@
                         );
                     })()}
 
-                    {/* 급여명세서 열람 — 슬라이드 */}
+                    {/* 급여명세서 열람 — 드롭다운 */}
                     <div className="bg-white rounded-xl border border-emerald-200 shadow-sm p-6">
-                        <h3 className="text-base font-bold text-emerald-700 mb-3">급여명세서</h3>
-                        {myPayslips.length > 0 ? (() => {
-                            const idx = Math.min(payslipIdx, myPayslips.length - 1);
-                            const p = myPayslips[idx];
-                            return (
-                                <div>
-                                    <div className="flex items-center justify-between mb-3">
-                                        <button onClick={() => setPayslipIdx(Math.max(0, idx - 1))} disabled={idx === 0}
-                                            className="p-1.5 rounded-full hover:bg-gray-100 transition disabled:opacity-30">
-                                            <ChevronLeft className="w-5 h-5 text-gray-600"/>
+                        <button onClick={() => setPayslipOpen(!payslipOpen)}
+                            className="w-full flex items-center justify-between">
+                            <h3 className="text-base font-bold text-emerald-700 flex items-center gap-2">
+                                급여명세서
+                                {myPayslips.some(p => !p.read) && <span className="w-2 h-2 bg-red-500 rounded-full"></span>}
+                            </h3>
+                            <ChevronDown className={`w-5 h-5 text-gray-400 transition-transform ${payslipOpen ? 'rotate-180' : ''}`}/>
+                        </button>
+                        {payslipOpen && (
+                            <div className="mt-3 space-y-2">
+                                {myPayslips.length > 0 ? (
+                                    myPayslips.slice(0, 6).sort((a, b) => {
+                                        if (a.year !== b.year) return b.year - a.year;
+                                        return b.month - a.month;
+                                    }).map(p => (
+                                        <button key={p.docId} onClick={async () => {
+                                            onViewPayslip(p);
+                                            if (!p.read) {
+                                                try { await fbDb.collection('workspaces').doc(empAccount.bossUid).collection('payslips').doc(p.docId).update({ read: true }); } catch(e) {}
+                                            }
+                                        }}
+                                            className="w-full flex items-center justify-between bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 py-2.5 px-4 rounded-xl font-bold transition text-sm">
+                                            <span className="flex items-center gap-2">
+                                                {!p.read && <span className="w-2 h-2 bg-red-500 rounded-full shrink-0"></span>}
+                                                {p.year}년 {p.month}월
+                                            </span>
+                                            <span className="text-emerald-600">{Number(p.finalAmount||0).toLocaleString()}원</span>
                                         </button>
-                                        <span className="text-sm font-bold text-gray-700">{p.year}년 {p.month}월</span>
-                                        <button onClick={() => setPayslipIdx(Math.min(myPayslips.length - 1, idx + 1))} disabled={idx === myPayslips.length - 1}
-                                            className="p-1.5 rounded-full hover:bg-gray-100 transition disabled:opacity-30">
-                                            <ChevronRight className="w-5 h-5 text-gray-600"/>
-                                        </button>
-                                    </div>
-                                    <button onClick={async () => {
-                                        onViewPayslip(p);
-                                        if (!p.read) {
-                                            try { await fbDb.collection('workspaces').doc(empAccount.bossUid).collection('payslips').doc(p.docId).update({ read: true }); } catch(e) {}
-                                        }
-                                    }}
-                                        className="w-full flex items-center justify-between bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 py-3 px-4 rounded-xl font-bold transition text-sm">
-                                        <span className="flex items-center gap-2">
-                                            {!p.read && <span className="w-2 h-2 bg-red-500 rounded-full shrink-0"></span>}
-                                            급여명세서 열람
-                                        </span>
-                                        <span className="text-emerald-600">{Number(p.finalAmount||0).toLocaleString()}원</span>
-                                    </button>
-                                    <p className="text-center text-xs text-gray-400 mt-2">{idx + 1} / {myPayslips.length}</p>
-                                </div>
-                            );
-                        })() : (
-                            <p className="text-sm text-gray-400 text-center py-4">열람 가능한 급여명세서가 없습니다.</p>
+                                    ))
+                                ) : (
+                                    <p className="text-sm text-gray-400 text-center py-3">열람 가능한 급여명세서가 없습니다.</p>
+                                )}
+                            </div>
                         )}
                     </div>
 

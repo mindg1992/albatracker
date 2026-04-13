@@ -1643,9 +1643,11 @@
                 if (!firebaseUser || userRole !== 'employee' || !empAccount?.bossUid) return;
                 const unsub = fbDb.collection('workspaces').doc(empAccount.bossUid)
                     .onSnapshot(doc => {
-                        const list = (doc.data()?.notices || [])
+                        const data = doc.data();
+                        const list = (data?.notices || [])
                             .slice().sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
                         setNotices(list);
+                        if (data?.shopName) setEmpAccount(prev => prev?.bossUid === empAccount.bossUid ? { ...prev, shopName: data.shopName } : prev);
                     }, () => {});
                 return () => unsub();
             }, [firebaseUser, userRole, empAccount?.bossUid]);

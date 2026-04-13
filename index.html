@@ -9248,11 +9248,6 @@
                     />
                 )}
 
-                {/* 개인정보처리방침 */}
-                <div className="max-w-md mx-auto mt-6 text-center">
-                    <a href="./privacy.html" target="_blank" className="text-sm text-gray-400 hover:text-blue-500 underline">개인정보처리방침</a>
-                </div>
-
                 {/* 업체 삭제 */}
                 <WorkspaceDeleteSection
                     isDeleting={isDeleting}
@@ -9262,6 +9257,11 @@
                     showConfirm={showConfirm}
                     shopName={workspaceInfo?.shopName}
                 />
+
+                {/* 개인정보처리방침 */}
+                <div className="max-w-md mx-auto mt-6 mb-8 text-center">
+                    <a href="./privacy.html" target="_blank" className="text-sm text-gray-400 hover:text-blue-500 underline">개인정보처리방침</a>
+                </div>
                 </>
             );
         }

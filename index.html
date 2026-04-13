@@ -7663,9 +7663,22 @@
                     sheet1Rows.push(row);
                 }
 
+                const autoColWidth = (rows, minWidth = 4, padding = 3) => {
+                    const cols = rows[0]?.length || 0;
+                    const widths = Array(cols).fill(minWidth);
+                    rows.forEach(row => {
+                        row.forEach((cell, c) => {
+                            const len = cell != null ? String(cell).length : 0;
+                            // 한글은 약 2배 너비
+                            const korLen = (String(cell || '').match(/[가-힣]/g) || []).length;
+                            const w = len + korLen + padding;
+                            if (w > widths[c]) widths[c] = w;
+                        });
+                    });
+                    return widths.map(w => ({ wch: w }));
+                };
                 const ws1 = XLSX.utils.aoa_to_sheet(sheet1Rows);
-                const colWidth1 = [{ wch: 6 }, ...payrollList.map(() => ({ wch: 12 }))];
-                ws1['!cols'] = colWidth1;
+                ws1['!cols'] = autoColWidth(sheet1Rows);
                 // 탭1 스타일: X축(헤더행) 연한초록, Y축(날짜열) 연한노랑, 가운데정렬
                 const greenFill = { fgColor: { rgb: 'D5F5E3' } };
                 const yellowFill = { fgColor: { rgb: 'FFF9C4' } };
@@ -7728,13 +7741,7 @@
                 });
 
                 const ws2 = XLSX.utils.aoa_to_sheet(sheet2Rows);
-                ws2['!cols'] = [
-                    { wch: 8 }, { wch: 14 },
-                    { wch: 18 }, { wch: 10 },
-                    { wch: 14 }, { wch: 12 }, { wch: 14 },
-                    { wch: 18 }, { wch: 14 }, { wch: 12 },
-                    ...memoHeaders.map(() => ({ wch: 20 }))
-                ];
+                ws2['!cols'] = autoColWidth(sheet2Rows);
                 // 탭2 스타일: X축(헤더행) 연한초록, Y축(구분번호+근무자명) 연한노랑
                 // 금액 컬럼(시간급여4, 주휴수당5, 총급여6, 보험공제7)은 오른쪽정렬, 나머지 가운데
                 const moneyCols2 = new Set([4, 5, 6, 7]);

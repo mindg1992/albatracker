@@ -6571,15 +6571,22 @@
                         />
                     )}
 
-                    {editDayModal && (
-                        <DailyEditModal
-                            year={year} month={month} day={editDayModal} monthKey={monthKey}
-                            activeEmployees={activeEmployees} allEmployees={employees} monthlyData={monthlyData} setMonthlyData={setMonthlyData}
-                            onClose={() => setEditDayModal(null)}
-                            onDelete={() => handleDeleteDay(editDayModal)}
-                            workspaceId={workspaceId}
-                        />
-                    )}
+                    {editDayModal && (() => {
+                        const editDateStr = `${year}-${month.toString().padStart(2, '0')}-${editDayModal.toString().padStart(2, '0')}`;
+                        const editDate = new Date(year, month - 1, editDayModal);
+                        const isSunday = editDate.getDay() === 0;
+                        const editHolidayEntries = isSunday ? (holidayPayBySunday[editDateStr] || []) : [];
+                        return (
+                            <DailyEditModal
+                                year={year} month={month} day={editDayModal} monthKey={monthKey}
+                                activeEmployees={activeEmployees} allEmployees={employees} monthlyData={monthlyData} setMonthlyData={setMonthlyData}
+                                onClose={() => setEditDayModal(null)}
+                                onDelete={() => handleDeleteDay(editDayModal)}
+                                workspaceId={workspaceId}
+                                holidayEntries={editHolidayEntries}
+                            />
+                        );
+                    })()}
 
                     <div className="flex justify-end mt-4">
                         <button
@@ -6840,7 +6847,7 @@
             );
         }
 
-        function DailyEditModal({ year, month, day, monthKey, activeEmployees, allEmployees, monthlyData, setMonthlyData, onClose, onDelete, workspaceId }) {
+        function DailyEditModal({ year, month, day, monthKey, activeEmployees, allEmployees, monthlyData, setMonthlyData, onClose, onDelete, workspaceId, holidayEntries }) {
             const currentDayData = monthlyData[monthKey]?.days[day] || { revenue: 0, entries: {} };
 
             const combinedEmployees = useMemo(() => {
@@ -7087,6 +7094,30 @@
                                 ))}
                             </div>
                             
+                            {/* 주휴수당 정보 */}
+                            {holidayEntries && holidayEntries.length > 0 && (
+                                <div className="pt-3 border-t border-blue-200">
+                                    <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
+                                        <div className="flex items-center gap-2 mb-2">
+                                            <div className="w-2.5 h-2.5 rounded-full bg-blue-400"></div>
+                                            <span className="text-sm font-bold text-blue-700">주휴수당 발생</span>
+                                        </div>
+                                        <div className="space-y-1.5">
+                                            {holidayEntries.map((h, i) => (
+                                                <div key={i} className="flex justify-between items-center text-sm">
+                                                    <span className="text-gray-700">{h.name} <span className="text-xs text-gray-400">(주 {h.weeklyHours.toFixed(1)}h)</span></span>
+                                                    <span className="font-bold text-blue-600">{Number(h.holidayPay).toLocaleString()}원</span>
+                                                </div>
+                                            ))}
+                                        </div>
+                                        <div className="mt-2 pt-2 border-t border-blue-200 flex justify-between items-center">
+                                            <span className="text-xs font-bold text-blue-700">합계</span>
+                                            <span className="font-bold text-blue-700">{holidayEntries.reduce((s, h) => s + h.holidayPay, 0).toLocaleString()}원</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+
                             {/* 모바일 삭제 버튼 영역 */}
                             {onDelete && (
                                 <div className="pt-2 flex justify-center">
@@ -8141,14 +8172,21 @@
                             onClose={() => setIsBulkInputOpen(false)}
                         />
                     )}
-                    {editDayModal && (
-                        <DailyEditModal
-                            year={year} month={month} day={editDayModal} monthKey={monthKey}
-                            activeEmployees={activeEmployees} allEmployees={employees} monthlyData={predictData} setMonthlyData={setPredictData}
-                            onClose={() => setEditDayModal(null)}
-                            onDelete={() => handleDeleteDay(editDayModal)}
-                        />
-                    )}
+                    {editDayModal && (() => {
+                        const editDateStr = `${year}-${month.toString().padStart(2, '0')}-${editDayModal.toString().padStart(2, '0')}`;
+                        const editDate = new Date(year, month - 1, editDayModal);
+                        const isSunday = editDate.getDay() === 0;
+                        const editHolidayEntries = isSunday ? (holidayPayBySunday[editDateStr] || []) : [];
+                        return (
+                            <DailyEditModal
+                                year={year} month={month} day={editDayModal} monthKey={monthKey}
+                                activeEmployees={activeEmployees} allEmployees={employees} monthlyData={predictData} setMonthlyData={setPredictData}
+                                onClose={() => setEditDayModal(null)}
+                                onDelete={() => handleDeleteDay(editDayModal)}
+                                holidayEntries={editHolidayEntries}
+                            />
+                        );
+                    })()}
 
                     <div className="flex justify-end mt-4">
                         <button

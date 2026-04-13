@@ -4074,7 +4074,7 @@
                                     {(() => { try {
                                         const subs = Object.values(mySubmissions || {}).filter(s => s.date?.startsWith(monthKey));
                                         const totalH = subs.reduce((a,s) => a+(s.hours||0), 0);
-                                        const empWage = Number(empAccount?.wage) || Number(globalMinWage || 0) || MIN_WAGE;
+                                        const empWage = Number(empAccount?.wage) || MIN_WAGE;
                                         // 시급별 분류
                                         const wageMap = {};
                                         subs.forEach(s => {
@@ -4109,7 +4109,7 @@
                                                 </div>
                                             </div>
                                         );
-                                    } catch(err) { console.error('월 요약 에러:', err); return <div className="text-sm text-red-500">에러: {String(err?.message || err)}</div>; } })()}
+                                    } catch(err) { console.error('월 요약 에러:', err); return null; } })()}
                                 </div>
                             </div>
                         )}

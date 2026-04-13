@@ -1573,23 +1573,7 @@
                     .collection('submissions')
                     .onSnapshot(snap => {
                         if (!initialLoadDone) {
-                            // 초기 로드: monthlyData는 건너뛰되, wage 없는 submissions에 wage 보충
                             initialLoadDone = true;
-                            snap.docChanges().forEach(change => {
-                                if (change.type !== 'added') return;
-                                const sub = change.doc.data();
-                                if (!sub.wage && sub.employeeId != null) {
-                                    const emp = employeesRef.current.find(e => e.id !== undefined && e.id.toString() === String(sub.employeeId));
-                                    const empWage = emp?.wage ? Number(emp.wage) : 0;
-                                    // monthlyData에 기록된 시급이 있으면 그걸 사용
-                                    const parts = (sub.date || '').split('-').map(Number);
-                                    const mk = parts.length >= 2 ? `${parts[0]}-${String(parts[1]).padStart(2,'0')}` : null;
-                                    const day = parts[2];
-                                    const monthlyEntry = mk ? monthlyData?.[mk]?.days?.[day]?.entries?.[sub.employeeId] : null;
-                                    const wage = Number(monthlyEntry?.wage) || empWage || Number(globalMinWage) || MIN_WAGE;
-                                    if (wage > 0) change.doc.ref.update({ wage }).catch(() => {});
-                                }
-                            });
                             return;
                         }
                         // 이후: 실시간 변경만 처리 (직원이 새로 시간 제출 등)
@@ -1641,6 +1625,31 @@
                     }, () => {});
                 return () => unsub();
             }, [firebaseUser, userRole, isAuthenticated, currentWorkspaceId, globalMinWage]);
+
+            // submissions에 wage 없는 문서 보충 (monthlyData/employees 로드 완료 후 1회)
+            const wageBackfillDone = useRef(false);
+            useEffect(() => {
+                if (!firebaseUser || userRole !== 'boss' || !currentWorkspaceId) return;
+                if (wageBackfillDone.current) return;
+                if (employees.length === 0) return; // employees 아직 로드 안됨
+                wageBackfillDone.current = true;
+                fbDb.collection('workspaces').doc(currentWorkspaceId)
+                    .collection('submissions').get().then(snap => {
+                        snap.forEach(doc => {
+                            const sub = doc.data();
+                            if (sub.wage) return; // 이미 wage 있음
+                            if (sub.employeeId == null) return;
+                            const parts = (sub.date || '').split('-').map(Number);
+                            const mk = parts.length >= 2 ? `${parts[0]}-${String(parts[1]).padStart(2,'0')}` : null;
+                            const day = parts[2];
+                            const monthlyEntry = mk ? monthlyData?.[mk]?.days?.[day]?.entries?.[sub.employeeId] : null;
+                            const emp = employees.find(e => e.id !== undefined && e.id.toString() === String(sub.employeeId));
+                            const empWage = emp?.wage ? Number(emp.wage) : 0;
+                            const wage = Number(monthlyEntry?.wage) || empWage || 0;
+                            if (wage > 0) doc.ref.update({ wage }).catch(() => {});
+                        });
+                    }).catch(() => {});
+            }, [firebaseUser, userRole, currentWorkspaceId, employees, monthlyData]);
 
             // 공지사항 실시간 로드 (관리자)
             useEffect(() => {

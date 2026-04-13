@@ -1573,8 +1573,23 @@
                     .collection('submissions')
                     .onSnapshot(snap => {
                         if (!initialLoadDone) {
-                            // 초기 로드: monthlyData(localStorage/Firebase)가 source of truth이므로 건너뜀
+                            // 초기 로드: monthlyData는 건너뛰되, wage 없는 submissions에 wage 보충
                             initialLoadDone = true;
+                            snap.docChanges().forEach(change => {
+                                if (change.type !== 'added') return;
+                                const sub = change.doc.data();
+                                if (!sub.wage && sub.employeeId != null) {
+                                    const emp = employeesRef.current.find(e => e.id !== undefined && e.id.toString() === String(sub.employeeId));
+                                    const empWage = emp?.wage ? Number(emp.wage) : 0;
+                                    // monthlyData에 기록된 시급이 있으면 그걸 사용
+                                    const parts = (sub.date || '').split('-').map(Number);
+                                    const mk = parts.length >= 2 ? `${parts[0]}-${String(parts[1]).padStart(2,'0')}` : null;
+                                    const day = parts[2];
+                                    const monthlyEntry = mk ? monthlyData?.[mk]?.days?.[day]?.entries?.[sub.employeeId] : null;
+                                    const wage = Number(monthlyEntry?.wage) || empWage || Number(globalMinWage) || MIN_WAGE;
+                                    if (wage > 0) change.doc.ref.update({ wage }).catch(() => {});
+                                }
+                            });
                             return;
                         }
                         // 이후: 실시간 변경만 처리 (직원이 새로 시간 제출 등)
@@ -1586,6 +1601,14 @@
                             const parts = sub.date.split('-').map(Number);
                             const mk = `${parts[0]}-${String(parts[1]).padStart(2,'0')}`;
                             const day = parts[2];
+                            const emp = employeesRef.current.find(e => e.id !== undefined && e.id.toString() === String(sub.employeeId));
+                            const empWage = emp?.wage ? Number(emp.wage) : 0;
+                            const wage = Number(sub.wage) || empWage || Number(globalMinWage) || MIN_WAGE;
+                            // submission에 wage가 없으면 Firebase 문서에 wage 추가 (직원 앱에서 시급 표시용)
+                            if (!sub.wage && wage > 0) {
+                                change.doc.ref.update({ wage }).catch(() => {});
+                            }
+                            const latestName = emp?.name || sub.empName;
                             setMonthlyData(prev => {
                                 const md = prev[mk] || {};
                                 const dd = md.days || {};
@@ -1593,10 +1616,6 @@
                                 const ee = de.entries || {};
                                 const existing = ee[sub.employeeId];
                                 if (existing?.bossModified) return prev;
-                                const emp = employeesRef.current.find(e => e.id !== undefined && e.id.toString() === String(sub.employeeId));
-                                const empWage = emp?.wage ? Number(emp.wage) : 0;
-                                const wage = Number(sub.wage) || empWage || Number(globalMinWage) || MIN_WAGE;
-                                const latestName = emp?.name || sub.empName;
                                 if (existing && existing.hours === sub.hours && existing.wage === wage && existing.name === latestName) return prev;
                                 return {
                                     ...prev,

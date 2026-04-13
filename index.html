@@ -5632,6 +5632,14 @@
                                                     ? `주 ${emp.scheduledDays}일 × ${emp.dailyHours}시간 = ${parseFloat(emp.scheduledDays) * parseFloat(emp.dailyHours)}시간`
                                                     : '-'}
                                             </p>
+                                            {(() => {
+                                                const ins = getInsuranceInfo(workspaceInfo, emp);
+                                                return ins.rate > 0 ? (
+                                                    <p><span className="font-medium text-gray-700">보험공제:</span>{' '}
+                                                        <span className="text-orange-600 font-medium">{ins.name || '보험료'} {ins.rate}%</span>
+                                                    </p>
+                                                ) : null;
+                                            })()}
                                             {/* 메모 목록 */}
                                             {emp.memos && emp.memos.length > 0 && (
                                                 <div className="mt-2 space-y-1">

@@ -5320,12 +5320,30 @@
                     setEmployees(prev => [...prev, { ...dataToSave, wage: newEmpWage }]);
                     setNextEmpId(prev => prev + 1);
                 }
-                // 이름 변경 시 직원 workplaces에도 반영
-                if (editingEmp && editingEmp.empUid && currentWorkspaceId && editingEmp.name !== dataToSave.name) {
-                    fbDb.collection('employeeAccounts').doc(editingEmp.empUid)
-                        .collection('workplaces').doc(currentWorkspaceId)
-                        .update({ name: dataToSave.name })
-                        .catch(() => {});
+                // 이름 변경 시 직원 workplaces + monthlyData 근무기록 이름도 반영
+                if (editingEmp && editingEmp.name !== dataToSave.name) {
+                    const empId = editingEmp.id;
+                    const newName = dataToSave.name;
+                    setMonthlyData(prev => {
+                        const updated = { ...prev };
+                        Object.keys(updated).forEach(mk => {
+                            const days = updated[mk]?.days;
+                            if (!days) return;
+                            Object.keys(days).forEach(d => {
+                                const entry = days[d]?.entries?.[empId];
+                                if (entry && entry.name !== newName) {
+                                    updated[mk] = { ...updated[mk], days: { ...updated[mk].days, [d]: { ...days[d], entries: { ...days[d].entries, [empId]: { ...entry, name: newName } } } } };
+                                }
+                            });
+                        });
+                        return updated;
+                    });
+                    if (editingEmp.empUid && currentWorkspaceId) {
+                        fbDb.collection('employeeAccounts').doc(editingEmp.empUid)
+                            .collection('workplaces').doc(currentWorkspaceId)
+                            .update({ name: newName })
+                            .catch(() => {});
+                    }
                 }
 
                 setIsModalOpen(false);

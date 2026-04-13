@@ -1591,15 +1591,16 @@
                                 const empWage = emp?.wage ? Number(emp.wage) : 0;
                                 // 초기 로드: 기존 기록 시급 유지 / 새 제출: 현재 직원 시급 사용
                                 const wage = sub.wage || (!initialLoadDone && existing?.wage ? Number(existing.wage) : 0) || empWage || Number(globalMinWage) || MIN_WAGE;
-                                // 이미 같은 시간/시급으로 기록돼 있으면 덮어쓰지 않음
-                                if (existing && existing.hours === sub.hours && existing.wage === wage) return prev;
+                                const latestName = emp?.name || sub.empName;
+                                // 이미 같은 시간/시급/이름으로 기록돼 있으면 덮어쓰지 않음
+                                if (existing && existing.hours === sub.hours && existing.wage === wage && existing.name === latestName) return prev;
                                 return {
                                     ...prev,
                                     [mk]: { ...md, days: { ...dd, [day]: { ...de, entries: { ...ee,
                                         [sub.employeeId]: {
                                             hours: sub.hours,
                                             pay: Math.round(sub.hours * wage),
-                                            name: sub.empName,
+                                            name: emp?.name || sub.empName,
                                             wage,
                                             note: sub.note || existing?.note || '',
                                             submittedByEmp: true,

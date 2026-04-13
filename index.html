@@ -2773,6 +2773,7 @@
 
                         </div>
                         <p className="text-[10px] text-gray-300 mt-6">v2.1 업데이트: 프로그램 설치 및 로그인환경 개선</p>
+                        <a href="./privacy.html" target="_blank" className="text-[10px] text-gray-400 hover:text-blue-500 underline mt-2 inline-block">개인정보처리방침</a>
                     </div>
 
                 </div>
@@ -4450,8 +4451,14 @@
                                 className="w-full border-2 border-red-400 text-red-600 py-3 rounded-xl font-bold hover:bg-red-50 transition">
                                 {empAccount.shopName || '이 업체'}에서 퇴사
                             </button>
+                            <p className="text-xs text-gray-400 mt-3">퇴사 시 해당 업체의 내 근무 기록, 근로계약서, 알림 등 모든 데이터가 삭제됩니다.</p>
                         </div>
                     )}
+
+                    {/* 개인정보처리방침 */}
+                    <div className="text-center mt-2">
+                        <a href="./privacy.html" target="_blank" className="text-xs text-gray-400 hover:text-blue-500 underline">개인정보처리방침</a>
+                    </div>
                 </div>
             );
         }
@@ -9240,6 +9247,11 @@
                         setEmployees={setEmployees}
                     />
                 )}
+
+                {/* 개인정보처리방침 */}
+                <div className="max-w-md mx-auto mt-6 text-center">
+                    <a href="./privacy.html" target="_blank" className="text-sm text-gray-400 hover:text-blue-500 underline">개인정보처리방침</a>
+                </div>
 
                 {/* 업체 삭제 */}
                 <WorkspaceDeleteSection

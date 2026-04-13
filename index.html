@@ -1287,13 +1287,46 @@
                         );
                         if (cancelled) return;
                         clearTimeout(fallbackTimer);
-                        setBossWorkspaceList(details);
+
+                        // 24시간 경과한 삭제 예약 업체 자동 정리
+                        const now = Date.now();
+                        const expired = details.filter(ws => {
+                            if (!ws.deleteScheduledAt) return false;
+                            const ms = ws.deleteScheduledAt.toMillis ? ws.deleteScheduledAt.toMillis() : new Date(ws.deleteScheduledAt).getTime();
+                            return now > ms + 24 * 60 * 60 * 1000;
+                        });
+                        if (expired.length > 0) {
+                            expired.forEach(ws => {
+                                (async () => {
+                                    try {
+                                        await fbDb.collection('users').doc(ws.id).delete();
+                                        await fbDb.collection('workspaces').doc(ws.id).delete();
+                                        await fbDb.collection('bossWorkspaces').doc(firebaseUser.uid).update({
+                                            workspaceIds: firebase.firestore.FieldValue.arrayRemove(ws.id)
+                                        });
+                                        localStorage.removeItem('at_cache_' + ws.id);
+                                    } catch(e) { console.error('만료 업체 자동 삭제 실패:', ws.id, e); }
+                                })();
+                            });
+                            const expiredIds = new Set(expired.map(w => w.id));
+                            const remaining = details.filter(d => !expiredIds.has(d.id));
+                            setBossWorkspaceList(remaining);
+                            // 삭제된 업체가 세션 선택이었으면 초기화
+                            const sessionId = sessionStorage.getItem('bossWorkspaceSelected');
+                            if (sessionId && expiredIds.has(sessionId)) {
+                                sessionStorage.removeItem('bossWorkspaceSelected');
+                                localStorage.removeItem('bossWorkspaceId');
+                            }
+                        } else {
+                            setBossWorkspaceList(details);
+                        }
                         setBossWorkspacesLoaded(true);
 
                         // 이번 세션에서 이미 선택한 업체가 있으면 자동 선택 (페이지 새로고침 대응)
                         const sessionId = sessionStorage.getItem('bossWorkspaceSelected');
                         if (sessionId && workspaceIds.includes(sessionId)) {
-                            setCurrentWorkspaceId(sessionId);
+                            const expiredIds = new Set(expired.map(w => w.id));
+                            if (!expiredIds.has(sessionId)) setCurrentWorkspaceId(sessionId);
                         }
                         // 세션 선택 없으면 업체 선택 화면 표시 (currentWorkspaceId = null 유지)
                     })

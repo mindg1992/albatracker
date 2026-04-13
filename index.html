@@ -4109,7 +4109,7 @@
                                                 </div>
                                             </div>
                                         );
-                                    } catch(err) { console.error('월 요약 에러:', err); return <div className="text-sm text-gray-400">요약 정보를 불러올 수 없습니다.</div>; } })()}
+                                    } catch(err) { console.error('월 요약 에러:', err); return <div className="text-sm text-red-500">에러: {String(err?.message || err)}</div>; } })()}
                                 </div>
                             </div>
                         )}

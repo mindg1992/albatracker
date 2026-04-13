@@ -1572,11 +1572,16 @@
                 const unsub = fbDb.collection('workspaces').doc(currentWorkspaceId)
                     .collection('submissions')
                     .onSnapshot(snap => {
+                        if (!initialLoadDone) {
+                            // 초기 로드: monthlyData(localStorage/Firebase)가 source of truth이므로 건너뜀
+                            initialLoadDone = true;
+                            return;
+                        }
+                        // 이후: 실시간 변경만 처리 (직원이 새로 시간 제출 등)
                         snap.docChanges().forEach(change => {
                             if (change.type !== 'added' && change.type !== 'modified') return;
                             const sub = change.doc.data();
                             if (!sub.date || sub.employeeId == null || !sub.hours) return;
-                            // 관리자가 직접 입력한 submissions는 무시 (이미 monthlyData에 반영됨)
                             if (sub.bossEntered) return;
                             const parts = sub.date.split('-').map(Number);
                             const mk = `${parts[0]}-${String(parts[1]).padStart(2,'0')}`;
@@ -1587,14 +1592,11 @@
                                 const de = dd[day] || {};
                                 const ee = de.entries || {};
                                 const existing = ee[sub.employeeId];
-                                if (existing?.bossModified) return prev; // 관리자가 수정한 경우 유지
-                                // 초기 로드 시 기존 기록이 있으면 덮어쓰지 않음 (시급 보호)
-                                if (!initialLoadDone && existing) return prev;
+                                if (existing?.bossModified) return prev;
                                 const emp = employeesRef.current.find(e => e.id !== undefined && e.id.toString() === String(sub.employeeId));
                                 const empWage = emp?.wage ? Number(emp.wage) : 0;
                                 const wage = Number(sub.wage) || empWage || Number(globalMinWage) || MIN_WAGE;
                                 const latestName = emp?.name || sub.empName;
-                                // 이미 같은 시간/시급/이름으로 기록돼 있으면 덮어쓰지 않음
                                 if (existing && existing.hours === sub.hours && existing.wage === wage && existing.name === latestName) return prev;
                                 return {
                                     ...prev,
@@ -1602,7 +1604,7 @@
                                         [sub.employeeId]: {
                                             hours: sub.hours,
                                             pay: Math.round(sub.hours * wage),
-                                            name: emp?.name || sub.empName,
+                                            name: latestName,
                                             wage,
                                             note: sub.note || existing?.note || '',
                                             submittedByEmp: true,
@@ -1612,13 +1614,11 @@
                                     }}}}
                                 };
                             });
-                            // 초기 로드 이후 새로 추가된 제출만 알림 배너 + 미확인 날짜 추가
-                            if (initialLoadDone && change.type === 'added' && sub.empName) {
+                            if (change.type === 'added' && sub.empName) {
                                 setWorkSubmitBanner({ empName: sub.empName, date: sub.date, hours: sub.hours });
                                 setUnseenDates(prev => new Set([...prev, sub.date]));
                             }
                         });
-                        initialLoadDone = true;
                     }, () => {});
                 return () => unsub();
             }, [firebaseUser, userRole, isAuthenticated, currentWorkspaceId, globalMinWage]);

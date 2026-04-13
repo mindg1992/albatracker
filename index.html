@@ -1580,15 +1580,20 @@
                             const parts = sub.date.split('-').map(Number);
                             const mk = `${parts[0]}-${String(parts[1]).padStart(2,'0')}`;
                             const day = parts[2];
-                            const emp = employees.find(e => e.id !== undefined && e.id.toString() === String(sub.employeeId));
-                            const empWage = emp?.wage ? Number(emp.wage) : 0;
-                            const wage = sub.wage || empWage || Number(globalMinWage) || MIN_WAGE;
                             setMonthlyData(prev => {
                                 const md = prev[mk] || {};
                                 const dd = md.days || {};
                                 const de = dd[day] || {};
                                 const ee = de.entries || {};
-                                if (ee[sub.employeeId]?.bossModified) return prev; // 관리자가 수정한 경우 유지
+                                const existing = ee[sub.employeeId];
+                                if (existing?.bossModified) return prev; // 관리자가 수정한 경우 유지
+                                // 이미 기록된 시급이 있으면 유지, 없으면 직원 개별시급 → 최저시급 순
+                                const existingWage = existing?.wage ? Number(existing.wage) : 0;
+                                const emp = employees.find(e => e.id !== undefined && e.id.toString() === String(sub.employeeId));
+                                const empWage = emp?.wage ? Number(emp.wage) : 0;
+                                const wage = sub.wage || existingWage || empWage || Number(globalMinWage) || MIN_WAGE;
+                                // 이미 같은 시간/시급으로 기록돼 있으면 덮어쓰지 않음
+                                if (existing && existing.hours === sub.hours && existing.wage === wage) return prev;
                                 return {
                                     ...prev,
                                     [mk]: { ...md, days: { ...dd, [day]: { ...de, entries: { ...ee,
@@ -1597,7 +1602,7 @@
                                             pay: Math.round(sub.hours * wage),
                                             name: sub.empName,
                                             wage,
-                                            note: sub.note || '',
+                                            note: sub.note || existing?.note || '',
                                             submittedByEmp: true,
                                             empUid: sub.empUid,
                                             submittedHours: sub.hours

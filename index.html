@@ -4074,34 +4074,41 @@
                                     {(() => {
                                         const subs = Object.values(mySubmissions || {}).filter(s => s.date?.startsWith(monthKey));
                                         const totalH = subs.reduce((a,s) => a+(s.hours||0), 0);
-                                        // 시급 데이터가 있는 submissions만 분류
                                         const subsWithWage = subs.filter(s => s.wage && Number(s.wage) > 0);
                                         const hasWageData = subsWithWage.length > 0;
-                                        let wageSection = null;
-                                        let totalPaySection = null;
-                                        if (hasWageData) {
-                                            const wageMap = {};
-                                            subsWithWage.forEach(s => {
-                                                const w = Number(s.wage);
-                                                if (!wageMap[w]) wageMap[w] = { days: 0, hours: 0 };
-                                                wageMap[w].days += 1;
-                                                wageMap[w].hours += (s.hours || 0);
-                                            });
-                                            const wages = Object.entries(wageMap).sort((a,b) => Number(a[0]) - Number(b[0]));
-                                            const totalPay = wages.reduce((sum, [w, info]) => sum + Math.round(info.hours * Number(w)), 0);
-                                            wageSection = wages.length <= 1
-                                                ? <div><p className="text-gray-500">시급</p><p className="font-bold text-gray-800">{Number(wages[0]?.[0]).toLocaleString()}원</p></div>
-                                                : wages.map(([w, info]) => (
-                                                    <div key={w}><p className="text-gray-500">시급 {Number(w).toLocaleString()}원</p><p className="font-bold text-gray-800">{info.days}일 ({fmtHours(info.hours)})</p></div>
-                                                ));
-                                            totalPaySection = <div><p className="text-gray-500">합산</p><p className="font-bold text-green-600">{totalPay.toLocaleString()}원</p></div>;
+                                        if (!hasWageData) {
+                                            return (
+                                                <div className="flex flex-wrap gap-4 text-sm">
+                                                    <div><p className="text-gray-500">근무일</p><p className="font-bold text-gray-800">{subs.length}일</p></div>
+                                                    <div><p className="text-gray-500">총 시간</p><p className="font-bold text-gray-800">{fmtHours(totalH) || '0시간'}</p></div>
+                                                </div>
+                                            );
                                         }
+                                        const wageMap = {};
+                                        subsWithWage.forEach(s => {
+                                            const w = Number(s.wage);
+                                            if (!wageMap[w]) wageMap[w] = { days: 0, hours: 0 };
+                                            wageMap[w].days += 1;
+                                            wageMap[w].hours += (s.hours || 0);
+                                        });
+                                        const wages = Object.entries(wageMap).sort((a,b) => Number(a[0]) - Number(b[0]));
+                                        const totalPay = wages.reduce((sum, [w, info]) => sum + Math.round(info.hours * Number(w)), 0);
                                         return (
-                                            <div className="flex flex-wrap gap-4 text-sm">
-                                                <div><p className="text-gray-500">근무일</p><p className="font-bold text-gray-800">{subs.length}일</p></div>
-                                                {wageSection}
-                                                <div><p className="text-gray-500">총 시간</p><p className="font-bold text-gray-800">{fmtHours(totalH) || '0시간'}</p></div>
-                                                {totalPaySection}
+                                            <div className="space-y-2 text-sm">
+                                                <div className="flex flex-wrap gap-4">
+                                                    <div><p className="text-gray-500">근무일</p><p className="font-bold text-gray-800">{subs.length}일</p></div>
+                                                    <div><p className="text-gray-500">총 시간</p><p className="font-bold text-gray-800">{fmtHours(totalH) || '0시간'}</p></div>
+                                                </div>
+                                                {wages.map(([w, info]) => (
+                                                    <div key={w} className="flex justify-between items-center bg-gray-50 rounded-lg px-3 py-2">
+                                                        <span className="text-gray-600">시급 {Number(w).toLocaleString()}원 <span className="text-gray-400">× {info.days}일 ({fmtHours(info.hours)})</span></span>
+                                                        <span className="font-bold text-gray-800">{Math.round(info.hours * Number(w)).toLocaleString()}원</span>
+                                                    </div>
+                                                ))}
+                                                <div className="flex justify-between items-center border-t border-gray-200 pt-2 px-1">
+                                                    <span className="font-bold text-gray-700">합산</span>
+                                                    <span className="font-bold text-green-600 text-base">{totalPay.toLocaleString()}원</span>
+                                                </div>
                                             </div>
                                         );
                                     })()}

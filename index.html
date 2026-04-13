@@ -6861,15 +6861,19 @@
                                                                 placeholder="분"
                                                             />
                                                             <span className="text-gray-200 text-xs mx-0.5">|</span>
-                                                            <input
-                                                                ref={el => wageRefs.current[`${day}-${emp.id}`] = el}
-                                                                type="number" min="0"
-                                                                value={wageData[day]?.[emp.id] ?? ''}
-                                                                onChange={e => handleWageChange(day, emp.id, e.target.value)}
-                                                                onKeyDown={e => handleWageKeyDown(e, day, empIdx)}
-                                                                className="w-16 h-9 text-center border-none focus:ring-2 focus:ring-orange-400 bg-transparent outline-none transition text-[11px] text-orange-600"
-                                                                placeholder="시급"
-                                                            />
+                                                            <div className="relative flex items-center">
+                                                                <input
+                                                                    ref={el => wageRefs.current[`${day}-${emp.id}`] = el}
+                                                                    type="number" min="0"
+                                                                    value={wageData[day]?.[emp.id] ?? ''}
+                                                                    onChange={e => handleWageChange(day, emp.id, e.target.value)}
+                                                                    onKeyDown={e => handleWageKeyDown(e, day, empIdx)}
+                                                                    className="w-16 h-9 text-center border-none focus:ring-2 focus:ring-orange-400 bg-transparent outline-none transition text-[11px] opacity-0 focus:opacity-100 absolute inset-0 z-10"
+                                                                />
+                                                                <span className={`w-16 h-9 flex items-center justify-center text-[11px] font-medium pointer-events-none ${Number(wageData[day]?.[emp.id]) !== (Number(emp.wage) > 0 ? Number(emp.wage) : (Number(globalMinWage) > 0 ? Number(globalMinWage) : MIN_WAGE)) ? 'text-red-500' : 'text-gray-700'}`}>
+                                                                    {Number(wageData[day]?.[emp.id] || 0).toLocaleString()}원/h
+                                                                </span>
+                                                            </div>
                                                         </div>
                                                     </td>
                                                 ))}

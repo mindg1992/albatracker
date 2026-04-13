@@ -5071,7 +5071,7 @@
                     showAlert('설정에서 근로계약서 템플릿을 먼저 작성하세요.', '안내', 'info');
                     return;
                 }
-                const targets = employees.filter(emp => emp.empUid && (
+                const targets = employees.filter(emp => emp.empUid && emp.status !== 'resigned' && emp.status !== 'leave' && (
                     pendingContractUpdateEmpIds.has(emp.id) ||
                     emp.contractUpdateRequired ||
                     (!emp.contractStatus || emp.contractStatus === null)
@@ -5548,7 +5548,7 @@
                                                         {emp.contractDeleteRequest === 'employee' ? '재작성 확인' : emp.contractDeleteRequest === 'boss' ? '재작성 요청 대기중' : '근로계약서 열람'}
                                                     </button>
                                                 )}
-                                                {contractStatus === null && (
+                                                {contractStatus === null && emp.status !== 'resigned' && emp.status !== 'leave' && (
                                                     <button onClick={() => { setPersonalTemplateReason('new_contract'); setPersonalTemplateTarget(emp); }}
                                                         className="w-full text-xs py-1.5 rounded-lg font-bold transition bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100">
                                                         계약서 작성 요청
@@ -5705,7 +5705,7 @@
                     )}
                     {bulkDispatchOpen && (
                         <BulkContractDispatchModal
-                            targets={employees.filter(emp => emp.empUid && (pendingContractUpdateEmpIds.has(emp.id) || emp.contractUpdateRequired || (!emp.contractStatus || emp.contractStatus === null)))}
+                            targets={employees.filter(emp => emp.empUid && emp.status !== 'resigned' && emp.status !== 'leave' && (pendingContractUpdateEmpIds.has(emp.id) || emp.contractUpdateRequired || (!emp.contractStatus || emp.contractStatus === null)))}
                             globalTemplate={workspaceInfo?.contractTemplate}
                             workspaceId={currentWorkspaceId}
                             firebaseUser={firebaseUser}
@@ -6184,6 +6184,7 @@
                     ...formData,
                     wage: parsedWage > 0 ? parsedWage : (Number(globalMinWage) > 0 ? Number(globalMinWage) : '')
                 };
+                if (finalData.status !== 'resigned') finalData.resignDate = '';
                 delete finalData._newMemo;
                 onSave(finalData);
             };

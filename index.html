@@ -464,7 +464,7 @@
         async function approveGoogleEmpJoinRequest(bossUid, empUid, employeeId, hasContract) {
             const pendingDocId = `${empUid}_${bossUid}`;
             const batch = fbDb.batch();
-            const updateData = { status: 'approved', employeeId, approvedAt: firebase.firestore.FieldValue.serverTimestamp() };
+            const updateData = { status: 'approved', employeeId, workStatus: 'working', approvedAt: firebase.firestore.FieldValue.serverTimestamp() };
             if (hasContract) updateData.contractStatus = 'completed';
             batch.update(
                 fbDb.collection('employeeAccounts').doc(empUid).collection('workplaces').doc(bossUid),
@@ -1726,6 +1726,22 @@
                             // 같은 empUid의 다른 레코드(중복)는 퇴사 처리
                             return { ...e, status: 'resigned' };
                         }));
+                        // monthlyData의 기존 근무기록 이름 업데이트 (시급·근무시간은 유지)
+                        const newName = empData.name;
+                        setMonthlyData(prev => {
+                            const updated = { ...prev };
+                            Object.keys(updated).forEach(mk => {
+                                const days = updated[mk]?.days;
+                                if (!days) return;
+                                Object.keys(days).forEach(d => {
+                                    const entry = days[d]?.entries?.[approvedId];
+                                    if (entry && entry.name !== newName) {
+                                        updated[mk] = { ...updated[mk], days: { ...updated[mk].days, [d]: { ...days[d], entries: { ...days[d].entries, [approvedId]: { ...entry, name: newName } } } } };
+                                    }
+                                });
+                            });
+                            return updated;
+                        });
                         await approveGoogleEmpJoinRequest(currentWorkspaceId || firebaseUser.uid, empUid, approvedId, hasContract);
                         showAlert(`${empData.name}님이 재입사 승인되었습니다.\n기존 근무 기록이 이어집니다.`, '재입사 승인', 'success');
                     } else {
@@ -1775,12 +1791,16 @@
             };
 
             const employeesWithDisplayId = useMemo(() => {
-                return [...employees].sort((a, b) => {
+                const active = employees.filter(e => e.status !== 'deleted');
+                const deleted = employees.filter(e => e.status === 'deleted');
+                const sorted = [...active].sort((a, b) => {
                     const dateA = new Date(a.hireDate).getTime();
                     const dateB = new Date(b.hireDate).getTime();
                     if (dateA === dateB) return a.id - b.id;
                     return dateA - dateB;
                 }).map((emp, index) => ({ ...emp, displayId: index + 1 }));
+                // deleted 직원도 포함 (재가입 시 찾을 수 있도록)
+                return [...sorted, ...deleted.map(e => ({ ...e, displayId: 99999 }))];
             }, [employees]);
 
             const fileInputRef = useRef(null);
@@ -3051,7 +3071,7 @@
                     const doc = await fbDb.collection('inviteCodes').doc(code.trim().toUpperCase()).get();
                     if (!doc.exists) { setError('유효하지 않은 초대코드입니다.'); setLoading(false); return; }
                     const bossUid = doc.data().bossUid;
-                    const existingBossWp = empGoogleWorkplaces.find(w => w.bossUid === bossUid && w.status !== 'disconnected' && w.status !== 'resigned_by_emp');
+                    const existingBossWp = empGoogleWorkplaces.find(w => w.bossUid === bossUid && w.status !== 'disconnected' && w.status !== 'resigned_by_emp' && w.workStatus !== 'deleted');
                     if (existingBossWp && existingBossWp.status === 'approved') {
                         showAlert('이미 이 업체에 승인된 계정이 있습니다.\n업체 선택 화면에서 선택해 주세요.', '안내', 'info');
                         setLoading(false); onBack(); return;
@@ -5092,7 +5112,8 @@
             const filteredEmployees = useMemo(() => {
                 const minW = Number(globalMinWage);
                 const isLowWage = (emp) => emp.wage && Number(emp.wage) > 0 && Number(emp.wage) < minW;
-                const list = searchTerm ? employees.filter(emp => emp.name.includes(searchTerm)) : [...employees];
+                const visible = employees.filter(emp => emp.status !== 'deleted');
+                const list = searchTerm ? visible.filter(emp => emp.name.includes(searchTerm)) : [...visible];
                 return list.sort((a, b) => {
                     const aPending = pendingContractUpdateEmpIds.has(a.id);
                     const bPending = pendingContractUpdateEmpIds.has(b.id);
@@ -5305,8 +5326,8 @@
             };
 
             const handleDelete = (emp) => {
-                showConfirm('정말 이 근무자를 삭제하시겠습니까?\n(기존 근무 기록은 월별 현황에 유지됩니다)', () => {
-                    setEmployees(prev => prev.filter(e => e.id !== emp.id));
+                showConfirm('정말 이 근무자를 삭제하시겠습니까?\n(기존 근무 기록은 월별 현황에 유지됩니다)\n같은 Google 계정으로 재가입 시 기록이 자동 연동됩니다.', () => {
+                    setEmployees(prev => prev.map(e => e.id === emp.id ? { ...e, status: 'deleted' } : e));
                     // Google 직원이면 workplaces workStatus를 'deleted'로 업데이트 + 알림
                     if (emp.empUid && currentWorkspaceId) {
                         fbDb.collection('employeeAccounts').doc(emp.empUid)

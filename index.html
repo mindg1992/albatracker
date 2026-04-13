@@ -7524,7 +7524,7 @@
             };
 
             const handleOpenSend = (item, existing = null) => {
-                setSendIncludeHoliday(existing ? !!existing.includeHoliday : false);
+                setSendIncludeHoliday(false);
                 setSendDeductInsurance(existing ? !!existing.deductInsurance : false);
                 setSendPayDate(existing ? parsePayDate(existing.payDate) : todayDateVal());
                 setSendModal({ item, isResend: !!existing });

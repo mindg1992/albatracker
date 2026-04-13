@@ -2594,6 +2594,7 @@
                                 predictData={predictData}
                                 setPredictData={setPredictData}
                                 showConfirm={showConfirm}
+                                globalMinWage={globalMinWage}
                             />
                         )}
                         {activeTab === 'invite' && (
@@ -6584,6 +6585,7 @@
                                 onDelete={() => handleDeleteDay(editDayModal)}
                                 workspaceId={workspaceId}
                                 holidayEntries={editHolidayEntries}
+                                globalMinWage={globalMinWage}
                             />
                         );
                     })()}
@@ -6847,7 +6849,7 @@
             );
         }
 
-        function DailyEditModal({ year, month, day, monthKey, activeEmployees, allEmployees, monthlyData, setMonthlyData, onClose, onDelete, workspaceId, holidayEntries }) {
+        function DailyEditModal({ year, month, day, monthKey, activeEmployees, allEmployees, monthlyData, setMonthlyData, onClose, onDelete, workspaceId, holidayEntries, globalMinWage }) {
             const currentDayData = monthlyData[monthKey]?.days[day] || { revenue: 0, entries: {} };
 
             const combinedEmployees = useMemo(() => {
@@ -6875,7 +6877,9 @@
                 const init = {};
                 combinedEmployees.forEach(emp => {
                     const existing = currentDayData.entries[emp.id];
-                    init[emp.id] = existing?.wage || emp.wage || MIN_WAGE;
+                    const empWage = Number(emp.wage) > 0 ? Number(emp.wage) : 0;
+                    const minW = Number(globalMinWage) > 0 ? Number(globalMinWage) : MIN_WAGE;
+                    init[emp.id] = existing?.wage || empWage || minW;
                 });
                 return init;
             });
@@ -6972,7 +6976,7 @@
                                     }).catch(() => {});
                                 }
                             }
-                            const savedWage = Number(wageData[emp.id]) || emp.wage || MIN_WAGE;
+                            const savedWage = Number(wageData[emp.id]) || (Number(emp.wage) > 0 ? Number(emp.wage) : 0) || (Number(globalMinWage) > 0 ? Number(globalMinWage) : MIN_WAGE);
                             newData[monthKey].days[day].entries[emp.id] = {
                                 hours, pay: Math.round(hours * savedWage), name: emp.name, wage: savedWage,
                                 note: deletedNotes[emp.id] ? '' : (existingEntry?.note || ''),
@@ -8095,7 +8099,7 @@
         // ==========================================
         // 주휴수당 예측 탭
         // ==========================================
-        function TabPredict({ employees, predictData, setPredictData, showConfirm }) {
+        function TabPredict({ employees, predictData, setPredictData, showConfirm, globalMinWage }) {
             const [currentDate, setCurrentDate] = useState(new Date());
             const [isBulkInputOpen, setIsBulkInputOpen] = useState(false);
             const [editDayModal, setEditDayModal] = useState(null);
@@ -8288,6 +8292,7 @@
                                 onClose={() => setEditDayModal(null)}
                                 onDelete={() => handleDeleteDay(editDayModal)}
                                 holidayEntries={editHolidayEntries}
+                                globalMinWage={globalMinWage}
                             />
                         );
                     })()}

@@ -1734,22 +1734,7 @@
                             // 같은 empUid의 다른 레코드(중복)는 퇴사 처리
                             return { ...e, status: 'resigned' };
                         }));
-                        // monthlyData의 기존 근무기록 이름 업데이트 (시급·근무시간은 유지)
-                        const newName = empData.name;
-                        setMonthlyData(prev => {
-                            const updated = { ...prev };
-                            Object.keys(updated).forEach(mk => {
-                                const days = updated[mk]?.days;
-                                if (!days) return;
-                                Object.keys(days).forEach(d => {
-                                    const entry = days[d]?.entries?.[approvedId];
-                                    if (entry && entry.name !== newName) {
-                                        updated[mk] = { ...updated[mk], days: { ...updated[mk].days, [d]: { ...days[d], entries: { ...days[d].entries, [approvedId]: { ...entry, name: newName } } } } };
-                                    }
-                                });
-                            });
-                            return updated;
-                        });
+                        // 달력/급여는 employees 배열에서 최신 이름 자동 표시하므로 monthlyData 업데이트 불필요
                         await approveGoogleEmpJoinRequest(currentWorkspaceId || firebaseUser.uid, empUid, approvedId, hasContract);
                         showAlert(`${empData.name}님이 재입사 승인되었습니다.\n기존 근무 기록이 이어집니다.`, '재입사 승인', 'success');
                     } else {
@@ -5321,28 +5306,12 @@
                     setEmployees(prev => [...prev, { ...dataToSave, wage: newEmpWage }]);
                     setNextEmpId(prev => prev + 1);
                 }
-                // 이름 변경 시 직원 workplaces + monthlyData 근무기록 이름도 반영
+                // 이름 변경 시 직원 workplaces에도 반영 (달력/급여는 employees 배열에서 최신 이름 자동 표시)
                 if (editingEmp && editingEmp.name !== dataToSave.name) {
-                    const empId = editingEmp.id;
-                    const newName = dataToSave.name;
-                    setMonthlyData(prev => {
-                        const updated = { ...prev };
-                        Object.keys(updated).forEach(mk => {
-                            const days = updated[mk]?.days;
-                            if (!days) return;
-                            Object.keys(days).forEach(d => {
-                                const entry = days[d]?.entries?.[empId];
-                                if (entry && entry.name !== newName) {
-                                    updated[mk] = { ...updated[mk], days: { ...updated[mk].days, [d]: { ...days[d], entries: { ...days[d].entries, [empId]: { ...entry, name: newName } } } } };
-                                }
-                            });
-                        });
-                        return updated;
-                    });
                     if (editingEmp.empUid && currentWorkspaceId) {
                         fbDb.collection('employeeAccounts').doc(editingEmp.empUid)
                             .collection('workplaces').doc(currentWorkspaceId)
-                            .update({ name: newName })
+                            .update({ name: dataToSave.name })
                             .catch(() => {});
                     }
                 }

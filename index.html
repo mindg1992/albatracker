@@ -1624,6 +1624,7 @@
                         );
                         setEmpAccount(prev => ({
                             ...prev,
+                            name: data.name || prev.name,
                             shopName: data.shopName || prev.shopName,
                             contractStatus: data.contractStatus || null,
                             contract: data.contract || null,
@@ -5258,6 +5259,14 @@
                     setEmployees(prev => [...prev, { ...dataToSave, wage: newEmpWage }]);
                     setNextEmpId(prev => prev + 1);
                 }
+                // 이름 변경 시 직원 workplaces에도 반영
+                if (editingEmp && editingEmp.empUid && currentWorkspaceId && editingEmp.name !== dataToSave.name) {
+                    fbDb.collection('employeeAccounts').doc(editingEmp.empUid)
+                        .collection('workplaces').doc(currentWorkspaceId)
+                        .update({ name: dataToSave.name })
+                        .catch(() => {});
+                }
+
                 setIsModalOpen(false);
                 setEditingEmp(null);
             };

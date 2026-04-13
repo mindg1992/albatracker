@@ -7251,7 +7251,7 @@
                 if (!workspaceId || payrollList.length === 0) return;
                 setBulkSending(true);
                 let successCount = 0;
-                for (const item of payrollList) {
+                for (const item of payrollList.filter(i => i.displayId !== 99999)) {
                     try {
                         const finalAmount = bulkIncludeHoliday ? (item.totalPay + item.holidayPay) : item.totalPay;
                         const calcLines = [`시급: ${Number(item.wage).toLocaleString()}원`, `근무시간: ${fmtHours(item.totalHours)}`, `${bulkIncludeHoliday ? '순수급여' : '총 급여'}: ${Number(item.totalPay).toLocaleString()}원`];
@@ -7480,7 +7480,7 @@
                                                 <span className="text-sm font-bold text-blue-600">{formatCurrency(item.holidayPay)}</span>
                                             </div>
                                         )}
-                                        {workspaceId && (() => {
+                                        {workspaceId && item.displayId !== 99999 && (() => {
                                             const docId = `${item.id}_${year}_${month}`;
                                             const isSent = !!sentPayslips[docId];
                                             return (
@@ -7553,7 +7553,7 @@
                                                 </td>
                                                 {workspaceId && (
                                                     <td className="px-4 py-4 text-center">
-                                                        {(() => {
+                                                        {item.displayId !== 99999 ? (() => {
                                                             const docId = `${item.id}_${year}_${month}`;
                                                             const isSent = !!sentPayslips[docId];
                                                             return (
@@ -7562,7 +7562,7 @@
                                                                     {isSent ? '발송완료' : '발송'}
                                                                 </button>
                                                             );
-                                                        })()}
+                                                        })() : <span className="text-gray-300 text-xs">-</span>}
                                                     </td>
                                                 )}
                                             </tr>

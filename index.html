@@ -1588,10 +1588,11 @@
                                 const ee = de.entries || {};
                                 const existing = ee[sub.employeeId];
                                 if (existing?.bossModified) return prev; // 관리자가 수정한 경우 유지
+                                // 초기 로드 시 기존 기록이 있으면 덮어쓰지 않음 (시급 보호)
+                                if (!initialLoadDone && existing) return prev;
                                 const emp = employeesRef.current.find(e => e.id !== undefined && e.id.toString() === String(sub.employeeId));
                                 const empWage = emp?.wage ? Number(emp.wage) : 0;
-                                // 초기 로드: 기존 기록 시급 유지 / 새 제출: 현재 직원 시급 사용
-                                const wage = sub.wage || (!initialLoadDone && existing?.wage ? Number(existing.wage) : 0) || empWage || Number(globalMinWage) || MIN_WAGE;
+                                const wage = Number(sub.wage) || empWage || Number(globalMinWage) || MIN_WAGE;
                                 const latestName = emp?.name || sub.empName;
                                 // 이미 같은 시간/시급/이름으로 기록돼 있으면 덮어쓰지 않음
                                 if (existing && existing.hours === sub.hours && existing.wage === wage && existing.name === latestName) return prev;
@@ -4070,8 +4071,8 @@
 
                                 <div className="mt-4 bg-white rounded-xl border border-gray-200 p-4">
                                     <h3 className="text-sm font-bold text-gray-700 mb-3">{month}월 요약</h3>
-                                    {(() => {
-                                        const subs = Object.values(mySubmissions).filter(s => s.date?.startsWith(monthKey));
+                                    {(() => { try {
+                                        const subs = Object.values(mySubmissions || {}).filter(s => s.date?.startsWith(monthKey));
                                         const totalH = subs.reduce((a,s) => a+(s.hours||0), 0);
                                         const empWage = Number(empAccount?.wage) || Number(globalMinWage || 0) || MIN_WAGE;
                                         // 시급별 분류
@@ -4108,7 +4109,7 @@
                                                 </div>
                                             </div>
                                         );
-                                    })()}
+                                    } catch(err) { console.error('월 요약 에러:', err); return <div className="text-sm text-gray-400">요약 정보를 불러올 수 없습니다.</div>; } })()}
                                 </div>
                             </div>
                         )}

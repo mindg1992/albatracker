@@ -7741,7 +7741,10 @@
                 });
 
                 const ws2 = XLSX.utils.aoa_to_sheet(sheet2Rows);
-                ws2['!cols'] = autoColWidth(sheet2Rows);
+                const ws2Cols = autoColWidth(sheet2Rows);
+                // 지급일 열(인덱스 9) 최소 너비 11
+                if (ws2Cols[9]) ws2Cols[9].wch = Math.max(ws2Cols[9].wch, 11);
+                ws2['!cols'] = ws2Cols;
                 // 탭2 스타일: X축(헤더행) 연한초록, Y축(구분번호+근무자명) 연한노랑
                 // 금액 컬럼(시간급여4, 주휴수당5, 총급여6, 보험공제7)은 오른쪽정렬, 나머지 가운데
                 const moneyCols2 = new Set([4, 5, 6, 7]);

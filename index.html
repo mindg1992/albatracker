@@ -24,8 +24,8 @@
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
 
-    <!-- SheetJS -->
-    <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+    <!-- SheetJS (xlsx-js-style: 셀 스타일 지원 포크) -->
+    <script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"></script>
 
     <!-- html2pdf -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
@@ -7666,6 +7666,23 @@
                 const ws1 = XLSX.utils.aoa_to_sheet(sheet1Rows);
                 const colWidth1 = [{ wch: 6 }, ...payrollList.map(() => ({ wch: 12 }))];
                 ws1['!cols'] = colWidth1;
+                // 탭1 스타일: X축(헤더행) 연한초록, Y축(날짜열) 연한노랑, 가운데정렬
+                const greenFill = { fgColor: { rgb: 'D5F5E3' } };
+                const yellowFill = { fgColor: { rgb: 'FFF9C4' } };
+                const center = { horizontal: 'center', vertical: 'center' };
+                const headerFont = { bold: true };
+                for (let c = 0; c < sheet1Header.length; c++) {
+                    const addr = XLSX.utils.encode_cell({ r: 0, c });
+                    if (ws1[addr]) ws1[addr].s = { fill: greenFill, font: headerFont, alignment: center };
+                }
+                for (let r = 1; r < sheet1Rows.length; r++) {
+                    const addr = XLSX.utils.encode_cell({ r, c: 0 });
+                    if (ws1[addr]) ws1[addr].s = { fill: yellowFill, font: headerFont, alignment: center };
+                    for (let c = 1; c < sheet1Header.length; c++) {
+                        const addr2 = XLSX.utils.encode_cell({ r, c });
+                        if (ws1[addr2]) ws1[addr2].s = { alignment: center };
+                    }
+                }
 
                 // ── 탭2: 급여계산 ──────────────────────────────────
                 // 메모 최대 개수 계산
@@ -7715,10 +7732,27 @@
                     { wch: 8 }, { wch: 14 },
                     { wch: 18 }, { wch: 10 },
                     { wch: 14 }, { wch: 12 }, { wch: 14 },
-                    { wch: 14 }, { wch: 12 },
-                    { wch: 18 },
+                    { wch: 18 }, { wch: 14 }, { wch: 12 },
                     ...memoHeaders.map(() => ({ wch: 20 }))
                 ];
+                // 탭2 스타일: X축(헤더행) 연한초록, Y축(구분번호+근무자명) 연한노랑
+                // 금액 컬럼(시간급여4, 주휴수당5, 총급여6, 보험공제7)은 오른쪽정렬, 나머지 가운데
+                const moneyCols2 = new Set([4, 5, 6, 7]);
+                for (let c = 0; c < sheet2Header.length; c++) {
+                    const addr = XLSX.utils.encode_cell({ r: 0, c });
+                    if (ws2[addr]) ws2[addr].s = { fill: greenFill, font: headerFont, alignment: center };
+                }
+                for (let r = 1; r < sheet2Rows.length; r++) {
+                    // Y축: 구분번호(col0) + 근무자명(col1)
+                    for (let yc = 0; yc <= 1; yc++) {
+                        const addr = XLSX.utils.encode_cell({ r, c: yc });
+                        if (ws2[addr]) ws2[addr].s = { fill: yellowFill, font: yc === 1 ? headerFont : {}, alignment: center };
+                    }
+                    for (let c = 2; c < sheet2Header.length; c++) {
+                        const addr = XLSX.utils.encode_cell({ r, c });
+                        if (ws2[addr]) ws2[addr].s = { alignment: moneyCols2.has(c) ? { horizontal: 'right', vertical: 'center' } : center };
+                    }
+                }
 
                 const wb = XLSX.utils.book_new();
                 XLSX.utils.book_append_sheet(wb, ws1, '일별근무시간');

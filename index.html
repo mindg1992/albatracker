@@ -1375,6 +1375,13 @@
                         if (target) {
                             setSelectedEmpBossUid(target.bossUid);
                             localStorage.setItem('selectedEmpBossUid', target.bossUid);
+                            // workspaces 문서에서 최신 shopName 가져오기
+                            fbDb.collection('workspaces').doc(target.bossUid).get()
+                                .then(wsDoc => {
+                                    if (wsDoc.exists && wsDoc.data()?.shopName) {
+                                        setEmpAccount(prev => prev ? { ...prev, shopName: wsDoc.data().shopName } : prev);
+                                    }
+                                }).catch(() => {});
                             setEmpAccount(prev => ({
                                 ...prev,
                                 bossUid: target.bossUid,

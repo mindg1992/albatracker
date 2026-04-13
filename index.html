@@ -7522,7 +7522,7 @@
 
                     <div className="hidden md:block bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
                         <div className="overflow-x-auto">
-                            <table className="w-full text-center border-collapse min-w-max">
+                            <table className="w-full text-center border-collapse">
                                 <thead className="bg-gray-50 border-b">
                                     <tr>
                                         <th className="px-4 py-4 font-bold text-gray-600 whitespace-nowrap">구분번호</th>
@@ -7589,8 +7589,8 @@
                                 {payrollList.length > 0 && (
                                     <tfoot className="bg-gray-50 border-t-2 border-gray-200">
                                         <tr>
-                                            <td colSpan={workspaceId ? 9 : 8} className="px-4 py-5 text-right font-bold text-gray-700">총 지급 예정액</td>
-                                            <td className="px-4 py-5 text-right font-black text-xl text-purple-700 whitespace-nowrap">{formatCurrency(grandTotal)}</td>
+                                            <td colSpan={6} className="px-4 py-5 text-right font-bold text-gray-700">총 지급 예정액</td>
+                                            <td className="px-4 py-5 font-black text-xl text-purple-700 whitespace-nowrap">{formatCurrency(grandTotal)}</td>
                                             {workspaceId && <td></td>}
                                         </tr>
                                     </tfoot>

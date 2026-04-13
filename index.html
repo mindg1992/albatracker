@@ -1487,7 +1487,7 @@
                             if (data.type === 'resigned_by_emp') {
                                 resignedEmpUidsRef.current.add(data.empUid);
                                 setEmployees(prev => prev.map(e =>
-                                    e.empUid === data.empUid ? { ...e, status: 'resigned', contractDeleteRequest: null } : e
+                                    e.empUid === data.empUid && e.status !== 'deleted' ? { ...e, status: 'resigned', contractDeleteRequest: null } : e
                                 ));
                                 fbDb.collection('empPending').doc(d.id).delete().catch(() => {});
                                 return;

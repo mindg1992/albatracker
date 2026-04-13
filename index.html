@@ -1851,14 +1851,12 @@
                 const trimmed = newName.trim();
                 (async () => {
                     try {
-                        const batch = fbDb.batch();
                         // 1. workspaces 문서 업데이트
-                        batch.update(fbDb.collection('workspaces').doc(currentWorkspaceId), { shopName: trimmed });
-                        // 2. inviteCodes 문서 업데이트 (현재 초대코드)
+                        await fbDb.collection('workspaces').doc(currentWorkspaceId).update({ shopName: trimmed });
+                        // 2. inviteCodes 문서 업데이트 (권한 없으면 무시)
                         if (workspaceInfo.inviteCode) {
-                            batch.update(fbDb.collection('inviteCodes').doc(workspaceInfo.inviteCode), { shopName: trimmed });
+                            fbDb.collection('inviteCodes').doc(workspaceInfo.inviteCode).update({ shopName: trimmed }).catch(() => {});
                         }
-                        await batch.commit();
                         // 3. 클라이언트 상태 반영
                         setWorkspaceInfo(prev => ({ ...prev, shopName: trimmed }));
                         setBossWorkspaceList(prev => prev.map(ws =>

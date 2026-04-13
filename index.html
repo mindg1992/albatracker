@@ -163,6 +163,19 @@
             return `${m}분`;
         };
 
+        // --- 보험료 정보 유틸리티 ---
+        function getInsuranceInfo(workspaceInfo, employee) {
+            const mode = workspaceInfo?.insuranceMode || 'global';
+            if (mode === 'individual') {
+                const rate = parseFloat(employee?.insuranceRate) || 0;
+                const name = employee?.insuranceName || '보험료';
+                return { mode, rate, name };
+            }
+            const rate = parseFloat(workspaceInfo?.insuranceRate) || 0;
+            const name = workspaceInfo?.insuranceName || '';
+            return { mode, rate, name };
+        }
+
         // --- 주휴수당 계산 유틸리티 ---
         function calcHolidayPayBySunday(monthlyData, employees) {
             const toLocalStr = (date) => {
@@ -5709,6 +5722,7 @@
                             nextId={nextEmpId}
                             globalMinWage={globalMinWage}
                             showAlert={showAlert}
+                            workspaceInfo={workspaceInfo}
                         />
                     )}
                     {viewingContract && (
@@ -6229,7 +6243,7 @@
             );
         }
 
-        function EmployeeModal({ employee, onClose, onSave, nextId, globalMinWage, showAlert }) {
+        function EmployeeModal({ employee, onClose, onSave, nextId, globalMinWage, showAlert, workspaceInfo }) {
             const [formData, setFormData] = useState(() => {
                 const initialStatus = employee 
                     ? (employee.status || (employee.isWorking === false ? 'resigned' : 'working'))
@@ -6332,6 +6346,26 @@
                                     </div>
                                 </div>
                             </div>
+
+                            {workspaceInfo?.insuranceMode === 'individual' && (
+                                <div className="grid grid-cols-2 gap-3">
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 mb-1">보험항목</label>
+                                        <input type="text" name="insuranceName" value={formData.insuranceName || ''} onChange={handleChange}
+                                            placeholder="예) 고용보험, 고용보험+건강보험"
+                                            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-green-500 outline-none transition-shadow placeholder:text-gray-300" />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 mb-1">공제율</label>
+                                        <div className="relative">
+                                            <input type="number" name="insuranceRate" value={formData.insuranceRate || ''} onChange={handleChange}
+                                                min="0" max="100" step="0.1" placeholder="0"
+                                                className="w-full border border-gray-300 rounded-lg px-3 py-2 pr-8 text-sm focus:ring-2 focus:ring-green-500 outline-none transition-shadow" />
+                                            <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-gray-400">%</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
 
                             <div>
                                 <label className="block text-sm font-medium text-gray-700 mb-2">메모</label>
@@ -7427,10 +7461,21 @@
                     });
                 });
 
-                return Object.values(list).sort((a, b) => a.displayId - b.displayId);
-            }, [monthKey, monthlyData, employees, year, month]);
+                const result = Object.values(list).sort((a, b) => a.displayId - b.displayId);
+                result.forEach(item => {
+                    const emp = employees.find(e => e.id.toString() === item.id);
+                    const ins = getInsuranceInfo(workspaceInfo, emp);
+                    item.insuranceRate = ins.rate;
+                    item.insuranceName = ins.name;
+                    const gross = item.totalPay + item.holidayPay;
+                    item.insuranceDeduction = ins.rate > 0 ? Math.round(gross * ins.rate / 100) : 0;
+                    item.finalPay = gross - item.insuranceDeduction;
+                });
+                return result;
+            }, [monthKey, monthlyData, employees, year, month, workspaceInfo]);
 
             const grandTotal = payrollList.reduce((sum, item) => sum + item.totalPay + item.holidayPay, 0);
+            const grandTotalFinal = payrollList.reduce((sum, item) => sum + item.finalPay, 0);
 
             // 급여명세서 발송
             const [sendModal, setSendModal] = useState(null); // { item }
@@ -7482,7 +7527,9 @@
                 for (const item of payrollList.filter(i => i.displayId !== 99999)) {
                     try {
                         const beforeInsurance = bulkIncludeHoliday ? (item.totalPay + item.holidayPay) : item.totalPay;
-                        const finalAmount = bulkDeductInsurance ? Math.round(beforeInsurance * 0.992) : beforeInsurance;
+                        const insRate = item.insuranceRate || 0;
+                        const insName = item.insuranceName || '';
+                        const finalAmount = bulkDeductInsurance && insRate > 0 ? Math.round(beforeInsurance * (1 - insRate / 100)) : beforeInsurance;
                         const wages = Object.entries(item.wageBreakdown || {});
                         const calcLines = [];
                         if (wages.length <= 1) {
@@ -7494,7 +7541,7 @@
                             calcLines.push(`${bulkIncludeHoliday ? '순수급여' : '총 급여'}: ${Number(item.totalPay).toLocaleString()}원`);
                         }
                         if (bulkIncludeHoliday && item.holidayPay > 0) calcLines.push(`주휴수당: ${Number(item.holidayPay).toLocaleString()}원`);
-                        if (bulkDeductInsurance) calcLines.push(`고용보험 0.8% 제외: -${Number(beforeInsurance - finalAmount).toLocaleString()}원`);
+                        if (bulkDeductInsurance && insRate > 0) calcLines.push(`${insName || '보험료'} ${insRate}% 제외: -${Number(beforeInsurance - finalAmount).toLocaleString()}원`);
                         const docId = `${item.id}_${year}_${month}`;
                         const emp = employees.find(e => e.id.toString() === item.id);
                         const payslipData = {
@@ -7502,6 +7549,7 @@
                             empUid: emp?.empUid || '',
                             totalPay: item.totalPay, holidayPay: item.holidayPay,
                             includeHoliday: bulkIncludeHoliday, deductInsurance: bulkDeductInsurance, finalAmount,
+                            insuranceName: insName, insuranceRate: insRate,
                             wage: item.wage, totalHours: item.totalHours,
                             calcMethod: calcLines.join('\n'),
                             payDate: fmtPayDate(bulkPayDate) || fmtPayDate(todayDateVal()),
@@ -7539,7 +7587,9 @@
                 setSending(true);
                 const { item } = sendModal;
                 const beforeInsurance = sendIncludeHoliday ? (item.totalPay + item.holidayPay) : item.totalPay;
-                const finalAmount = sendDeductInsurance ? Math.round(beforeInsurance * 0.992) : beforeInsurance;
+                const insRate = item.insuranceRate || 0;
+                const insName = item.insuranceName || '';
+                const finalAmount = sendDeductInsurance && insRate > 0 ? Math.round(beforeInsurance * (1 - insRate / 100)) : beforeInsurance;
                 const wages = Object.entries(item.wageBreakdown || {});
                 const calcLines = [];
                 if (wages.length <= 1) {
@@ -7551,7 +7601,7 @@
                     calcLines.push(`${sendIncludeHoliday ? '순수급여' : '총 급여'}: ${Number(item.totalPay).toLocaleString()}원`);
                 }
                 if (sendIncludeHoliday && item.holidayPay > 0) calcLines.push(`주휴수당: ${Number(item.holidayPay).toLocaleString()}원`);
-                if (sendDeductInsurance) calcLines.push(`고용보험 0.8% 제외: -${Number(beforeInsurance - finalAmount).toLocaleString()}원`);
+                if (sendDeductInsurance && insRate > 0) calcLines.push(`${insName || '보험료'} ${insRate}% 제외: -${Number(beforeInsurance - finalAmount).toLocaleString()}원`);
                 const calcMethod = calcLines.join('\n');
                 const payDate = fmtPayDate(sendPayDate) || fmtPayDate(todayDateVal());
                 const docId = `${item.id}_${year}_${month}`;
@@ -7561,6 +7611,7 @@
                     empUid: emp?.empUid || '',
                     totalPay: item.totalPay, holidayPay: item.holidayPay,
                     includeHoliday: sendIncludeHoliday, deductInsurance: sendDeductInsurance, finalAmount,
+                    insuranceName: insName, insuranceRate: insRate,
                     wage: item.wage, totalHours: item.totalHours,
                     calcMethod, payDate,
                     shopName: workspaceInfo?.shopName || '',
@@ -7621,20 +7672,25 @@
                 const maxMemos = payrollList.reduce((max, item) => Math.max(max, (item.memos || []).length), 0);
                 const memoHeaders = Array.from({ length: maxMemos }, (_, i) => `메모${i + 1}`);
 
+                const hasInsurance = payrollList.some(i => i.insuranceRate > 0);
+                const insMode = workspaceInfo?.insuranceMode || 'global';
+                const insHeaderLabel = hasInsurance
+                    ? (insMode === 'global' && workspaceInfo?.insuranceName ? `${workspaceInfo.insuranceName}공제` : '보험료 공제')
+                    : '보험료 공제';
                 const sheet2Header = [
                     '구분번호', '근무자명',
                     '이번달 총 근무시간', '시급',
                     '시간급여', '주휴수당', '총 급여',
                     '실제 지급액', '지급일',
-                    '고용보험 0.8% 제외',
+                    insHeaderLabel,
                     ...memoHeaders
                 ];
                 const sheet2Rows = [sheet2Header];
 
                 payrollList.forEach((item, idx) => {
-                    const timePay = item.totalPay;                     // 시간급여 (시급별 합산)
-                    const totalPay = timePay + item.holidayPay;       // 총급여
-                    const afterInsurance = Math.round(totalPay * 0.992); // 고용보험 0.8% 제외
+                    const timePay = item.totalPay;
+                    const totalPay = timePay + item.holidayPay;
+                    const afterInsurance = item.insuranceRate > 0 ? item.finalPay : totalPay;
                     const wages = Object.entries(item.wageBreakdown || {});
                     const wageStr = wages.length <= 1 ? String(wages[0]?.[0] || item.wage) : wages.map(([w, info]) => `${Number(w).toLocaleString()}원(${info.days}일)`).join(' / ');
                     const memoCells = Array.from({ length: maxMemos }, (_, i) => (item.memos || [])[i] || '');
@@ -7709,7 +7765,7 @@
                                                 <h3 className="text-lg font-bold text-gray-800 mt-2">{item.name}</h3>
                                             </div>
                                             <div className="text-right">
-                                                <div className="text-xl font-black text-purple-700">{formatCurrency(item.totalPay + item.holidayPay)}</div>
+                                                <div className="text-xl font-black text-purple-700">{formatCurrency(item.insuranceRate > 0 ? item.finalPay : item.totalPay + item.holidayPay)}</div>
                                                 <div className="text-xs font-medium text-gray-400 mt-0.5">총 지급액</div>
                                             </div>
                                         </div>
@@ -7759,6 +7815,12 @@
                                                 <span className="text-sm font-bold text-blue-600">{formatCurrency(item.holidayPay)}</span>
                                             </div>
                                         )}
+                                        {item.insuranceRate > 0 && (
+                                            <div className="mt-3 pt-3 border-t border-orange-100 flex justify-between items-center bg-orange-50/50 -mx-5 px-5 pb-3">
+                                                <span className="text-xs text-orange-600 font-bold">보험료 공제 (-{item.insuranceRate}%)</span>
+                                                <span className="text-sm font-bold text-orange-600">-{formatCurrency(item.insuranceDeduction)}</span>
+                                            </div>
+                                        )}
                                         {workspaceId && item.displayId !== 99999 && (() => {
                                             const docId = `${item.id}_${year}_${month}`;
                                             const isSent = !!sentPayslips[docId];
@@ -7776,7 +7838,7 @@
                                 ))}
                                 <div className="bg-purple-50 rounded-2xl border border-purple-200 p-5 flex justify-between items-center shadow-sm">
                                     <span className="font-bold text-gray-800">총 지급 예정액</span>
-                                    <span className="text-2xl font-black text-purple-700">{formatCurrency(grandTotal)}</span>
+                                    <span className="text-2xl font-black text-purple-700">{formatCurrency(payrollList.some(i => i.insuranceRate > 0) ? grandTotalFinal : grandTotal)}</span>
                                 </div>
                             </>
                         )}
@@ -7793,13 +7855,14 @@
                                         <th className="px-4 py-4 font-bold text-gray-600 whitespace-nowrap">이번달 근무시간</th>
                                         <th className="px-4 py-4 font-bold text-gray-600 whitespace-nowrap">순수 급여</th>
                                         <th className="px-4 py-4 font-bold text-blue-600 whitespace-nowrap">주휴수당</th>
+                                        {payrollList.some(i => i.insuranceRate > 0) && <th className="px-4 py-4 font-bold text-orange-600 whitespace-nowrap">보험료 공제</th>}
                                         <th className="px-4 py-4 font-bold text-purple-600 whitespace-nowrap">{month}월 총 지급액</th>
                                         {workspaceId && <th className="px-4 py-4 font-bold text-emerald-600 whitespace-nowrap">급여명세서</th>}
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-gray-100">
                                     {payrollList.length === 0 ? (
-                                        <tr><td colSpan={workspaceId ? 8 : 7} className="p-10 text-center text-gray-500 font-medium">해당 월의 인건비 지급 내역이 없습니다.</td></tr>
+                                        <tr><td colSpan={workspaceId ? 9 : 8} className="p-10 text-center text-gray-500 font-medium">해당 월의 인건비 지급 내역이 없습니다.</td></tr>
                                     ) : (
                                         payrollList.map(item => (
                                             <tr key={item.id} className="hover:bg-gray-50 transition">
@@ -7852,8 +7915,18 @@
                                                         </>
                                                     ) : <span className="text-gray-300 font-normal">-</span>}
                                                 </td>
+                                                {payrollList.some(i => i.insuranceRate > 0) && (
+                                                    <td className="px-4 py-4 font-bold text-orange-600 whitespace-nowrap">
+                                                        {item.insuranceRate > 0 ? (
+                                                            <>
+                                                                <div className="text-[11px] text-gray-400 font-normal">-{item.insuranceRate}%</div>
+                                                                <div>-{formatCurrency(item.insuranceDeduction)}</div>
+                                                            </>
+                                                        ) : <span className="text-gray-300 font-normal">-</span>}
+                                                    </td>
+                                                )}
                                                 <td className="px-4 py-4 font-black text-purple-700 whitespace-nowrap">
-                                                    {formatCurrency(item.totalPay + item.holidayPay)}
+                                                    {formatCurrency(item.insuranceRate > 0 ? item.finalPay : item.totalPay + item.holidayPay)}
                                                 </td>
                                                 {workspaceId && (
                                                     <td className="px-4 py-4 text-center">
@@ -7876,8 +7949,8 @@
                                 {payrollList.length > 0 && (
                                     <tfoot className="bg-gray-50 border-t-2 border-gray-200">
                                         <tr>
-                                            <td colSpan={6} className="px-4 py-5 text-right font-bold text-gray-700">총 지급 예정액</td>
-                                            <td className="px-4 py-5 font-black text-xl text-purple-700 whitespace-nowrap">{formatCurrency(grandTotal)}</td>
+                                            <td colSpan={payrollList.some(i => i.insuranceRate > 0) ? 7 : 6} className="px-4 py-5 text-right font-bold text-gray-700">총 지급 예정액</td>
+                                            <td className="px-4 py-5 font-black text-xl text-purple-700 whitespace-nowrap">{formatCurrency(payrollList.some(i => i.insuranceRate > 0) ? grandTotalFinal : grandTotal)}</td>
                                             {workspaceId && <td></td>}
                                         </tr>
                                     </tfoot>
@@ -7897,7 +7970,8 @@
                                 <p className="text-gray-500">{year}년 {month}월 급여</p>
                                 <p className="text-purple-700 font-bold text-base">{(() => {
                                     const base = sendIncludeHoliday ? sendModal.item.totalPay + sendModal.item.holidayPay : sendModal.item.totalPay;
-                                    return formatCurrency(sendDeductInsurance ? Math.round(base * 0.992) : base);
+                                    const r = sendModal.item.insuranceRate || 0;
+                                    return formatCurrency(sendDeductInsurance && r > 0 ? Math.round(base * (1 - r / 100)) : base);
                                 })()}</p>
                             </div>
                             <div>
@@ -7912,19 +7986,32 @@
                                     <p className="text-xs text-blue-600">주휴수당 {formatCurrency(sendModal.item.holidayPay)}</p>
                                 </div>
                             </label>
-                            <label className="flex items-center gap-3 cursor-pointer bg-orange-50 rounded-xl p-4 border border-orange-100">
-                                <input type="checkbox" checked={sendDeductInsurance} onChange={e => setSendDeductInsurance(e.target.checked)} className="w-4 h-4 accent-orange-600" />
-                                <div>
-                                    <p className="font-bold text-orange-800 text-sm">고용보험 0.8% 제외</p>
-                                    <p className="text-xs text-orange-600">
-                                        {(() => {
-                                            const base = sendIncludeHoliday ? sendModal.item.totalPay + sendModal.item.holidayPay : sendModal.item.totalPay;
-                                            const deducted = Math.round(base * 0.008);
-                                            return sendDeductInsurance ? `공제액 -${deducted.toLocaleString()}원 → 실수령 ${(base - deducted).toLocaleString()}원` : `공제 시 -${deducted.toLocaleString()}원`;
-                                        })()}
-                                    </p>
-                                </div>
-                            </label>
+                            {(() => {
+                                const ins = sendModal.item;
+                                const r = ins.insuranceRate || 0;
+                                const n = ins.insuranceName || '';
+                                const isIndiv = workspaceInfo?.insuranceMode === 'individual';
+                                if (r <= 0) return null;
+                                return (
+                                    <label className="flex items-center gap-3 cursor-pointer bg-orange-50 rounded-xl p-4 border border-orange-100">
+                                        <input type="checkbox" checked={sendDeductInsurance} onChange={e => setSendDeductInsurance(e.target.checked)} className="w-4 h-4 accent-orange-600" />
+                                        <div>
+                                            <p className="font-bold text-orange-800 text-sm">{isIndiv ? '보험료 제외' : `${n || '보험료'} ${r}% 제외`}</p>
+                                            <p className="text-xs text-orange-600">
+                                                {(() => {
+                                                    const base = sendIncludeHoliday ? sendModal.item.totalPay + sendModal.item.holidayPay : sendModal.item.totalPay;
+                                                    const deducted = Math.round(base * r / 100);
+                                                    return sendDeductInsurance
+                                                        ? `공제액 -${deducted.toLocaleString()}원 → 실수령 ${(base - deducted).toLocaleString()}원`
+                                                        : isIndiv
+                                                            ? `체크 시 개별로 설정한 보험료율을 공제한 금액으로 발송됩니다`
+                                                            : `체크 시 총액에서 ${r}%를 공제한 금액으로 발송됩니다`;
+                                                })()}
+                                            </p>
+                                        </div>
+                                    </label>
+                                );
+                            })()}
                             <div className="flex gap-2">
                                 <button onClick={() => setSendModal(null)} className="flex-1 bg-gray-100 text-gray-700 py-3 rounded-xl font-medium hover:bg-gray-200 transition">취소</button>
                                 <button onClick={handleSendPayslip} disabled={sending} className="flex-1 bg-emerald-600 text-white py-3 rounded-xl font-bold hover:bg-emerald-700 transition disabled:opacity-50">
@@ -7956,13 +8043,22 @@
                                     <p className="text-xs text-blue-600">체크 시 주휴수당이 임금총액에 포함됩니다</p>
                                 </div>
                             </label>
-                            <label className="flex items-center gap-3 cursor-pointer bg-orange-50 rounded-xl p-4 border border-orange-100">
-                                <input type="checkbox" checked={bulkDeductInsurance} onChange={e => setBulkDeductInsurance(e.target.checked)} className="w-4 h-4 accent-orange-600" />
-                                <div>
-                                    <p className="font-bold text-orange-800 text-sm">고용보험 0.8% 제외</p>
-                                    <p className="text-xs text-orange-600">체크 시 총액에서 0.8%를 공제한 금액으로 발송됩니다</p>
-                                </div>
-                            </label>
+                            {(() => {
+                                const isIndiv = workspaceInfo?.insuranceMode === 'individual';
+                                const gRate = parseFloat(workspaceInfo?.insuranceRate) || 0;
+                                const gName = workspaceInfo?.insuranceName || '';
+                                const hasAny = isIndiv ? payrollList.some(i => i.insuranceRate > 0) : gRate > 0;
+                                if (!hasAny) return null;
+                                return (
+                                    <label className="flex items-center gap-3 cursor-pointer bg-orange-50 rounded-xl p-4 border border-orange-100">
+                                        <input type="checkbox" checked={bulkDeductInsurance} onChange={e => setBulkDeductInsurance(e.target.checked)} className="w-4 h-4 accent-orange-600" />
+                                        <div>
+                                            <p className="font-bold text-orange-800 text-sm">{isIndiv ? '보험료 제외' : `${gName || '보험료'} ${gRate}% 제외`}</p>
+                                            <p className="text-xs text-orange-600">{isIndiv ? '체크 시 개별로 설정한 보험료율을 공제한 금액으로 발송됩니다' : `체크 시 총액에서 ${gRate}%를 공제한 금액으로 발송됩니다`}</p>
+                                        </div>
+                                    </label>
+                                );
+                            })()}
                             <div className="flex gap-2">
                                 <button onClick={() => setBulkModal(false)} className="flex-1 bg-gray-100 text-gray-700 py-3 rounded-xl font-medium hover:bg-gray-200 transition">취소</button>
                                 <button onClick={handleBulkSend} disabled={bulkSending} className="flex-1 bg-blue-600 text-white py-3 rounded-xl font-bold hover:bg-blue-700 transition disabled:opacity-50">
@@ -9409,6 +9505,29 @@
             const [savingUnit, setSavingUnit] = useState(false);
             const [openPin, setOpenPin] = useState(false);
             const [openTimeUnit, setOpenTimeUnit] = useState(false);
+            const [openInsurance, setOpenInsurance] = useState(false);
+            const [localInsuranceMode, setLocalInsuranceMode] = useState(workspaceInfo?.insuranceMode || 'global');
+            const [localInsuranceName, setLocalInsuranceName] = useState(workspaceInfo?.insuranceName || '');
+            const [localInsuranceRate, setLocalInsuranceRate] = useState(workspaceInfo?.insuranceRate || '');
+            const [savingInsurance, setSavingInsurance] = useState(false);
+
+            const handleSaveInsurance = async () => {
+                if (!firebaseUser) return;
+                setSavingInsurance(true);
+                try {
+                    const update = { insuranceMode: localInsuranceMode };
+                    if (localInsuranceMode === 'global') {
+                        update.insuranceName = localInsuranceName;
+                        update.insuranceRate = parseFloat(localInsuranceRate) || 0;
+                    }
+                    await fbDb.collection('workspaces').doc(workspaceId || firebaseUser.uid).update(update);
+                    setWorkspaceInfo(prev => ({ ...prev, ...update }));
+                    showAlert('보험료율 설정이 저장되었습니다.', '저장 완료', 'success');
+                } catch(e) {
+                    showAlert('저장 실패: ' + e.message, '오류', 'error');
+                }
+                setSavingInsurance(false);
+            };
 
             const currentRef = useRef(null);
             const newRef = useRef(null);
@@ -9554,6 +9673,73 @@
                             </div>
                             <button onClick={handleSaveTimeUnit} disabled={savingUnit} className="w-full bg-blue-600 text-white font-bold py-3.5 rounded-xl hover:bg-blue-700 transition disabled:opacity-50">
                                 {savingUnit ? '저장 중...' : '저장하기'}
+                            </button>
+                        </div>
+                    )}
+                </div>
+
+                {/* 보험료율 설정 */}
+                <div className="max-w-md mx-auto mt-6 bg-white rounded-2xl shadow-sm border border-gray-200">
+                    <button onClick={() => setOpenInsurance(p => !p)} className="w-full p-6 flex items-center justify-between text-left">
+                        <div className="flex items-center gap-3">
+                            <div className="bg-orange-100 p-2.5 rounded-xl">
+                                <svg className="w-6 h-6 text-orange-700" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                            </div>
+                            <div>
+                                <h2 className="text-xl font-bold text-gray-800">보험료율 설정</h2>
+                                <p className="text-xs text-gray-500">급여명세서에 적용되는 보험료 공제 설정</p>
+                            </div>
+                        </div>
+                        <svg className={`w-5 h-5 text-gray-400 transition-transform ${openInsurance ? 'rotate-180' : ''}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="6 9 12 15 18 9"/></svg>
+                    </button>
+
+                    {openInsurance && (
+                        <div className="px-6 pb-6 border-t border-gray-100 pt-4">
+                            <div className="space-y-2 mb-5">
+                                <label className={`flex items-center gap-3 p-3 border-2 rounded-xl cursor-pointer transition ${localInsuranceMode === 'global' ? 'border-orange-500 bg-orange-50' : 'border-gray-200 hover:bg-gray-50'}`}>
+                                    <input type="radio" name="insuranceMode" value="global" checked={localInsuranceMode === 'global'} onChange={() => setLocalInsuranceMode('global')} className="accent-orange-600" />
+                                    <div>
+                                        <p className="font-bold text-gray-800 text-sm">전체 일괄적용</p>
+                                        <p className="text-xs text-gray-400">모든 근무자에게 동일한 보험료율 적용</p>
+                                    </div>
+                                </label>
+                                <label className={`flex items-center gap-3 p-3 border-2 rounded-xl cursor-pointer transition ${localInsuranceMode === 'individual' ? 'border-orange-500 bg-orange-50' : 'border-gray-200 hover:bg-gray-50'}`}>
+                                    <input type="radio" name="insuranceMode" value="individual" checked={localInsuranceMode === 'individual'} onChange={() => setLocalInsuranceMode('individual')} className="accent-orange-600" />
+                                    <div>
+                                        <p className="font-bold text-gray-800 text-sm">개별 적용</p>
+                                        <p className="text-xs text-gray-400">근무자별로 다른 보험료율 설정</p>
+                                    </div>
+                                </label>
+                            </div>
+
+                            {localInsuranceMode === 'global' && (
+                                <div className="space-y-3 mb-5">
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 mb-1">보험항목</label>
+                                        <input type="text" value={localInsuranceName} onChange={e => setLocalInsuranceName(e.target.value)}
+                                            placeholder="예) 고용보험, 고용보험+건강보험"
+                                            className="w-full border border-gray-300 rounded-xl px-4 py-2.5 text-sm focus:ring-2 focus:ring-orange-500 outline-none transition placeholder:text-gray-300" />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 mb-1">총 급여에서 공제</label>
+                                        <div className="relative">
+                                            <input type="number" value={localInsuranceRate} onChange={e => setLocalInsuranceRate(e.target.value)}
+                                                min="0" max="100" step="0.1" placeholder="0"
+                                                className="w-full border border-gray-300 rounded-xl px-4 py-2.5 pr-8 text-sm focus:ring-2 focus:ring-orange-500 outline-none transition" />
+                                            <span className="absolute right-4 top-1/2 -translate-y-1/2 text-sm text-gray-400 font-bold">%</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+
+                            {localInsuranceMode === 'individual' && (
+                                <div className="bg-yellow-50 rounded-xl p-4 border border-yellow-200 mb-5">
+                                    <p className="text-sm text-yellow-700 font-medium">근무자카드에서 개별 보험료율을 설정하세요.</p>
+                                </div>
+                            )}
+
+                            <button onClick={handleSaveInsurance} disabled={savingInsurance} className="w-full bg-orange-600 text-white font-bold py-3.5 rounded-xl hover:bg-orange-700 transition disabled:opacity-50">
+                                {savingInsurance ? '저장 중...' : '저장하기'}
                             </button>
                         </div>
                     )}

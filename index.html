@@ -7663,7 +7663,7 @@
                     sheet1Rows.push(row);
                 }
 
-                const autoColWidth = (rows, minWidth = 4, padding = 3) => {
+                const autoColWidth = (rows, minWidth = 4, padding = 1) => {
                     const cols = rows[0]?.length || 0;
                     const widths = Array(cols).fill(minWidth);
                     rows.forEach(row => {

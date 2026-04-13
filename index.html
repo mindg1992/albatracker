@@ -7682,8 +7682,8 @@
                     '구분번호', '근무자명',
                     '이번달 총 근무시간', '시급',
                     '시간급여', '주휴수당', '총 급여',
-                    '실제 지급액', '지급일',
                     insHeaderLabel,
+                    '실제 지급액', '지급일',
                     ...memoHeaders
                 ];
                 const sheet2Rows = [sheet2Header];
@@ -7703,9 +7703,9 @@
                         timePay,
                         item.holidayPay,
                         totalPay,
+                        afterInsurance,
                         '',   // 실제 지급액 공란
                         '',   // 지급일 공란
-                        afterInsurance,
                         ...memoCells
                     ]);
                 });

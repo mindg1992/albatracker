@@ -1624,6 +1624,7 @@
                         );
                         setEmpAccount(prev => ({
                             ...prev,
+                            shopName: data.shopName || prev.shopName,
                             contractStatus: data.contractStatus || null,
                             contract: data.contract || null,
                             contractDeleteRequest: data.contractDeleteRequest || null,

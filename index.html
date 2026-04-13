@@ -202,7 +202,8 @@
                     const dk = toLocalStr(new Date(sy, sm - 1, sd - 6 + i));
                     Object.entries(allDateEntries[dk] || {}).forEach(([empId, data]) => {
                         if (!empWeekly[empId]) {
-                            empWeekly[empId] = { hours: 0, totalPay: 0, name: data.name };
+                            const currentEmp = employees.find(e => String(e.id) === String(empId));
+                            empWeekly[empId] = { hours: 0, totalPay: 0, name: currentEmp?.name || data.name };
                         }
                         empWeekly[empId].hours += data.hours;
                         empWeekly[empId].totalPay += Math.round(data.hours * data.wage);
@@ -6540,10 +6541,11 @@
                                 let dailyTotalPay = 0;
                                 const activeEntries = [];
 
-                                Object.values(dayData.entries || {}).forEach(entry => {
+                                Object.entries(dayData.entries || {}).forEach(([empId, entry]) => {
                                     if (entry.hours > 0) {
                                         dailyTotalPay += entry.pay;
-                                        activeEntries.push(entry);
+                                        const currentEmp = employees.find(e => String(e.id) === String(empId));
+                                        activeEntries.push(currentEmp ? { ...entry, name: currentEmp.name } : entry);
                                     }
                                 });
 
@@ -7299,7 +7301,7 @@
                             list[empId] = {
                                 id: empId,
                                 displayId: currentEmp ? currentEmp.displayId : 99999,
-                                name: data.name,
+                                name: currentEmp?.name || data.name,
                                 residentId: currentEmp?.residentId || '',
                                 account: currentEmp?.account || '정보 없음',
                                 bank: currentEmp?.bank || '-',

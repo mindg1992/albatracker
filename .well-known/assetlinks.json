@@ -1,0 +1,13 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.albatracker.app",
+      "sha256_cert_fingerprints": [
+        "80:44:F4:B1:F1:83:E3:F9:E8:6A:31:CE:BF:C2:64:4E:2D:BD:C9:EA:90:D9:53:CF:38:1B:F5:A7:3F:F3:95:35",
+        "24:95:EC:EC:3A:B4:8D:A0:98:8D:E5:04:BC:B2:04:DE:D9:32:76:72:3A:BB:86:FF:26:85:7E:3D:93:36:82:E4"
+      ]
+    }
+  }
+]

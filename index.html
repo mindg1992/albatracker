@@ -4036,7 +4036,7 @@
                                             </div>
                                         ) : n.type === 'status_change' ? (
                                             <p className="text-sm text-gray-600">
-                                                {n.newStatus === 'leave' ? '휴직 처리되었습니다.' : n.newStatus === 'resigned' ? '퇴사 처리되었습니다.' : n.newStatus === 'deleted' ? '근무자 카��가 삭제되었습니다.' : '근무 중 상태로 변경되었습니다.'}
+                                                {n.newStatus === 'leave' ? '휴직 처리되었습니다.' : n.newStatus === 'resigned' ? '퇴사 처리되었습니다.' : n.newStatus === 'deleted' ? '퇴사 처리되었습니다.' : '근무 중 상태로 변경되었습니다.'}
                                             </p>
                                         ) : n.type === 'wage_change' ? (
                                             <p className="text-sm text-gray-600">
@@ -5050,9 +5050,13 @@
                     showAlert('설정에서 근로계약서 템플릿을 먼저 작성하세요.', '안내', 'info');
                     return;
                 }
-                const targets = employees.filter(emp => emp.empUid && (pendingContractUpdateEmpIds.has(emp.id) || emp.contractUpdateRequired));
+                const targets = employees.filter(emp => emp.empUid && (
+                    pendingContractUpdateEmpIds.has(emp.id) ||
+                    emp.contractUpdateRequired ||
+                    (!emp.contractStatus || emp.contractStatus === null)
+                ));
                 if (targets.length === 0) {
-                    showAlert('근로계약서 수정이 필요한 근무자가 없습니다.', '안내', 'info');
+                    showAlert('근로계약서 발송이 필요한 근무자가 없습니다.', '안내', 'info');
                     return;
                 }
                 setBulkDispatchOpen(true);
@@ -5680,7 +5684,7 @@
                     )}
                     {bulkDispatchOpen && (
                         <BulkContractDispatchModal
-                            targets={employees.filter(emp => emp.empUid && (pendingContractUpdateEmpIds.has(emp.id) || emp.contractUpdateRequired))}
+                            targets={employees.filter(emp => emp.empUid && (pendingContractUpdateEmpIds.has(emp.id) || emp.contractUpdateRequired || (!emp.contractStatus || emp.contractStatus === null)))}
                             globalTemplate={workspaceInfo?.contractTemplate}
                             workspaceId={currentWorkspaceId}
                             firebaseUser={firebaseUser}
@@ -5810,7 +5814,7 @@
                                 <button onClick={onClose} className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition"><X className="w-5 h-5" /></button>
                             </div>
                             <div className="p-5 space-y-3 max-h-[60vh] overflow-y-auto">
-                                <p className="text-xs text-gray-500 mb-2">근로계약서 수정필요 상태인 근무자 {targets.length}명</p>
+                                <p className="text-xs text-gray-500 mb-2">근로계약서 발송 대상 근무자 {targets.length}명</p>
                                 <div className="space-y-2">
                                     {targets.map(emp => (
                                         <label key={emp.id} className="flex items-center gap-3 p-3 rounded-xl border border-gray-200 hover:bg-gray-50 cursor-pointer">
@@ -8776,34 +8780,7 @@
                     await saveContractTemplate(workspaceId || firebaseUser.uid, template);
                     setWorkspaceInfo(prev => ({ ...prev, contractTemplate: template }));
 
-                    // 템플릿 첫 저장 시: 이미 가입한 근무자(계약서 없는 상태) → 재작성 필요로 전환
-                    if (isFirstSave && employees && setEmployees) {
-                        const bossUid = workspaceId || firebaseUser.uid;
-                        const needsContract = (employees || []).filter(emp =>
-                            emp.empUid && (emp.status === 'working' || !emp.status) &&
-                            (!emp.contractStatus || emp.contractStatus === null)
-                        );
-                        if (needsContract.length > 0) {
-                            setEmployees(prev => prev.map(e =>
-                                needsContract.some(n => n.id === e.id)
-                                    ? { ...e, contractStatus: 'needs_resign' }
-                                    : e
-                            ));
-                            const batch = fbDb.batch();
-                            needsContract.forEach(emp => {
-                                batch.update(
-                                    fbDb.collection('employeeAccounts').doc(emp.empUid).collection('workplaces').doc(bossUid),
-                                    { contractStatus: 'needs_resign' }
-                                );
-                            });
-                            batch.commit().catch(() => {});
-                            showAlert(`근로계약서 템플릿이 저장되었습니다.\n이미 가입한 근무자 ${needsContract.length}명에게 근로계약서 재작성이 요청되었습니다.`, '저장 완료', 'success');
-                        } else {
-                            showAlert('근로계약서 템플릿이 저장되었습니다.', '저장 완료', 'success');
-                        }
-                    } else {
-                        showAlert('근로계약서 템플릿이 저장되었습니다.', '저장 완료', 'success');
-                    }
+                    showAlert('근로계약서 템플릿이 저장되었습니다.', '저장 완료', 'success');
                 } catch(e) { showAlert('저장 실패: ' + e.message, '오류', 'error'); }
                 setSaving(false);
             };

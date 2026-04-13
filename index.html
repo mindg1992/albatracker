@@ -1580,7 +1580,9 @@
                             const parts = sub.date.split('-').map(Number);
                             const mk = `${parts[0]}-${String(parts[1]).padStart(2,'0')}`;
                             const day = parts[2];
-                            const wage = sub.wage || Number(globalMinWage) || MIN_WAGE;
+                            const emp = employees.find(e => e.id !== undefined && e.id.toString() === String(sub.employeeId));
+                            const empWage = emp?.wage ? Number(emp.wage) : 0;
+                            const wage = sub.wage || empWage || Number(globalMinWage) || MIN_WAGE;
                             setMonthlyData(prev => {
                                 const md = prev[mk] || {};
                                 const dd = md.days || {};

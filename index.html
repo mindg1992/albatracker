@@ -7674,8 +7674,9 @@
 
                 const hasInsurance = payrollList.some(i => i.insuranceRate > 0);
                 const insMode = workspaceInfo?.insuranceMode || 'global';
+                const gRate = parseFloat(workspaceInfo?.insuranceRate) || 0;
                 const insHeaderLabel = hasInsurance
-                    ? (insMode === 'global' && workspaceInfo?.insuranceName ? `${workspaceInfo.insuranceName}공제` : '보험료 공제')
+                    ? (insMode === 'global' && workspaceInfo?.insuranceName ? `${workspaceInfo.insuranceName}(-${gRate}%)` : '보험료 공제')
                     : '보험료 공제';
                 const sheet2Header = [
                     '구분번호', '근무자명',

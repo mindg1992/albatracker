@@ -6569,6 +6569,7 @@
                             year={year} month={month} monthKey={monthKey} daysInMonth={daysInMonth}
                             activeEmployees={activeEmployees} monthlyData={monthlyData} setMonthlyData={setMonthlyData}
                             onClose={() => setIsBulkInputOpen(false)}
+                            globalMinWage={globalMinWage}
                         />
                     )}
 
@@ -6651,26 +6652,33 @@
             );
         }
 
-        function BulkInputModal({ year, month, monthKey, daysInMonth, activeEmployees, monthlyData, setMonthlyData, onClose }) {
+        function BulkInputModal({ year, month, monthKey, daysInMonth, activeEmployees, monthlyData, setMonthlyData, onClose, globalMinWage }) {
             const hourRefs = useRef({});
             const minRefs = useRef({});
+            const wageRefs = useRef({});
             const [localData, setLocalData] = useState({});   // 시간 (정수)
             const [minuteData, setMinuteData] = useState({}); // 분 (0-59)
+            const [wageData, setWageData] = useState({});     // 시급
 
             useEffect(() => {
                 const initData = {};
                 const initMinData = {};
+                const initWageData = {};
                 const currentMonthData = monthlyData[monthKey] || { days: {} };
+                const minW = Number(globalMinWage) > 0 ? Number(globalMinWage) : MIN_WAGE;
 
                 for (let d = 1; d <= daysInMonth; d++) {
                     initData[d] = {};
                     initMinData[d] = {};
+                    initWageData[d] = {};
                     const dayData = currentMonthData.days[d] || { entries: {} };
                     activeEmployees.forEach(emp => {
-                        const existing = dayData.entries[emp.id]?.hours;
-                        if (existing != null && existing > 0) {
-                            const h = Math.floor(existing);
-                            const m = Math.round((existing - h) * 60);
+                        const existing = dayData.entries[emp.id];
+                        const empWage = Number(emp.wage) > 0 ? Number(emp.wage) : minW;
+                        initWageData[d][emp.id] = existing?.wage || empWage;
+                        if (existing?.hours != null && existing.hours > 0) {
+                            const h = Math.floor(existing.hours);
+                            const m = Math.round((existing.hours - h) * 60);
                             initData[d][emp.id] = h > 0 ? String(h) : '';
                             initMinData[d][emp.id] = m > 0 ? String(m) : '';
                         } else {
@@ -6681,6 +6689,7 @@
                 }
                 setLocalData(initData);
                 setMinuteData(initMinData);
+                setWageData(initWageData);
             }, [monthKey, daysInMonth, activeEmployees, monthlyData]);
 
             const handleInputChange = (day, empId, val) => {
@@ -6691,6 +6700,10 @@
                 setMinuteData(prev => ({ ...prev, [day]: { ...prev[day], [empId]: val } }));
             };
 
+            const handleWageChange = (day, empId, val) => {
+                setWageData(prev => ({ ...prev, [day]: { ...prev[day], [empId]: val } }));
+            };
+
             const focusHour = (day, empIdx) => {
                 const ref = hourRefs.current[`${day}-${activeEmployees[empIdx]?.id}`];
                 if (ref) { ref.focus(); ref.select(); }
@@ -6698,6 +6711,22 @@
             const focusMin = (day, empIdx) => {
                 const ref = minRefs.current[`${day}-${activeEmployees[empIdx]?.id}`];
                 if (ref) { ref.focus(); ref.select(); }
+            };
+            const focusWage = (day, empIdx) => {
+                const ref = wageRefs.current[`${day}-${activeEmployees[empIdx]?.id}`];
+                if (ref) { ref.focus(); ref.select(); }
+            };
+
+            // 시급칸 키보드: ↑↓/Enter만 위아래 이동
+            const handleWageKeyDown = (e, day, empIdx) => {
+                if (['e', 'E', '+', '-'].includes(e.key)) { e.preventDefault(); return; }
+                if (e.key === 'ArrowDown' || e.key === 'Enter') {
+                    e.preventDefault();
+                    if (day < daysInMonth) focusWage(day + 1, empIdx);
+                } else if (e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    if (day > 1) focusWage(day - 1, empIdx);
+                }
             };
 
             // 시간 입력칸 방향키
@@ -6765,8 +6794,9 @@
                             const hours = h + m / 60;
 
                             if (hours > 0 || (newData[monthKey].days[d].entries[emp.id] && hours === 0)) {
+                                const w = Number(wageData[d]?.[emp.id]) || (Number(emp.wage) > 0 ? Number(emp.wage) : (Number(globalMinWage) > 0 ? Number(globalMinWage) : MIN_WAGE));
                                 newData[monthKey].days[d].entries[emp.id] = {
-                                    hours: hours, pay: Math.round(hours * emp.wage), name: emp.name, wage: emp.wage
+                                    hours: hours, pay: Math.round(hours * w), name: emp.name, wage: w
                                 };
                             }
                         });
@@ -6799,7 +6829,7 @@
                                                 <th key={emp.id} className="border p-2 bg-gray-100 text-center whitespace-nowrap text-sm">
                                                     {emp.displayId}. {emp.name}
                                                     <span className="text-xs font-normal text-gray-500 block">{formatCurrency(emp.wage)}/h</span>
-                                                    <span className="text-[10px] font-normal text-gray-400 block">시간&nbsp;&nbsp;&nbsp;분</span>
+                                                    <span className="text-[10px] font-normal text-gray-400 block">시간&nbsp;&nbsp;분&nbsp;&nbsp;&nbsp;시급</span>
                                                 </th>
                                             ))}
                                         </tr>
@@ -6829,6 +6859,16 @@
                                                                 onKeyDown={e => handleMinKeyDown(e, day, empIdx)}
                                                                 className="w-10 h-9 text-center border-none focus:ring-2 focus:ring-blue-400 bg-transparent outline-none transition text-sm text-blue-600"
                                                                 placeholder="분"
+                                                            />
+                                                            <span className="text-gray-200 text-xs mx-0.5">|</span>
+                                                            <input
+                                                                ref={el => wageRefs.current[`${day}-${emp.id}`] = el}
+                                                                type="number" min="0"
+                                                                value={wageData[day]?.[emp.id] ?? ''}
+                                                                onChange={e => handleWageChange(day, emp.id, e.target.value)}
+                                                                onKeyDown={e => handleWageKeyDown(e, day, empIdx)}
+                                                                className="w-16 h-9 text-center border-none focus:ring-2 focus:ring-orange-400 bg-transparent outline-none transition text-[11px] text-orange-600"
+                                                                placeholder="시급"
                                                             />
                                                         </div>
                                                     </td>
@@ -8278,6 +8318,7 @@
                             year={year} month={month} monthKey={monthKey} daysInMonth={daysInMonth}
                             activeEmployees={activeEmployees} monthlyData={predictData} setMonthlyData={setPredictData}
                             onClose={() => setIsBulkInputOpen(false)}
+                            globalMinWage={globalMinWage}
                         />
                     )}
                     {editDayModal && (() => {

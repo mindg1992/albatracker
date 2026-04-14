@@ -4127,7 +4127,6 @@
 
                                 <div className="mt-4 bg-white rounded-xl border border-gray-200 p-4">
                                     <h3 className="text-sm font-bold text-gray-700 mb-3">{month}월 요약</h3>
-                                    <div className="text-[10px] text-red-400 mb-2 bg-red-50 p-2 rounded">DEBUG: showDeduction={String(displaySettings?.showDeduction)}, mode={displaySettings?.insuranceMode}, rate={displaySettings?.insuranceRate}, empRate={empAccount?.insuranceRate}</div>
                                     {(() => {
                                         const subs = Object.values(mySubmissions || {}).filter(s => s.date?.startsWith(monthKey));
                                         const totalH = subs.reduce((a,s) => a+(s.hours||0), 0);
@@ -9687,8 +9686,19 @@
                         update.insuranceName = '';
                         update.insuranceRate = 0;
                     }
-                    await fbDb.collection('workspaces').doc(workspaceId || firebaseUser.uid).update(update);
+                    const wsId = workspaceId || firebaseUser.uid;
+                    await fbDb.collection('workspaces').doc(wsId).update(update);
                     setWorkspaceInfo(prev => ({ ...prev, ...update }));
+                    // 개별 적용 모드: 기존 직원들의 공제율을 workplace 문서에 일괄 동기화
+                    if (localInsuranceMode === 'individual') {
+                        const empsWithUid = employees.filter(e => e.empUid && e.status !== 'deleted');
+                        empsWithUid.forEach(emp => {
+                            fbDb.collection('employeeAccounts').doc(emp.empUid)
+                                .collection('workplaces').doc(wsId)
+                                .update({ insuranceName: emp.insuranceName || '', insuranceRate: parseFloat(emp.insuranceRate) || 0 })
+                                .catch(() => {});
+                        });
+                    }
                     showAlert('급여 공제율 설정이 저장되었습니다.', '저장 완료', 'success');
                 } catch(e) {
                     showAlert('저장 실패: ' + e.message, '오류', 'error');

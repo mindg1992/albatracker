@@ -1698,7 +1698,9 @@
                             workStatus: data.workStatus || prev.workStatus,
                             wageBelowMin: data.wageBelowMin || false,
                             pendingRewrite: data.pendingRewrite || false,
-                            contractUpdateRequired: !!data.contractUpdateRequired
+                            contractUpdateRequired: !!data.contractUpdateRequired,
+                            insuranceName: data.insuranceName || prev.insuranceName || '',
+                            insuranceRate: data.insuranceRate != null ? data.insuranceRate : (prev.insuranceRate || 0)
                         }));
                     }, () => {});
                 return () => unsub();
@@ -5480,6 +5482,19 @@
                         fbDb.collection('employeeAccounts').doc(editingEmp.empUid)
                             .collection('workplaces').doc(currentWorkspaceId)
                             .update({ name: dataToSave.name })
+                            .catch(() => {});
+                    }
+                }
+                // 개별 공제율 변경 시 직원 workplaces에도 반영
+                if (editingEmp && editingEmp.empUid && currentWorkspaceId && workspaceInfo?.insuranceMode === 'individual') {
+                    const oldRate = parseFloat(editingEmp.insuranceRate) || 0;
+                    const newRate = parseFloat(dataToSave.insuranceRate) || 0;
+                    const oldName = editingEmp.insuranceName || '';
+                    const newName = dataToSave.insuranceName || '';
+                    if (oldRate !== newRate || oldName !== newName) {
+                        fbDb.collection('employeeAccounts').doc(editingEmp.empUid)
+                            .collection('workplaces').doc(currentWorkspaceId)
+                            .update({ insuranceName: newName, insuranceRate: newRate })
                             .catch(() => {});
                     }
                 }

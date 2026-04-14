@@ -2643,6 +2643,7 @@
                                 workspaceId={currentWorkspaceId}
                                 onImmediateSaveMonthly={handleImmediateSaveMonthly}
                                 pendingContractUpdateEmpIds={pendingContractUpdateEmpIds}
+                                workspaceInfo={workspaceInfo}
                             />
                         )}
                         {activeTab === 'payroll' && (
@@ -6527,7 +6528,7 @@
             );
         }
 
-        function TabCalendar({ employees, monthlyData, setMonthlyData, showConfirm, unseenDates, onMarkSeen, globalMinWage, workspaceId, onImmediateSaveMonthly, pendingContractUpdateEmpIds }) {
+        function TabCalendar({ employees, monthlyData, setMonthlyData, showConfirm, unseenDates, onMarkSeen, globalMinWage, workspaceId, onImmediateSaveMonthly, pendingContractUpdateEmpIds, workspaceInfo }) {
             const [currentDate, setCurrentDate] = useState(new Date());
             const [isBulkInputOpen, setIsBulkInputOpen] = useState(false);
             const [editDayModal, setEditDayModal] = useState(null);

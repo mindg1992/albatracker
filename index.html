@@ -7339,7 +7339,8 @@
                         const m = Number(minsData[emp.id]) || 0;
                         const hours = h + m / 60;
                         const w = Number(wageData[emp.id]) || (Number(emp.wage) > 0 ? Number(emp.wage) : 0) || (Number(globalMinWage) > 0 ? Number(globalMinWage) : MIN_WAGE);
-                        submissionUpdates.push({ empUid, employeeId: emp.id, empName: emp.name, hours, wage: w, isNew: !existingEntry?.submittedByEmp, noteDeleted: !!deletedNotes[emp.id] });
+                        const noteVal = deletedNotes[emp.id] ? '' : (existingEntry?.note || '');
+                        submissionUpdates.push({ empUid, employeeId: emp.id, empName: emp.name, hours, wage: w, isNew: !existingEntry?.submittedByEmp, note: noteVal });
                     }
                 });
 
@@ -7422,17 +7423,15 @@
 
                 // 근무자 달력에도 반영: submissions 컬렉션 동기화 (기존 업데이트 + 신규 생성)
                 if (workspaceId && submissionUpdates.length > 0) {
-                    submissionUpdates.forEach(({ empUid, employeeId, empName, hours, wage, isNew, noteDeleted }) => {
+                    submissionUpdates.forEach(({ empUid, employeeId, empName, hours, wage, isNew, note }) => {
                         const subsRef = fbDb.collection('workspaces').doc(workspaceId).collection('submissions');
                         if (hours > 0) {
                             const docId = `${empUid}_${dateStr}`;
-                            const updateData = {
+                            subsRef.doc(docId).set({
                                 empUid, employeeId, empName, date: dateStr, hours, wage,
-                                locked: true, bossEntered: isNew,
+                                locked: true, bossEntered: isNew, note,
                                 submittedAt: firebase.firestore.FieldValue.serverTimestamp()
-                            };
-                            if (noteDeleted) { updateData.note = ''; updateData.memoSeenByBoss = true; }
-                            subsRef.doc(docId).set(updateData, { merge: true }).catch(() => {});
+                            }, { merge: true }).catch(() => {});
                         } else {
                             // 시간 0이면 submissions에서도 삭제
                             const docId = `${empUid}_${dateStr}`;

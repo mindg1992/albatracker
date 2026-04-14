@@ -1622,6 +1622,17 @@
                                 if (!sub.seenByBoss && sub.empName) {
                                     unseenSubs.push({ ...sub, docRef: doc.ref });
                                 }
+                                // 관리자가 메모 삭제했지만 Firestore에 남아있는 경우 자동 클리어
+                                if (sub.note) {
+                                    const parts = sub.date.split('-').map(Number);
+                                    const mk = `${parts[0]}-${String(parts[1]).padStart(2,'0')}`;
+                                    const dayNum = parts[2];
+                                    const localEntry = monthlyData[mk]?.days?.[dayNum]?.entries?.[sub.employeeId];
+                                    if (localEntry && !localEntry.note) {
+                                        doc.ref.update({ note: '', memoSeenByBoss: true }).catch(() => {});
+                                        return; // 삭제된 메모이므로 알림 배너 표시하지 않음
+                                    }
+                                }
                                 // 미확인 메모 알림 수집
                                 if (sub.note && !sub.memoSeenByBoss && sub.empName) {
                                     setMemoBanners(prev => [...prev, { empName: sub.empName, date: sub.date, id: Date.now() + Math.random(), docId: doc.id }]);

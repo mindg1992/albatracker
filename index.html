@@ -705,11 +705,34 @@
             return h > 0 ? `${h}시간 ${m}분` : `${m}분`;
         }
 
-        // --- 근무 완료 알림 배너 (3초 후 자동 사라짐) ---
+        // --- 근무 완료 알림 배너 (관리자가 앱을 보고 있을 때만 3초 카운트) ---
         function WorkSubmitBannerBar({ banner, onDismiss }) {
             useEffect(() => {
-                const timer = setTimeout(onDismiss, 3000);
-                return () => clearTimeout(timer);
+                let timer = null;
+                let remaining = 3000;
+                let startedAt = null;
+                const startTimer = () => {
+                    startedAt = Date.now();
+                    timer = setTimeout(onDismiss, remaining);
+                };
+                const pauseTimer = () => {
+                    if (timer) {
+                        clearTimeout(timer);
+                        timer = null;
+                        if (startedAt) remaining -= (Date.now() - startedAt);
+                        if (remaining <= 0) { onDismiss(); return; }
+                    }
+                };
+                const handleVisibility = () => {
+                    if (document.visibilityState === 'visible') startTimer();
+                    else pauseTimer();
+                };
+                if (document.visibilityState === 'visible') startTimer();
+                document.addEventListener('visibilitychange', handleVisibility);
+                return () => {
+                    if (timer) clearTimeout(timer);
+                    document.removeEventListener('visibilitychange', handleVisibility);
+                };
             }, [banner]);
             const [y, m, d] = banner.date.split('-').map(Number);
             const h = Math.floor(banner.hours);
@@ -744,6 +767,8 @@
             const [predictData, setPredictData] = useState({});
             const [globalMinWage, setGlobalMinWage] = useState(''); // 최저시급 기본값 비워둠
             const [workSubmitBanner, setWorkSubmitBanner] = useState(null); // 근무자 제출 알림 배너
+            const [memoBanners, setMemoBanners] = useState([]); // 직원 메모 알림 배너
+            const [calendarNavigateTarget, setCalendarNavigateTarget] = useState(null); // { year, month, day } — 메모 알림에서 해당 날짜로 이동
             const [unseenDates, setUnseenDates] = useState(new Set()); // 관리자가 아직 열어보지 않은 날짜
             const [pendingContractUpdateEmpIds, setPendingContractUpdateEmpIds] = useState(new Set()); // 카드 위 "근로계약서 수정필요" 표시 대상 — 입력 제한도 함께 발동
 
@@ -1635,6 +1660,9 @@
                             if (change.type === 'added' && sub.empName) {
                                 setWorkSubmitBanner({ empName: sub.empName, date: sub.date, hours: sub.hours });
                                 setUnseenDates(prev => new Set([...prev, sub.date]));
+                                if (sub.note) {
+                                    setMemoBanners(prev => [...prev, { empName: sub.empName, date: sub.date, id: Date.now() + Math.random() }]);
+                                }
                             }
                         });
                     }, () => {});
@@ -2608,6 +2636,23 @@
 
                     {workSubmitBanner && <WorkSubmitBannerBar banner={workSubmitBanner} onDismiss={() => setWorkSubmitBanner(null)} />}
 
+                    {memoBanners.map(mb => {
+                        const [y, m, d] = mb.date.split('-').map(Number);
+                        return (
+                            <div key={mb.id} className="bg-blue-50 border-b border-blue-200 px-4 py-3 flex items-center justify-between gap-3">
+                                <div className="flex items-center gap-2 min-w-0">
+                                    <span className="text-blue-500 text-base flex-shrink-0">📝</span>
+                                    <p className="text-blue-800 text-sm font-bold truncate">{String(y).slice(2)}년 {m}월 {d}일 {mb.empName}님이 메모를 남겼습니다</p>
+                                </div>
+                                <button onClick={() => {
+                                    setMemoBanners(prev => prev.filter(b => b.id !== mb.id));
+                                    setActiveTab('calendar');
+                                    setCalendarNavigateTarget({ year: y, month: m, day: d });
+                                }} className="flex-shrink-0 bg-blue-600 text-white text-xs font-bold px-3 py-1.5 rounded-lg hover:bg-blue-700 transition">확인</button>
+                            </div>
+                        );
+                    })}
+
                     <main className="max-w-7xl mx-auto px-3 md:px-4 py-4 md:py-6">
                         {/* 삭제 예약 중: 설정탭 외 조작 불가 (inert로 클릭/포커스 차단, 스크롤은 허용) */}
                         <div {...(isWorkspaceDeleting && activeTab !== 'settings' ? { inert: '' } : {})}>
@@ -2644,6 +2689,8 @@
                                 onImmediateSaveMonthly={handleImmediateSaveMonthly}
                                 pendingContractUpdateEmpIds={pendingContractUpdateEmpIds}
                                 workspaceInfo={workspaceInfo}
+                                navigateTarget={calendarNavigateTarget}
+                                onNavigateDone={() => setCalendarNavigateTarget(null)}
                             />
                         )}
                         {activeTab === 'payroll' && (
@@ -4626,7 +4673,7 @@
 
             // 최종 시간값(소수) 계산
             const computeHours = () => {
-                const h = parseInt(hoursInt, 10);
+                const h = hoursInt === '' ? 0 : parseInt(hoursInt, 10);
                 if (isNaN(h) || h < 0 || h > 24) return null;
                 if (timeUnit === 'hour') return h;
                 if (timeUnit === 'half') return h + (halfOn ? 0.5 : 0);
@@ -4640,7 +4687,7 @@
             };
 
             const displayHours = () => {
-                const h = parseInt(hoursInt, 10);
+                const h = hoursInt === '' ? 0 : parseInt(hoursInt, 10);
                 if (isNaN(h)) return '-';
                 if (timeUnit === 'hour') return `${h}시간`;
                 if (timeUnit === 'half') return halfOn ? `${h}시간 30분` : `${h}시간`;
@@ -4653,7 +4700,7 @@
             };
 
             const isValid = () => {
-                const h = parseInt(hoursInt, 10);
+                const h = hoursInt === '' ? 0 : parseInt(hoursInt, 10);
                 if (isNaN(h) || h < 0 || h > 24) return false;
                 if (timeUnit === 'minute') {
                     const m = parseInt(minsInt, 10);
@@ -6528,10 +6575,18 @@
             );
         }
 
-        function TabCalendar({ employees, monthlyData, setMonthlyData, showConfirm, unseenDates, onMarkSeen, globalMinWage, workspaceId, onImmediateSaveMonthly, pendingContractUpdateEmpIds, workspaceInfo }) {
+        function TabCalendar({ employees, monthlyData, setMonthlyData, showConfirm, unseenDates, onMarkSeen, globalMinWage, workspaceId, onImmediateSaveMonthly, pendingContractUpdateEmpIds, workspaceInfo, navigateTarget, onNavigateDone }) {
             const [currentDate, setCurrentDate] = useState(new Date());
             const [isBulkInputOpen, setIsBulkInputOpen] = useState(false);
             const [editDayModal, setEditDayModal] = useState(null);
+
+            // 메모 알림에서 특정 날짜로 이동
+            useEffect(() => {
+                if (!navigateTarget) return;
+                setCurrentDate(new Date(navigateTarget.year, navigateTarget.month - 1, 1));
+                setEditDayModal(navigateTarget.day);
+                if (onNavigateDone) onNavigateDone();
+            }, [navigateTarget]);
 
             const year = currentDate.getFullYear();
             const month = currentDate.getMonth() + 1;
@@ -7425,7 +7480,7 @@
                                          !deletedNotes[emp.id] && (
                                             <div className="mb-2 flex items-start gap-2 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2">
                                                 <div className="flex-1">
-                                                    <p className="text-[10px] text-blue-500 font-bold mb-0.5">직원 메모</p>
+                                                    <p className="text-[10px] text-blue-500 font-bold mb-0.5">{emp.name}님의 메모</p>
                                                     <p className="text-xs text-gray-700 whitespace-pre-wrap">{currentDayData.entries[emp.id].note}</p>
                                                 </div>
                                                 <button type="button" onClick={() => setDeletedNotes(p => ({...p, [emp.id]: true}))}

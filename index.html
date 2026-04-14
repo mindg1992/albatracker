@@ -4167,14 +4167,15 @@
                                             } catch(e) { return 0; }
                                         })() : 0;
                                         // 공제 계산 (displaySettings.showDeduction일 때)
+                                        // 주휴수당 미선택 시 순수급여에서만 공제
                                         const deductInfo = ds.showDeduction ? (() => {
                                             const ins = getInsuranceInfo(ds, empAccount);
                                             if (ins.rate <= 0) return null;
-                                            const gross = totalPay + holidayInfo;
+                                            const gross = ds.showHoliday ? totalPay + holidayInfo : totalPay;
                                             const deductAmt = Math.round(gross * ins.rate / 100);
                                             return { name: ins.name || '공제', rate: ins.rate, amount: deductAmt };
                                         })() : null;
-                                        const finalTotal = totalPay + holidayInfo - (deductInfo?.amount || 0);
+                                        const finalTotal = totalPay + (ds.showHoliday ? holidayInfo : 0) - (deductInfo?.amount || 0);
                                         return (
                                             <div className="space-y-2 text-sm">
                                                 <div className="flex flex-wrap gap-4">
@@ -9922,21 +9923,21 @@
                             <p className="text-sm text-gray-500 mb-4">직원화면 N월 요약에 표시될 항목을 선택하세요.</p>
                             <div className="space-y-3 mb-5">
                                 <label className="flex items-center gap-3 cursor-pointer">
-                                    <input type="checkbox" checked={empShowPay} onChange={e => setEmpShowPay(e.target.checked)} className="w-4 h-4 accent-purple-600" />
+                                    <input type="checkbox" checked={empShowPay} onChange={e => { const v = e.target.checked; setEmpShowPay(v); if (!v) { setEmpShowHoliday(false); setEmpShowDeduction(false); } }} className="w-4 h-4 accent-purple-600" />
                                     <div>
                                         <p className="font-bold text-gray-800 text-sm">급여 합계</p>
                                         <p className="text-xs text-gray-400">시급별 근무시간 × 시급 합산 표시</p>
                                     </div>
                                 </label>
-                                <label className="flex items-center gap-3 cursor-pointer">
-                                    <input type="checkbox" checked={empShowHoliday} onChange={e => setEmpShowHoliday(e.target.checked)} className="w-4 h-4 accent-purple-600" />
+                                <label className={`flex items-center gap-3 ${empShowPay ? 'cursor-pointer' : 'cursor-not-allowed opacity-40'}`}>
+                                    <input type="checkbox" checked={empShowHoliday} onChange={e => setEmpShowHoliday(e.target.checked)} disabled={!empShowPay} className="w-4 h-4 accent-purple-600" />
                                     <div>
                                         <p className="font-bold text-gray-800 text-sm">주휴수당 표시</p>
                                         <p className="text-xs text-gray-400">주휴수당 금액을 합산에 포함하여 표시</p>
                                     </div>
                                 </label>
-                                <label className="flex items-center gap-3 cursor-pointer">
-                                    <input type="checkbox" checked={empShowDeduction} onChange={e => setEmpShowDeduction(e.target.checked)} className="w-4 h-4 accent-purple-600" />
+                                <label className={`flex items-center gap-3 ${empShowPay ? 'cursor-pointer' : 'cursor-not-allowed opacity-40'}`}>
+                                    <input type="checkbox" checked={empShowDeduction} onChange={e => setEmpShowDeduction(e.target.checked)} disabled={!empShowPay} className="w-4 h-4 accent-purple-600" />
                                     <div>
                                         <p className="font-bold text-gray-800 text-sm">공제율 표시</p>
                                         <p className="text-xs text-gray-400">설정된 급여 공제율을 적용하여 표시</p>

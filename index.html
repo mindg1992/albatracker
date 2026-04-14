@@ -78,6 +78,18 @@
         /* 모든 placeholder 색상 통일 (gray-300: #d1d5db) */
         ::placeholder { color: #d1d5db; opacity: 1; }
 
+        /* 스와이프 슬라이딩 애니메이션 */
+        @keyframes slideInLeft {
+            from { transform: translateX(100%); opacity: 0.4; }
+            to   { transform: translateX(0);    opacity: 1; }
+        }
+        @keyframes slideInRight {
+            from { transform: translateX(-100%); opacity: 0.4; }
+            to   { transform: translateX(0);     opacity: 1; }
+        }
+        .slide-in-left  { animation: slideInLeft  0.28s ease-out; }
+        .slide-in-right { animation: slideInRight 0.28s ease-out; }
+
     </style>
 </head>
 <body>
@@ -3915,13 +3927,14 @@
             };
 
             const empTouchStartX = useRef(null);
+            const [empSlideAnim, setEmpSlideAnim] = useState({ key: 0, dir: '' });
             const handleEmpTouchStart = (e) => { empTouchStartX.current = e.touches[0].clientX; };
             const handleEmpTouchEnd = (e) => {
                 if (empTouchStartX.current === null || submitModal || viewModal) return;
                 const dx = e.changedTouches[0].clientX - empTouchStartX.current;
                 if (Math.abs(dx) > 80) {
-                    if (dx < 0) { let m=month+1,y=year; if(m>12){m=1;y++;} setMonth(m);setYear(y); }
-                    else        { let m=month-1,y=year; if(m<1){m=12;y--;} setMonth(m);setYear(y); }
+                    if (dx < 0) { let m=month+1,y=year; if(m>12){m=1;y++;} setMonth(m);setYear(y); setEmpSlideAnim(s => ({ key: s.key+1, dir: 'slide-in-left' })); }
+                    else        { let m=month-1,y=year; if(m<1){m=12;y--;} setMonth(m);setYear(y); setEmpSlideAnim(s => ({ key: s.key+1, dir: 'slide-in-right' })); }
                 }
                 empTouchStartX.current = null;
             };
@@ -4178,7 +4191,7 @@
                                     </button>
                                 </div>
 
-                                <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden" onTouchStart={handleEmpTouchStart} onTouchEnd={handleEmpTouchEnd}>
+                                <div key={empSlideAnim.key} className={`bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden ${empSlideAnim.dir}`} onTouchStart={handleEmpTouchStart} onTouchEnd={handleEmpTouchEnd}>
                                     <div className="grid grid-cols-7 border-b border-gray-100">
                                         {['일','월','화','수','목','금','토'].map(d => (
                                             <div key={d} className="py-2 text-center text-xs font-bold text-gray-500">{d}</div>
@@ -6669,11 +6682,15 @@
             }, [year, month, isBulkInputOpen, editDayModal]);
 
             const touchStartX = useRef(null);
+            const [calSlideAnim, setCalSlideAnim] = useState({ key: 0, dir: '' });
             const handleTouchStart = (e) => { touchStartX.current = e.touches[0].clientX; };
             const handleTouchEnd = (e) => {
                 if (touchStartX.current === null || isBulkInputOpen || editDayModal) return;
                 const dx = e.changedTouches[0].clientX - touchStartX.current;
-                if (Math.abs(dx) > 80) { dx < 0 ? nextMonth() : prevMonth(); }
+                if (Math.abs(dx) > 80) {
+                    if (dx < 0) { nextMonth(); setCalSlideAnim(s => ({ key: s.key+1, dir: 'slide-in-left' })); }
+                    else        { prevMonth(); setCalSlideAnim(s => ({ key: s.key+1, dir: 'slide-in-right' })); }
+                }
                 touchStartX.current = null;
             };
 
@@ -6844,7 +6861,7 @@
                         </div>
                     </div>
 
-                    <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden" onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
+                    <div key={calSlideAnim.key} className={`bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden ${calSlideAnim.dir}`} onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
                         <div className="grid grid-cols-7 bg-gray-50 border-b border-gray-200">
                             {['일', '월', '화', '수', '목', '금', '토'].map((day, i) => (
                                 <div key={day} className={`text-center py-3 text-sm font-bold ${i === 0 ? 'text-red-500' : i === 6 ? 'text-blue-500' : 'text-gray-600'}`}>
@@ -7625,11 +7642,15 @@
             }, [year, month]);
 
             const payrollTouchStartX = useRef(null);
+            const [payrollSlideAnim, setPayrollSlideAnim] = useState({ key: 0, dir: '' });
             const handlePayrollTouchStart = (e) => { payrollTouchStartX.current = e.touches[0].clientX; };
             const handlePayrollTouchEnd = (e) => {
                 if (payrollTouchStartX.current === null) return;
                 const dx = e.changedTouches[0].clientX - payrollTouchStartX.current;
-                if (Math.abs(dx) > 80) { dx < 0 ? nextMonth() : prevMonth(); }
+                if (Math.abs(dx) > 80) {
+                    if (dx < 0) { nextMonth(); setPayrollSlideAnim(s => ({ key: s.key+1, dir: 'slide-in-left' })); }
+                    else        { prevMonth(); setPayrollSlideAnim(s => ({ key: s.key+1, dir: 'slide-in-right' })); }
+                }
                 payrollTouchStartX.current = null;
             };
 
@@ -8003,7 +8024,7 @@
 
             return (
                 <>
-                <div className="space-y-4 max-w-full mx-auto" onTouchStart={handlePayrollTouchStart} onTouchEnd={handlePayrollTouchEnd}>
+                <div key={payrollSlideAnim.key} className={`space-y-4 max-w-full mx-auto ${payrollSlideAnim.dir}`} onTouchStart={handlePayrollTouchStart} onTouchEnd={handlePayrollTouchEnd}>
                     <div className="flex flex-col md:flex-row justify-center items-center bg-white p-4 md:p-5 rounded-2xl shadow-sm border border-gray-200 gap-3 md:gap-4">
                         <div className="flex items-center gap-2 md:gap-4 shrink-0">
                             <button onClick={prevMonth} className="p-2 hover:bg-gray-100 rounded-full transition"><ChevronLeft className="w-5 h-5 md:w-6 md:h-6" /></button>
@@ -8721,11 +8742,15 @@
             }, [year, month, isBulkInputOpen, editDayModal]);
 
             const touchStartX = useRef(null);
+            const [predSlideAnim, setPredSlideAnim] = useState({ key: 0, dir: '' });
             const handleTouchStart = (e) => { touchStartX.current = e.touches[0].clientX; };
             const handleTouchEnd = (e) => {
                 if (touchStartX.current === null || isBulkInputOpen || editDayModal) return;
                 const dx = e.changedTouches[0].clientX - touchStartX.current;
-                if (Math.abs(dx) > 80) { dx < 0 ? nextMonth() : prevMonth(); }
+                if (Math.abs(dx) > 80) {
+                    if (dx < 0) { nextMonth(); setPredSlideAnim(s => ({ key: s.key+1, dir: 'slide-in-left' })); }
+                    else        { prevMonth(); setPredSlideAnim(s => ({ key: s.key+1, dir: 'slide-in-right' })); }
+                }
                 touchStartX.current = null;
             };
 
@@ -8796,7 +8821,7 @@
                         </div>
                     </div>
 
-                    <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden" onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
+                    <div key={predSlideAnim.key} className={`bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden ${predSlideAnim.dir}`} onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
                         <div className="grid grid-cols-7 bg-gray-50 border-b border-gray-200">
                             {['일', '월', '화', '수', '목', '금', '토'].map((day, i) => (
                                 <div key={day} className={`text-center py-3 text-sm font-bold ${i === 0 ? 'text-red-500' : i === 6 ? 'text-blue-500' : 'text-gray-600'}`}>

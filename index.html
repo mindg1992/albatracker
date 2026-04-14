@@ -3905,7 +3905,7 @@
             const handleEmpTouchEnd = (e) => {
                 if (empTouchStartX.current === null || submitModal || viewModal) return;
                 const dx = e.changedTouches[0].clientX - empTouchStartX.current;
-                if (Math.abs(dx) > 50) {
+                if (Math.abs(dx) > 80) {
                     if (dx < 0) { let m=month+1,y=year; if(m>12){m=1;y++;} setMonth(m);setYear(y); }
                     else        { let m=month-1,y=year; if(m<1){m=12;y--;} setMonth(m);setYear(y); }
                 }

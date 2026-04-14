@@ -9480,7 +9480,7 @@
             const handleDeleteTemplate = () => {
                 if (!firebaseUser || !existing) return;
                 showConfirm(
-                    '근로계약서 템플릿을 삭제하시겠습니까?\n\n삭제 후 신규 입사자는 근로계약서 없이 입사하며,\n이후 템플릿을 다시 저장하면 기존 근무자에게 재작성이 요청됩니다.\n(현재 계약서가 완료된 근무자의 계약서는 유지됩니다)',
+                    '근로계약서 템플릿을 삭제하시겠습니까?\n\n삭제 후 신규 입사자는 근로계약서 없이 입사합니다.\n현재 작성이 완료된 근로계약서는 유지됩니다.',
                     async () => {
                         try {
                             await fbDb.collection('workspaces').doc(workspaceId || firebaseUser.uid)

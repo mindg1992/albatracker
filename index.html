@@ -769,6 +769,7 @@
             // === Google 직원 전용 상태 ===
             const [empGoogleWorkplaces, setEmpGoogleWorkplaces] = useState([]);
             const [notices, setNotices] = useState([]);
+            const [empDisplaySettings, setEmpDisplaySettings] = useState({ showPay: true, showHoliday: false, showDeduction: false });
             const [selectedEmpBossUid, setSelectedEmpBossUid] = useState(() =>
                 localStorage.getItem('selectedEmpBossUid') || null
             );
@@ -1716,6 +1717,14 @@
                             setEmpAccount(prev => prev?.bossUid === empAccount.bossUid ? { ...prev, shopName: data.shopName } : prev);
                             setEmpGoogleWorkplaces(prev => prev.map(w => w.bossUid === empAccount.bossUid ? { ...w, shopName: data.shopName } : w));
                         }
+                        setEmpDisplaySettings({
+                            showPay: data?.empShowPay !== false,
+                            showHoliday: !!data?.empShowHoliday,
+                            showDeduction: !!data?.empShowDeduction,
+                            insuranceMode: data?.insuranceMode || 'none',
+                            insuranceName: data?.insuranceName || '',
+                            insuranceRate: parseFloat(data?.insuranceRate) || 0
+                        });
                     }, () => {});
                 return () => unsub();
             }, [firebaseUser, userRole, empAccount?.bossUid]);
@@ -2190,6 +2199,7 @@
                                 onAddWorkplace={() => setShowEmpJoinScreen(true)}
                                 allWorkplaces={empGoogleWorkplaces}
                                 notices={notices}
+                                displaySettings={empDisplaySettings}
                             />
                         </>
                     );
@@ -3773,7 +3783,7 @@
             );
         }
 
-        function EmployeeApp({ empAccount, onSetEmpAccount, firebaseUser, mySubmissions, notifications, onLogout, onLock, showAlert, showConfirm, modalConfig, onSwitchWorkplace, onDisconnectWorkplace, onAddWorkplace, allWorkplaces, notices = [] }) {
+        function EmployeeApp({ empAccount, onSetEmpAccount, firebaseUser, mySubmissions, notifications, onLogout, onLock, showAlert, showConfirm, modalConfig, onSwitchWorkplace, onDisconnectWorkplace, onAddWorkplace, allWorkplaces, notices = [], displaySettings = {} }) {
             const [activeTab, setActiveTab] = useState('calendar');
             const [today] = useState(new Date());
             const [year, setYear] = useState(today.getFullYear());
@@ -4137,22 +4147,70 @@
                                         });
                                         const wages = Object.entries(wageMap).sort((a,b) => Number(a[0]) - Number(b[0]));
                                         const totalPay = wages.reduce((sum, [w, info]) => sum + Math.round(info.hours * Number(w)), 0);
+                                        const ds = displaySettings || {};
+                                        // 주휴수당 간이 계산 (직원 submissions 기반)
+                                        const holidayInfo = ds.showHoliday ? (() => {
+                                            try {
+                                                const empId = String(empAccount?.employeeId || '0');
+                                                const fakeDays = {};
+                                                subs.forEach(s => {
+                                                    const d = parseInt(s.date?.split('-')[2]);
+                                                    if (!d) return;
+                                                    fakeDays[d] = { entries: { [empId]: { hours: s.hours, pay: Math.round(s.hours * Number(s.wage || 0)), name: empAccount?.name || '', wage: Number(s.wage || 0) } } };
+                                                });
+                                                const fakeMonthly = { [monthKey]: { days: fakeDays } };
+                                                const fakeEmp = [{ id: Number(empId), name: empAccount?.name || '', wage: Number(subsWithWage[0]?.wage || 0), scheduledDays: '5', dailyHours: '8', status: 'working' }];
+                                                const allHoliday = calcHolidayPayBySunday(fakeMonthly, fakeEmp);
+                                                let hp = 0;
+                                                Object.values(allHoliday).forEach(weekData => weekData.forEach(h => { hp += h.holidayPay; }));
+                                                return hp;
+                                            } catch(e) { return 0; }
+                                        })() : 0;
+                                        // 공제 계산 (displaySettings.showDeduction일 때)
+                                        const deductInfo = ds.showDeduction ? (() => {
+                                            const ins = getInsuranceInfo(ds, empAccount);
+                                            if (ins.rate <= 0) return null;
+                                            const gross = totalPay + holidayInfo;
+                                            const deductAmt = Math.round(gross * ins.rate / 100);
+                                            return { name: ins.name || '공제', rate: ins.rate, amount: deductAmt };
+                                        })() : null;
+                                        const finalTotal = totalPay + holidayInfo - (deductInfo?.amount || 0);
                                         return (
                                             <div className="space-y-2 text-sm">
                                                 <div className="flex flex-wrap gap-4">
                                                     <div><p className="text-gray-500">근무일</p><p className="font-bold text-gray-800">{subs.length}일</p></div>
                                                     <div><p className="text-gray-500">총 시간</p><p className="font-bold text-gray-800">{fmtHours(totalH) || '0시간'}</p></div>
                                                 </div>
-                                                {wages.map(([w, info]) => (
-                                                    <div key={w} className="flex justify-between items-center bg-gray-50 rounded-lg px-3 py-2">
-                                                        <span className="text-gray-600">시급 {Number(w).toLocaleString()}원 <span className="text-gray-400">× {info.days}일 ({fmtHours(info.hours)})</span></span>
-                                                        <span className="font-bold text-gray-800">{Math.round(info.hours * Number(w)).toLocaleString()}원</span>
+                                                {ds.showPay !== false && (<>
+                                                    {wages.map(([w, info]) => (
+                                                        <div key={w} className="flex justify-between items-center bg-gray-50 rounded-lg px-3 py-2">
+                                                            <span className="text-gray-600">시급 {Number(w).toLocaleString()}원 <span className="text-gray-400">× {info.days}일 ({fmtHours(info.hours)})</span></span>
+                                                            <span className="font-bold text-gray-800">{Math.round(info.hours * Number(w)).toLocaleString()}원</span>
+                                                        </div>
+                                                    ))}
+                                                    <div className="flex justify-between items-center border-t border-gray-200 pt-2 px-1">
+                                                        <span className="font-bold text-gray-700">{ds.showHoliday || ds.showDeduction ? '급여 합산' : '합산'}</span>
+                                                        <span className="font-bold text-green-600 text-base">{totalPay.toLocaleString()}원</span>
                                                     </div>
-                                                ))}
-                                                <div className="flex justify-between items-center border-t border-gray-200 pt-2 px-1">
-                                                    <span className="font-bold text-gray-700">합산</span>
-                                                    <span className="font-bold text-green-600 text-base">{totalPay.toLocaleString()}원</span>
-                                                </div>
+                                                </>)}
+                                                {ds.showHoliday && holidayInfo > 0 && (
+                                                    <div className="flex justify-between items-center bg-blue-50 rounded-lg px-3 py-2">
+                                                        <span className="text-blue-600 font-medium">주휴수당</span>
+                                                        <span className="font-bold text-blue-600">+{holidayInfo.toLocaleString()}원</span>
+                                                    </div>
+                                                )}
+                                                {ds.showDeduction && deductInfo && (
+                                                    <div className="flex justify-between items-center bg-orange-50 rounded-lg px-3 py-2">
+                                                        <span className="text-orange-600 font-medium">{deductInfo.name} -{deductInfo.rate}%</span>
+                                                        <span className="font-bold text-orange-600">-{deductInfo.amount.toLocaleString()}원</span>
+                                                    </div>
+                                                )}
+                                                {(ds.showHoliday || ds.showDeduction) && (
+                                                    <div className="flex justify-between items-center border-t-2 border-gray-300 pt-2 px-1">
+                                                        <span className="font-bold text-gray-800">총 금액</span>
+                                                        <span className="font-black text-purple-700 text-base">{finalTotal.toLocaleString()}원</span>
+                                                    </div>
+                                                )}
                                             </div>
                                         );
                                     })()}
@@ -9576,6 +9634,25 @@
             const [openPin, setOpenPin] = useState(false);
             const [openTimeUnit, setOpenTimeUnit] = useState(false);
             const [openInsurance, setOpenInsurance] = useState(false);
+            const [openEmpDisplay, setOpenEmpDisplay] = useState(false);
+            const [empShowPay, setEmpShowPay] = useState(workspaceInfo?.empShowPay !== false);
+            const [empShowHoliday, setEmpShowHoliday] = useState(!!workspaceInfo?.empShowHoliday);
+            const [empShowDeduction, setEmpShowDeduction] = useState(!!workspaceInfo?.empShowDeduction);
+            const [savingEmpDisplay, setSavingEmpDisplay] = useState(false);
+
+            const handleSaveEmpDisplay = async () => {
+                if (!firebaseUser) return;
+                setSavingEmpDisplay(true);
+                try {
+                    const update = { empShowPay: empShowPay, empShowHoliday: empShowHoliday, empShowDeduction: empShowDeduction };
+                    await fbDb.collection('workspaces').doc(workspaceId || firebaseUser.uid).update(update);
+                    setWorkspaceInfo(prev => ({ ...prev, ...update }));
+                    showAlert('직원화면 설정이 저장되었습니다.', '저장 완료', 'success');
+                } catch(e) {
+                    showAlert('저장 실패: ' + e.message, '오류', 'error');
+                }
+                setSavingEmpDisplay(false);
+            };
             const [localInsuranceMode, setLocalInsuranceMode] = useState(workspaceInfo?.insuranceMode || 'none');
             const [localInsuranceName, setLocalInsuranceName] = useState(workspaceInfo?.insuranceName || '');
             const [localInsuranceRate, setLocalInsuranceRate] = useState(workspaceInfo?.insuranceRate || '');
@@ -9820,6 +9897,54 @@
 
                             <button onClick={handleSaveInsurance} disabled={savingInsurance} className="w-full bg-orange-600 text-white font-bold py-3.5 rounded-xl hover:bg-orange-700 transition disabled:opacity-50">
                                 {savingInsurance ? '저장 중...' : '저장하기'}
+                            </button>
+                        </div>
+                    )}
+                </div>
+
+                {/* 직원화면 설정 */}
+                <div className="max-w-md mx-auto mt-6 bg-white rounded-2xl shadow-sm border border-gray-200">
+                    <button onClick={() => setOpenEmpDisplay(p => !p)} className="w-full p-6 flex items-center justify-between text-left">
+                        <div className="flex items-center gap-3">
+                            <div className="bg-purple-100 p-2.5 rounded-xl">
+                                <svg className="w-6 h-6 text-purple-700" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+                            </div>
+                            <div>
+                                <h2 className="text-xl font-bold text-gray-800">직원화면 설정</h2>
+                                <p className="text-xs text-gray-500">직원화면에 표시될 항목 설정</p>
+                            </div>
+                        </div>
+                        <svg className={`w-5 h-5 text-gray-400 transition-transform ${openEmpDisplay ? 'rotate-180' : ''}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="6 9 12 15 18 9"/></svg>
+                    </button>
+
+                    {openEmpDisplay && (
+                        <div className="px-6 pb-6 border-t border-gray-100 pt-4">
+                            <p className="text-sm text-gray-500 mb-4">직원화면 N월 요약에 표시될 항목을 선택하세요.</p>
+                            <div className="space-y-3 mb-5">
+                                <label className="flex items-center gap-3 cursor-pointer">
+                                    <input type="checkbox" checked={empShowPay} onChange={e => setEmpShowPay(e.target.checked)} className="w-4 h-4 accent-purple-600" />
+                                    <div>
+                                        <p className="font-bold text-gray-800 text-sm">급여 합계</p>
+                                        <p className="text-xs text-gray-400">시급별 근무시간 × 시급 합산 표시</p>
+                                    </div>
+                                </label>
+                                <label className="flex items-center gap-3 cursor-pointer">
+                                    <input type="checkbox" checked={empShowHoliday} onChange={e => setEmpShowHoliday(e.target.checked)} className="w-4 h-4 accent-purple-600" />
+                                    <div>
+                                        <p className="font-bold text-gray-800 text-sm">주휴수당 표시</p>
+                                        <p className="text-xs text-gray-400">주휴수당 금액을 합산에 포함하여 표시</p>
+                                    </div>
+                                </label>
+                                <label className="flex items-center gap-3 cursor-pointer">
+                                    <input type="checkbox" checked={empShowDeduction} onChange={e => setEmpShowDeduction(e.target.checked)} className="w-4 h-4 accent-purple-600" />
+                                    <div>
+                                        <p className="font-bold text-gray-800 text-sm">공제율 표시</p>
+                                        <p className="text-xs text-gray-400">설정된 급여 공제율을 적용하여 표시</p>
+                                    </div>
+                                </label>
+                            </div>
+                            <button onClick={handleSaveEmpDisplay} disabled={savingEmpDisplay} className="w-full bg-purple-600 text-white font-bold py-3.5 rounded-xl hover:bg-purple-700 transition disabled:opacity-50">
+                                {savingEmpDisplay ? '저장 중...' : '저장하기'}
                             </button>
                         </div>
                     )}

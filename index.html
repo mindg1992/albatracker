@@ -4310,7 +4310,7 @@
                                     <div key={n.id} className={`bg-white rounded-xl border p-4 ${n.read ? 'border-gray-200' : n.type === 'payslip' ? 'border-emerald-300 bg-emerald-50' : 'border-yellow-300 bg-yellow-50'}`}>
                                         <div className="flex items-start justify-between mb-1">
                                             <p className="text-sm font-bold text-gray-800">
-                                                {n.type === 'payslip' ? '급여명세서 도착' : n.type === 'status_change' ? '근무 상태 변경' : n.type === 'wage_change' ? '시급 변경' : n.type === 'wage_modified' ? `${n.date} 시급 변경` : n.type === 'shop_name_change' ? '업체명 변경' : n.type === 'hours_entered' ? `${n.date} 근무시간 등록` : n.type === 'hours_deleted' ? `${n.date} 근무시간 삭제` : `${n.date} 근무시간 변경`}
+                                                {n.type === 'payslip' ? '급여명세서 도착' : n.type === 'status_change' ? '근무 상태 변경' : n.type === 'wage_change' ? '시급 변경' : n.type === 'wage_modified' ? `${n.date} 시급 변경` : n.type === 'name_change' ? '이름 변경' : n.type === 'shop_name_change' ? '업체명 변경' : n.type === 'hours_entered' ? `${n.date} 근무시간 등록` : n.type === 'hours_deleted' ? `${n.date} 근무시간 삭제` : `${n.date} 근무시간 변경`}
                                             </p>
                                             {!n.read && <span className={`text-xs px-2 py-0.5 rounded-full font-bold ${n.type === 'payslip' ? 'bg-emerald-400 text-emerald-900' : 'bg-yellow-400 text-yellow-900'}`}>새 알림</span>}
                                         </div>
@@ -4329,6 +4329,10 @@
                                         ) : n.type === 'wage_modified' ? (
                                             <p className="text-sm text-gray-600">
                                                 해당 날짜 시급이 <span className="font-medium">{Number(n.oldWage).toLocaleString()}원</span> → <span className="font-bold text-blue-600">{Number(n.newWage).toLocaleString()}원</span>으로 변경되었습니다.
+                                            </p>
+                                        ) : n.type === 'name_change' ? (
+                                            <p className="text-sm text-gray-600">
+                                                이름이 <span className="font-medium">{n.oldName || '(없음)'}</span> → <span className="font-bold text-blue-600">{n.newName}</span>(으)로 변경되었습니다.
                                             </p>
                                         ) : n.type === 'shop_name_change' ? (
                                             <p className="text-sm text-gray-600">
@@ -5553,13 +5557,19 @@
                     setEmployees(prev => [...prev, { ...dataToSave, wage: newEmpWage }]);
                     setNextEmpId(prev => prev + 1);
                 }
-                // 이름 변경 시 직원 workplaces에도 반영 (달력/급여는 employees 배열에서 최신 이름 자동 표시)
+                // 이름 변경 시 직원 workplaces에도 반영 + 알림 발송
                 if (editingEmp && editingEmp.name !== dataToSave.name) {
                     if (editingEmp.empUid && currentWorkspaceId) {
                         fbDb.collection('employeeAccounts').doc(editingEmp.empUid)
                             .collection('workplaces').doc(currentWorkspaceId)
                             .update({ name: dataToSave.name })
                             .catch(() => {});
+                        addEmpNotification(editingEmp.empUid, {
+                            type: 'name_change',
+                            oldName: editingEmp.name,
+                            newName: dataToSave.name,
+                            bossUid: currentWorkspaceId
+                        }).catch(() => {});
                     }
                 }
                 // 개별 공제율 변경 시 직원 workplaces에도 반영

@@ -3927,16 +3927,43 @@
             };
 
             const empTouchStartX = useRef(null);
+            const empTouchStartY = useRef(null);
+            const empIsHorizontal = useRef(false);
+            const [empDragX, setEmpDragX] = useState(0);
+            const [empSnapping, setEmpSnapping] = useState(false);
             const [empSlideAnim, setEmpSlideAnim] = useState({ key: 0, dir: '' });
-            const handleEmpTouchStart = (e) => { empTouchStartX.current = e.touches[0].clientX; };
-            const handleEmpTouchEnd = (e) => {
+            const handleEmpTouchStart = (e) => {
+                empTouchStartX.current = e.touches[0].clientX;
+                empTouchStartY.current = e.touches[0].clientY;
+                empIsHorizontal.current = false;
+                setEmpSnapping(false);
+                setEmpDragX(0);
+            };
+            const handleEmpTouchMove = (e) => {
                 if (empTouchStartX.current === null || submitModal || viewModal) return;
+                const dx = e.touches[0].clientX - empTouchStartX.current;
+                const dy = e.touches[0].clientY - empTouchStartY.current;
+                if (!empIsHorizontal.current) {
+                    if (Math.abs(dx) < 10 && Math.abs(dy) < 10) return;
+                    empIsHorizontal.current = Math.abs(dx) > Math.abs(dy);
+                    if (!empIsHorizontal.current) return;
+                }
+                setEmpDragX(dx);
+            };
+            const handleEmpTouchEnd = (e) => {
+                if (empTouchStartX.current === null) return;
                 const dx = e.changedTouches[0].clientX - empTouchStartX.current;
+                const wasHorizontal = empIsHorizontal.current;
+                empTouchStartX.current = null;
+                if (submitModal || viewModal || !wasHorizontal) { setEmpDragX(0); return; }
                 if (Math.abs(dx) > 80) {
+                    setEmpDragX(0); setEmpSnapping(false);
                     if (dx < 0) { let m=month+1,y=year; if(m>12){m=1;y++;} setMonth(m);setYear(y); setEmpSlideAnim(s => ({ key: s.key+1, dir: 'slide-in-left' })); }
                     else        { let m=month-1,y=year; if(m<1){m=12;y--;} setMonth(m);setYear(y); setEmpSlideAnim(s => ({ key: s.key+1, dir: 'slide-in-right' })); }
+                } else {
+                    setEmpSnapping(true); setEmpDragX(0);
+                    setTimeout(() => setEmpSnapping(false), 220);
                 }
-                empTouchStartX.current = null;
             };
             const [submitModal, setSubmitModal] = useState(null);
             const [viewModal, setViewModal] = useState(null); // 제출된 날 열람 { date, sub }
@@ -4191,7 +4218,7 @@
                                     </button>
                                 </div>
 
-                                <div key={empSlideAnim.key} className={`bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden ${empSlideAnim.dir}`} onTouchStart={handleEmpTouchStart} onTouchEnd={handleEmpTouchEnd}>
+                                <div key={empSlideAnim.key} className={`bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden ${empSlideAnim.dir}`} style={(empDragX !== 0 || empSnapping) ? { transform: `translateX(${empDragX}px)`, transition: empSnapping ? 'transform 0.2s ease-out' : 'none' } : undefined} onTouchStart={handleEmpTouchStart} onTouchMove={handleEmpTouchMove} onTouchEnd={handleEmpTouchEnd}>
                                     <div className="grid grid-cols-7 border-b border-gray-100">
                                         {['일','월','화','수','목','금','토'].map(d => (
                                             <div key={d} className="py-2 text-center text-xs font-bold text-gray-500">{d}</div>
@@ -6682,16 +6709,43 @@
             }, [year, month, isBulkInputOpen, editDayModal]);
 
             const touchStartX = useRef(null);
+            const touchStartY = useRef(null);
+            const isHorizontalDrag = useRef(false);
+            const [calDragX, setCalDragX] = useState(0);
+            const [calSnapping, setCalSnapping] = useState(false);
             const [calSlideAnim, setCalSlideAnim] = useState({ key: 0, dir: '' });
-            const handleTouchStart = (e) => { touchStartX.current = e.touches[0].clientX; };
-            const handleTouchEnd = (e) => {
+            const handleTouchStart = (e) => {
+                touchStartX.current = e.touches[0].clientX;
+                touchStartY.current = e.touches[0].clientY;
+                isHorizontalDrag.current = false;
+                setCalSnapping(false);
+                setCalDragX(0);
+            };
+            const handleTouchMove = (e) => {
                 if (touchStartX.current === null || isBulkInputOpen || editDayModal) return;
+                const dx = e.touches[0].clientX - touchStartX.current;
+                const dy = e.touches[0].clientY - touchStartY.current;
+                if (!isHorizontalDrag.current) {
+                    if (Math.abs(dx) < 10 && Math.abs(dy) < 10) return;
+                    isHorizontalDrag.current = Math.abs(dx) > Math.abs(dy);
+                    if (!isHorizontalDrag.current) return;
+                }
+                setCalDragX(dx);
+            };
+            const handleTouchEnd = (e) => {
+                if (touchStartX.current === null) return;
                 const dx = e.changedTouches[0].clientX - touchStartX.current;
+                const wasHorizontal = isHorizontalDrag.current;
+                touchStartX.current = null;
+                if (isBulkInputOpen || editDayModal || !wasHorizontal) { setCalDragX(0); return; }
                 if (Math.abs(dx) > 80) {
+                    setCalDragX(0); setCalSnapping(false);
                     if (dx < 0) { nextMonth(); setCalSlideAnim(s => ({ key: s.key+1, dir: 'slide-in-left' })); }
                     else        { prevMonth(); setCalSlideAnim(s => ({ key: s.key+1, dir: 'slide-in-right' })); }
+                } else {
+                    setCalSnapping(true); setCalDragX(0);
+                    setTimeout(() => setCalSnapping(false), 220);
                 }
-                touchStartX.current = null;
             };
 
             const handleTotalRevenueChange = (e) => {
@@ -6861,7 +6915,7 @@
                         </div>
                     </div>
 
-                    <div key={calSlideAnim.key} className={`bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden ${calSlideAnim.dir}`} onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
+                    <div key={calSlideAnim.key} className={`bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden ${calSlideAnim.dir}`} style={(calDragX !== 0 || calSnapping) ? { transform: `translateX(${calDragX}px)`, transition: calSnapping ? 'transform 0.2s ease-out' : 'none' } : undefined} onTouchStart={handleTouchStart} onTouchMove={handleTouchMove} onTouchEnd={handleTouchEnd}>
                         <div className="grid grid-cols-7 bg-gray-50 border-b border-gray-200">
                             {['일', '월', '화', '수', '목', '금', '토'].map((day, i) => (
                                 <div key={day} className={`text-center py-3 text-sm font-bold ${i === 0 ? 'text-red-500' : i === 6 ? 'text-blue-500' : 'text-gray-600'}`}>
@@ -7642,16 +7696,43 @@
             }, [year, month]);
 
             const payrollTouchStartX = useRef(null);
+            const payrollTouchStartY = useRef(null);
+            const payrollIsHorizontal = useRef(false);
+            const [payrollDragX, setPayrollDragX] = useState(0);
+            const [payrollSnapping, setPayrollSnapping] = useState(false);
             const [payrollSlideAnim, setPayrollSlideAnim] = useState({ key: 0, dir: '' });
-            const handlePayrollTouchStart = (e) => { payrollTouchStartX.current = e.touches[0].clientX; };
+            const handlePayrollTouchStart = (e) => {
+                payrollTouchStartX.current = e.touches[0].clientX;
+                payrollTouchStartY.current = e.touches[0].clientY;
+                payrollIsHorizontal.current = false;
+                setPayrollSnapping(false);
+                setPayrollDragX(0);
+            };
+            const handlePayrollTouchMove = (e) => {
+                if (payrollTouchStartX.current === null) return;
+                const dx = e.touches[0].clientX - payrollTouchStartX.current;
+                const dy = e.touches[0].clientY - payrollTouchStartY.current;
+                if (!payrollIsHorizontal.current) {
+                    if (Math.abs(dx) < 10 && Math.abs(dy) < 10) return;
+                    payrollIsHorizontal.current = Math.abs(dx) > Math.abs(dy);
+                    if (!payrollIsHorizontal.current) return;
+                }
+                setPayrollDragX(dx);
+            };
             const handlePayrollTouchEnd = (e) => {
                 if (payrollTouchStartX.current === null) return;
                 const dx = e.changedTouches[0].clientX - payrollTouchStartX.current;
+                const wasHorizontal = payrollIsHorizontal.current;
+                payrollTouchStartX.current = null;
+                if (!wasHorizontal) { setPayrollDragX(0); return; }
                 if (Math.abs(dx) > 80) {
+                    setPayrollDragX(0); setPayrollSnapping(false);
                     if (dx < 0) { nextMonth(); setPayrollSlideAnim(s => ({ key: s.key+1, dir: 'slide-in-left' })); }
                     else        { prevMonth(); setPayrollSlideAnim(s => ({ key: s.key+1, dir: 'slide-in-right' })); }
+                } else {
+                    setPayrollSnapping(true); setPayrollDragX(0);
+                    setTimeout(() => setPayrollSnapping(false), 220);
                 }
-                payrollTouchStartX.current = null;
             };
 
             const payrollList = useMemo(() => {
@@ -8024,7 +8105,7 @@
 
             return (
                 <>
-                <div key={payrollSlideAnim.key} className={`space-y-4 max-w-full mx-auto ${payrollSlideAnim.dir}`} onTouchStart={handlePayrollTouchStart} onTouchEnd={handlePayrollTouchEnd}>
+                <div key={payrollSlideAnim.key} className={`space-y-4 max-w-full mx-auto ${payrollSlideAnim.dir}`} style={(payrollDragX !== 0 || payrollSnapping) ? { transform: `translateX(${payrollDragX}px)`, transition: payrollSnapping ? 'transform 0.2s ease-out' : 'none' } : undefined} onTouchStart={handlePayrollTouchStart} onTouchMove={handlePayrollTouchMove} onTouchEnd={handlePayrollTouchEnd}>
                     <div className="flex flex-col md:flex-row justify-center items-center bg-white p-4 md:p-5 rounded-2xl shadow-sm border border-gray-200 gap-3 md:gap-4">
                         <div className="flex items-center gap-2 md:gap-4 shrink-0">
                             <button onClick={prevMonth} className="p-2 hover:bg-gray-100 rounded-full transition"><ChevronLeft className="w-5 h-5 md:w-6 md:h-6" /></button>
@@ -8742,16 +8823,43 @@
             }, [year, month, isBulkInputOpen, editDayModal]);
 
             const touchStartX = useRef(null);
+            const touchStartY = useRef(null);
+            const isHorizontalDrag = useRef(false);
+            const [predDragX, setPredDragX] = useState(0);
+            const [predSnapping, setPredSnapping] = useState(false);
             const [predSlideAnim, setPredSlideAnim] = useState({ key: 0, dir: '' });
-            const handleTouchStart = (e) => { touchStartX.current = e.touches[0].clientX; };
-            const handleTouchEnd = (e) => {
+            const handleTouchStart = (e) => {
+                touchStartX.current = e.touches[0].clientX;
+                touchStartY.current = e.touches[0].clientY;
+                isHorizontalDrag.current = false;
+                setPredSnapping(false);
+                setPredDragX(0);
+            };
+            const handleTouchMove = (e) => {
                 if (touchStartX.current === null || isBulkInputOpen || editDayModal) return;
+                const dx = e.touches[0].clientX - touchStartX.current;
+                const dy = e.touches[0].clientY - touchStartY.current;
+                if (!isHorizontalDrag.current) {
+                    if (Math.abs(dx) < 10 && Math.abs(dy) < 10) return;
+                    isHorizontalDrag.current = Math.abs(dx) > Math.abs(dy);
+                    if (!isHorizontalDrag.current) return;
+                }
+                setPredDragX(dx);
+            };
+            const handleTouchEnd = (e) => {
+                if (touchStartX.current === null) return;
                 const dx = e.changedTouches[0].clientX - touchStartX.current;
+                const wasHorizontal = isHorizontalDrag.current;
+                touchStartX.current = null;
+                if (isBulkInputOpen || editDayModal || !wasHorizontal) { setPredDragX(0); return; }
                 if (Math.abs(dx) > 80) {
+                    setPredDragX(0); setPredSnapping(false);
                     if (dx < 0) { nextMonth(); setPredSlideAnim(s => ({ key: s.key+1, dir: 'slide-in-left' })); }
                     else        { prevMonth(); setPredSlideAnim(s => ({ key: s.key+1, dir: 'slide-in-right' })); }
+                } else {
+                    setPredSnapping(true); setPredDragX(0);
+                    setTimeout(() => setPredSnapping(false), 220);
                 }
-                touchStartX.current = null;
             };
 
             const handleDeleteDay = (dayToDel) => {
@@ -8821,7 +8929,7 @@
                         </div>
                     </div>
 
-                    <div key={predSlideAnim.key} className={`bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden ${predSlideAnim.dir}`} onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
+                    <div key={predSlideAnim.key} className={`bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden ${predSlideAnim.dir}`} style={(predDragX !== 0 || predSnapping) ? { transform: `translateX(${predDragX}px)`, transition: predSnapping ? 'transform 0.2s ease-out' : 'none' } : undefined} onTouchStart={handleTouchStart} onTouchMove={handleTouchMove} onTouchEnd={handleTouchEnd}>
                         <div className="grid grid-cols-7 bg-gray-50 border-b border-gray-200">
                             {['일', '월', '화', '수', '목', '금', '토'].map((day, i) => (
                                 <div key={day} className={`text-center py-3 text-sm font-bold ${i === 0 ? 'text-red-500' : i === 6 ? 'text-blue-500' : 'text-gray-600'}`}>

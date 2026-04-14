@@ -8167,7 +8167,7 @@
                                     <label className="flex items-center gap-3 cursor-pointer bg-orange-50 rounded-xl p-4 border border-orange-100">
                                         <input type="checkbox" checked={sendDeductInsurance} onChange={e => setSendDeductInsurance(e.target.checked)} className="w-4 h-4 accent-orange-600" />
                                         <div>
-                                            <p className="font-bold text-orange-800 text-sm">{isIndiv ? '급여 공제' : `${n || '공제'} ${r}% 제외`}</p>
+                                            <p className="font-bold text-orange-800 text-sm">{`${n || '공제'} ${r}% 제외`}</p>
                                             <p className="text-xs text-orange-600">
                                                 {(() => {
                                                     const base = sendIncludeHoliday ? sendModal.item.totalPay + sendModal.item.holidayPay : sendModal.item.totalPay;

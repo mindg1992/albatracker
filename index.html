@@ -6659,7 +6659,7 @@
             const handleTouchEnd = (e) => {
                 if (touchStartX.current === null || isBulkInputOpen || editDayModal) return;
                 const dx = e.changedTouches[0].clientX - touchStartX.current;
-                if (Math.abs(dx) > 50) { dx < 0 ? nextMonth() : prevMonth(); }
+                if (Math.abs(dx) > 80) { dx < 0 ? nextMonth() : prevMonth(); }
                 touchStartX.current = null;
             };
 
@@ -7607,7 +7607,7 @@
             const handlePayrollTouchEnd = (e) => {
                 if (payrollTouchStartX.current === null) return;
                 const dx = e.changedTouches[0].clientX - payrollTouchStartX.current;
-                if (Math.abs(dx) > 50) { dx < 0 ? nextMonth() : prevMonth(); }
+                if (Math.abs(dx) > 80) { dx < 0 ? nextMonth() : prevMonth(); }
                 payrollTouchStartX.current = null;
             };
 
@@ -8703,7 +8703,7 @@
             const handleTouchEnd = (e) => {
                 if (touchStartX.current === null || isBulkInputOpen || editDayModal) return;
                 const dx = e.changedTouches[0].clientX - touchStartX.current;
-                if (Math.abs(dx) > 50) { dx < 0 ? nextMonth() : prevMonth(); }
+                if (Math.abs(dx) > 80) { dx < 0 ? nextMonth() : prevMonth(); }
                 touchStartX.current = null;
             };
 

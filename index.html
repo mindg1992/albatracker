@@ -6655,6 +6655,31 @@
                 .filter(([s]) => { const [sy, sm] = s.split('-').map(Number); return sy === year && sm === month; })
                 .reduce((sum, [, wd]) => sum + wd.reduce((s, h) => s + h.holidayPay, 0), 0);
             const totalMonthGrandPay = totalMonthPay + totalMonthHolidayPay;
+            // 월별 총 공제액 계산
+            const totalMonthDeduction = (() => {
+                const mode = workspaceInfo?.insuranceMode || 'none';
+                if (mode === 'none') return 0;
+                let deduct = 0;
+                const monthData2 = monthlyData[monthKey]?.days || {};
+                const empIds = new Set();
+                Object.values(monthData2).forEach(day => Object.keys(day.entries || {}).forEach(id => empIds.add(id)));
+                empIds.forEach(empId => {
+                    const emp = employees.find(e => e.id.toString() === empId);
+                    const ins = getInsuranceInfo(workspaceInfo, emp);
+                    if (ins.rate <= 0) return;
+                    let empPay = 0;
+                    Object.values(monthData2).forEach(day => { const e = day.entries?.[empId]; if (e) empPay += (e.pay || 0); });
+                    let empHoliday = 0;
+                    Object.entries(holidayPayBySunday).forEach(([s, wd]) => {
+                        const [sy, sm] = s.split('-').map(Number);
+                        if (sy !== year || sm !== month) return;
+                        wd.forEach(h => { if (h.empId === empId) empHoliday += h.holidayPay; });
+                    });
+                    deduct += Math.round((empPay + empHoliday) * ins.rate / 100);
+                });
+                return deduct;
+            })();
+            const totalMonthFinalPay = totalMonthGrandPay - totalMonthDeduction;
 
             const explicitTotalRevenue = currentMonthData.totalRevenue || 0;
             const effectiveRevenue = explicitTotalRevenue > 0 ? explicitTotalRevenue : sumOfDailyRevenue;
@@ -6699,8 +6724,13 @@
                             <div className="bg-blue-50 text-blue-800 px-4 py-2.5 rounded-xl font-medium border border-blue-200 whitespace-nowrap text-sm shadow-sm">
                                 주휴수당: {formatCurrency(totalMonthHolidayPay)}
                             </div>
+                            {totalMonthDeduction > 0 && (
+                                <div className="bg-orange-50 text-orange-800 px-4 py-2.5 rounded-xl font-medium border border-orange-200 whitespace-nowrap text-sm shadow-sm">
+                                    총 공제액: -{formatCurrency(totalMonthDeduction)}
+                                </div>
+                            )}
                             <div className="bg-purple-50 text-purple-800 px-4 py-2.5 rounded-xl font-bold border border-purple-200 whitespace-nowrap text-sm shadow-sm">
-                                총 급여: {formatCurrency(totalMonthGrandPay)} <span className="text-xs font-normal text-purple-600">({payRatio}%)</span>
+                                총 급여: {formatCurrency(totalMonthDeduction > 0 ? totalMonthFinalPay : totalMonthGrandPay)} <span className="text-xs font-normal text-purple-600">({payRatio}%)</span>
                             </div>
                         </div>
                     </div>

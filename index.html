@@ -163,12 +163,12 @@
             return `${m}분`;
         };
 
-        // --- 보험료 정보 유틸리티 ---
+        // --- 급여 공제 정보 유틸리티 ---
         function getInsuranceInfo(workspaceInfo, employee) {
             const mode = workspaceInfo?.insuranceMode || 'global';
             if (mode === 'individual') {
                 const rate = parseFloat(employee?.insuranceRate) || 0;
-                const name = employee?.insuranceName || '보험료';
+                const name = employee?.insuranceName || '공제';
                 return { mode, rate, name };
             }
             const rate = parseFloat(workspaceInfo?.insuranceRate) || 0;
@@ -5635,8 +5635,8 @@
                                             {(() => {
                                                 const ins = getInsuranceInfo(workspaceInfo, emp);
                                                 return ins.rate > 0 ? (
-                                                    <p><span className="font-medium text-gray-700">보험공제:</span>{' '}
-                                                        <span className="text-orange-600 font-medium">{ins.name || '보험료'} {ins.rate}%</span>
+                                                    <p><span className="font-medium text-gray-700">급여공제:</span>{' '}
+                                                        <span className="text-orange-600 font-medium">{ins.name || '공제'} {ins.rate}%</span>
                                                     </p>
                                                 ) : null;
                                             })()}
@@ -7549,7 +7549,7 @@
                             calcLines.push(`${bulkIncludeHoliday ? '순수급여' : '총 급여'}: ${Number(item.totalPay).toLocaleString()}원`);
                         }
                         if (bulkIncludeHoliday && item.holidayPay > 0) calcLines.push(`주휴수당: ${Number(item.holidayPay).toLocaleString()}원`);
-                        if (bulkDeductInsurance && insRate > 0) calcLines.push(`${insName || '보험료'} ${insRate}% 제외: -${Number(beforeInsurance - finalAmount).toLocaleString()}원`);
+                        if (bulkDeductInsurance && insRate > 0) calcLines.push(`${insName || '공제'} ${insRate}% 제외: -${Number(beforeInsurance - finalAmount).toLocaleString()}원`);
                         const docId = `${item.id}_${year}_${month}`;
                         const emp = employees.find(e => e.id.toString() === item.id);
                         const payslipData = {
@@ -7609,7 +7609,7 @@
                     calcLines.push(`${sendIncludeHoliday ? '순수급여' : '총 급여'}: ${Number(item.totalPay).toLocaleString()}원`);
                 }
                 if (sendIncludeHoliday && item.holidayPay > 0) calcLines.push(`주휴수당: ${Number(item.holidayPay).toLocaleString()}원`);
-                if (sendDeductInsurance && insRate > 0) calcLines.push(`${insName || '보험료'} ${insRate}% 제외: -${Number(beforeInsurance - finalAmount).toLocaleString()}원`);
+                if (sendDeductInsurance && insRate > 0) calcLines.push(`${insName || '공제'} ${insRate}% 제외: -${Number(beforeInsurance - finalAmount).toLocaleString()}원`);
                 const calcMethod = calcLines.join('\n');
                 const payDate = fmtPayDate(sendPayDate) || fmtPayDate(todayDateVal());
                 const docId = `${item.id}_${year}_${month}`;
@@ -7714,8 +7714,8 @@
                 const insMode = workspaceInfo?.insuranceMode || 'global';
                 const gRate = parseFloat(workspaceInfo?.insuranceRate) || 0;
                 const insHeaderLabel = hasInsurance
-                    ? (insMode === 'global' && workspaceInfo?.insuranceName ? `${workspaceInfo.insuranceName}(-${gRate}%)` : '보험료 공제')
-                    : '보험료 공제';
+                    ? (insMode === 'global' && workspaceInfo?.insuranceName ? `${workspaceInfo.insuranceName}(-${gRate}%)` : '급여 공제')
+                    : '급여 공제';
                 const sheet2Header = [
                     '구분번호', '근무자명',
                     '총 근무시간', '시급',
@@ -7754,7 +7754,7 @@
                 if (ws2Cols[9]) ws2Cols[9].wch = 15;
                 ws2['!cols'] = ws2Cols;
                 // 탭2 스타일: X축(헤더행) 연한초록, Y축(구분번호+근무자명) 연한노랑
-                // 금액 컬럼(시간급여4, 주휴수당5, 총급여6, 보험공제7)은 오른쪽정렬, 나머지 가운데
+                // 금액 컬럼(시간급여4, 주휴수당5, 총급여6, 급여공제7)은 오른쪽정렬, 나머지 가운데
                 const moneyCols2 = new Set([4, 5, 6, 7]);
                 for (let c = 0; c < sheet2Header.length; c++) {
                     const addr = XLSX.utils.encode_cell({ r: 0, c });
@@ -7870,7 +7870,7 @@
                                         )}
                                         {item.insuranceRate > 0 && (
                                             <div className="mt-3 pt-3 border-t border-orange-100 flex justify-between items-center bg-orange-50/50 -mx-5 px-5 pb-3">
-                                                <span className="text-xs text-orange-600 font-bold">보험료 공제 (-{item.insuranceRate}%)</span>
+                                                <span className="text-xs text-orange-600 font-bold">급여 공제 (-{item.insuranceRate}%)</span>
                                                 <span className="text-sm font-bold text-orange-600">-{formatCurrency(item.insuranceDeduction)}</span>
                                             </div>
                                         )}
@@ -7908,7 +7908,7 @@
                                         <th className="px-4 py-4 font-bold text-gray-600 whitespace-nowrap">이번달 근무시간</th>
                                         <th className="px-4 py-4 font-bold text-gray-600 whitespace-nowrap">순수 급여</th>
                                         <th className="px-4 py-4 font-bold text-blue-600 whitespace-nowrap">주휴수당</th>
-                                        {payrollList.some(i => i.insuranceRate > 0) && <th className="px-4 py-4 font-bold text-orange-600 whitespace-nowrap">보험료 공제</th>}
+                                        {payrollList.some(i => i.insuranceRate > 0) && <th className="px-4 py-4 font-bold text-orange-600 whitespace-nowrap">급여 공제</th>}
                                         <th className="px-4 py-4 font-bold text-purple-600 whitespace-nowrap">{month}월 총 지급액</th>
                                         {workspaceId && <th className="px-4 py-4 font-bold text-emerald-600 whitespace-nowrap">급여명세서</th>}
                                     </tr>
@@ -8049,7 +8049,7 @@
                                     <label className="flex items-center gap-3 cursor-pointer bg-orange-50 rounded-xl p-4 border border-orange-100">
                                         <input type="checkbox" checked={sendDeductInsurance} onChange={e => setSendDeductInsurance(e.target.checked)} className="w-4 h-4 accent-orange-600" />
                                         <div>
-                                            <p className="font-bold text-orange-800 text-sm">{isIndiv ? '보험료 제외' : `${n || '보험료'} ${r}% 제외`}</p>
+                                            <p className="font-bold text-orange-800 text-sm">{isIndiv ? '급여 공제 제외' : `${n || '공제'} ${r}% 제외`}</p>
                                             <p className="text-xs text-orange-600">
                                                 {(() => {
                                                     const base = sendIncludeHoliday ? sendModal.item.totalPay + sendModal.item.holidayPay : sendModal.item.totalPay;
@@ -8106,7 +8106,7 @@
                                     <label className="flex items-center gap-3 cursor-pointer bg-orange-50 rounded-xl p-4 border border-orange-100">
                                         <input type="checkbox" checked={bulkDeductInsurance} onChange={e => setBulkDeductInsurance(e.target.checked)} className="w-4 h-4 accent-orange-600" />
                                         <div>
-                                            <p className="font-bold text-orange-800 text-sm">{isIndiv ? '보험료 제외' : `${gName || '보험료'} ${gRate}% 제외`}</p>
+                                            <p className="font-bold text-orange-800 text-sm">{isIndiv ? '급여 공제 제외' : `${gName || '공제'} ${gRate}% 제외`}</p>
                                             <p className="text-xs text-orange-600">{isIndiv ? '체크 시 개별로 설정한 공제율을 적용한 금액으로 발송됩니다' : `체크 시 총액에서 ${gRate}%를 공제한 금액으로 발송됩니다`}</p>
                                         </div>
                                     </label>

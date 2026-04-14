@@ -7647,12 +7647,11 @@
                         const wages = Object.entries(item.wageBreakdown || {});
                         const calcLines = [];
                         if (wages.length <= 1) {
-                            calcLines.push(`시급: ${Number(wages[0]?.[0] || item.wage).toLocaleString()}원`, `근무시간: ${fmtHours(item.totalHours)}`, `${bulkIncludeHoliday ? '순수급여' : '총 급여'}: ${Number(item.totalPay).toLocaleString()}원`);
+                            calcLines.push(`시급: ${Number(wages[0]?.[0] || item.wage).toLocaleString()}원`, `근무시간: ${fmtHours(item.totalHours)}`);
                         } else {
                             wages.sort((a, b) => Number(a[0]) - Number(b[0])).forEach(([w, info]) => {
                                 calcLines.push(`시급 ${Number(w).toLocaleString()}원 × ${info.days}일(${fmtHours(info.hours)}) = ${Number(info.pay).toLocaleString()}원`);
                             });
-                            calcLines.push(`${bulkIncludeHoliday ? '순수급여' : '총 급여'}: ${Number(item.totalPay).toLocaleString()}원`);
                         }
                         if (bulkIncludeHoliday && item.holidayPay > 0) calcLines.push(`주휴수당: ${Number(item.holidayPay).toLocaleString()}원`);
                         if (bulkDeductInsurance && insRate > 0) calcLines.push(`${insName || '공제'} ${insRate}% 제외: -${Number(beforeInsurance - finalAmount).toLocaleString()}원`);
@@ -7707,12 +7706,11 @@
                 const wages = Object.entries(item.wageBreakdown || {});
                 const calcLines = [];
                 if (wages.length <= 1) {
-                    calcLines.push(`시급: ${Number(wages[0]?.[0] || item.wage).toLocaleString()}원`, `근무시간: ${fmtHours(item.totalHours)}`, `${sendIncludeHoliday ? '순수급여' : '총 급여'}: ${Number(item.totalPay).toLocaleString()}원`);
+                    calcLines.push(`시급: ${Number(wages[0]?.[0] || item.wage).toLocaleString()}원`, `근무시간: ${fmtHours(item.totalHours)}`);
                 } else {
                     wages.sort((a, b) => Number(a[0]) - Number(b[0])).forEach(([w, info]) => {
                         calcLines.push(`시급 ${Number(w).toLocaleString()}원 × ${info.days}일(${fmtHours(info.hours)}) = ${Number(info.pay).toLocaleString()}원`);
                     });
-                    calcLines.push(`${sendIncludeHoliday ? '순수급여' : '총 급여'}: ${Number(item.totalPay).toLocaleString()}원`);
                 }
                 if (sendIncludeHoliday && item.holidayPay > 0) calcLines.push(`주휴수당: ${Number(item.holidayPay).toLocaleString()}원`);
                 if (sendDeductInsurance && insRate > 0) calcLines.push(`${insName || '공제'} ${insRate}% 제외: -${Number(beforeInsurance - finalAmount).toLocaleString()}원`);

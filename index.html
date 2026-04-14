@@ -709,7 +709,7 @@
         function WorkSubmitBannerBar({ banner, onDismiss }) {
             useEffect(() => {
                 let timer = null;
-                let remaining = 3000;
+                let remaining = 10000;
                 let startedAt = null;
                 const startTimer = () => {
                     startedAt = Date.now();
@@ -7339,7 +7339,7 @@
                         const m = Number(minsData[emp.id]) || 0;
                         const hours = h + m / 60;
                         const w = Number(wageData[emp.id]) || (Number(emp.wage) > 0 ? Number(emp.wage) : 0) || (Number(globalMinWage) > 0 ? Number(globalMinWage) : MIN_WAGE);
-                        submissionUpdates.push({ empUid, employeeId: emp.id, empName: emp.name, hours, wage: w, isNew: !existingEntry?.submittedByEmp });
+                        submissionUpdates.push({ empUid, employeeId: emp.id, empName: emp.name, hours, wage: w, isNew: !existingEntry?.submittedByEmp, noteDeleted: !!deletedNotes[emp.id] });
                     }
                 });
 
@@ -7422,15 +7422,17 @@
 
                 // 근무자 달력에도 반영: submissions 컬렉션 동기화 (기존 업데이트 + 신규 생성)
                 if (workspaceId && submissionUpdates.length > 0) {
-                    submissionUpdates.forEach(({ empUid, employeeId, empName, hours, wage, isNew }) => {
+                    submissionUpdates.forEach(({ empUid, employeeId, empName, hours, wage, isNew, noteDeleted }) => {
                         const subsRef = fbDb.collection('workspaces').doc(workspaceId).collection('submissions');
                         if (hours > 0) {
                             const docId = `${empUid}_${dateStr}`;
-                            subsRef.doc(docId).set({
+                            const updateData = {
                                 empUid, employeeId, empName, date: dateStr, hours, wage,
                                 locked: true, bossEntered: isNew,
                                 submittedAt: firebase.firestore.FieldValue.serverTimestamp()
-                            }, { merge: true }).catch(() => {});
+                            };
+                            if (noteDeleted) { updateData.note = ''; updateData.memoSeenByBoss = true; }
+                            subsRef.doc(docId).set(updateData, { merge: true }).catch(() => {});
                         } else {
                             // 시간 0이면 submissions에서도 삭제
                             const docId = `${empUid}_${dateStr}`;
@@ -7769,11 +7771,11 @@
                         };
                         await fbDb.collection('workspaces').doc(workspaceId).collection('payslips').doc(docId).set(payslipData);
                         if (emp?.empUid) {
-                            await addEmpNotification(emp.empUid, {
+                            addEmpNotification(emp.empUid, {
                                 type: 'payslip', year, month,
                                 message: `${year}년 ${month}월 급여명세서가 도착했습니다.`,
                                 payslipDocId: docId, bossUid: workspaceId
-                            });
+                            }).catch(() => {});
                         }
                         successCount++;
                     } catch(e) {}
@@ -7830,13 +7832,13 @@
                 try {
                     await fbDb.collection('workspaces').doc(workspaceId)
                         .collection('payslips').doc(docId).set(payslipData);
-                    // Google 직원이면 알림도 발송
+                    // Google 직원이면 알림도 발송 (실패해도 명세서 발송은 성공 처리)
                     if (emp?.empUid) {
-                        await addEmpNotification(emp.empUid, {
+                        addEmpNotification(emp.empUid, {
                                 type: 'payslip', year, month,
                                 message: `${year}년 ${month}월 급여명세서가 도착했습니다.`,
                                 payslipDocId: docId, bossUid: workspaceId
-                            });
+                            }).catch(() => {});
                     }
                     showAlert(`${item.name}님께 ${month}월 급여명세서를 발송했습니다.`, '발송 완료', 'success');
                     setSendModal(null);

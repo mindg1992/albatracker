@@ -7638,7 +7638,7 @@
                 if (!workspaceId || payrollList.length === 0) return;
                 setBulkSending(true);
                 let successCount = 0;
-                for (const item of payrollList.filter(i => i.displayId !== 99999)) {
+                for (const item of payrollList.filter(i => i.displayId !== 99999 && employees.find(e => e.id.toString() === i.id)?.empUid)) {
                     try {
                         const beforeInsurance = bulkIncludeHoliday ? (item.totalPay + item.holidayPay) : item.totalPay;
                         const insRate = item.insuranceRate || 0;
@@ -7981,6 +7981,8 @@
                                             </div>
                                         )}
                                         {workspaceId && item.displayId !== 99999 && (() => {
+                                            const emp = employees.find(e => e.id.toString() === item.id);
+                                            if (!emp?.empUid) return null;
                                             const docId = `${item.id}_${year}_${month}`;
                                             const isSent = !!sentPayslips[docId];
                                             return (
@@ -8089,7 +8091,10 @@
                                                 </td>
                                                 {workspaceId && (
                                                     <td className="px-4 py-4 text-center">
-                                                        {item.displayId !== 99999 ? (() => {
+                                                        {(() => {
+                                                            if (item.displayId === 99999) return <span className="text-gray-300 text-xs">-</span>;
+                                                            const emp = employees.find(e => e.id.toString() === item.id);
+                                                            if (!emp?.empUid) return <span className="text-gray-300 text-xs">-</span>;
                                                             const docId = `${item.id}_${year}_${month}`;
                                                             const isSent = !!sentPayslips[docId];
                                                             return (
@@ -8098,7 +8103,7 @@
                                                                     {isSent ? '발송완료' : '발송'}
                                                                 </button>
                                                             );
-                                                        })() : <span className="text-gray-300 text-xs">-</span>}
+                                                        })()}
                                                     </td>
                                                 )}
                                             </tr>
@@ -8194,7 +8199,7 @@
                             <h3 className="text-lg font-bold text-gray-800">급여명세서 일괄발송</h3>
                             <div className="bg-gray-50 rounded-xl p-4 space-y-1 text-sm">
                                 <p className="text-gray-500">{year}년 {month}월</p>
-                                <p className="font-bold text-gray-800">대상: {payrollList.length}명</p>
+                                <p className="font-bold text-gray-800">대상: {payrollList.filter(i => i.displayId !== 99999 && employees.find(e => e.id.toString() === i.id)?.empUid).length}명</p>
                                 <p className="text-xs text-gray-400">급여가 발생한 전원에게 발송됩니다.</p>
                             </div>
                             <div>

@@ -75,6 +75,9 @@
             .cal-cell-empty { min-height: 70px !important; }
         }
 
+        /* 모든 placeholder 색상 통일 (gray-300: #d1d5db) */
+        ::placeholder { color: #d1d5db; opacity: 1; }
+
     </style>
 </head>
 <body>
@@ -6534,7 +6537,7 @@
                                         <label className="block text-sm font-medium text-gray-700 mb-1">공제항목</label>
                                         <input type="text" name="insuranceName" value={formData.insuranceName || ''} onChange={handleChange}
                                             placeholder="예) 고용보험 / 프리랜서 등등"
-                                            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-green-500 outline-none transition-shadow placeholder:text-gray-300" />
+                                            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-green-500 outline-none transition-shadow" />
                                     </div>
                                     <div>
                                         <label className="block text-sm font-medium text-gray-700 mb-1">공제율</label>
@@ -10043,7 +10046,7 @@
                                         <label className="block text-sm font-medium text-gray-700 mb-1">공제항목</label>
                                         <input type="text" value={localInsuranceName} onChange={e => setLocalInsuranceName(e.target.value)}
                                             placeholder="예) 고용보험 / 프리랜서 등등"
-                                            className="w-full border border-gray-300 rounded-xl px-4 py-2.5 text-sm focus:ring-2 focus:ring-orange-500 outline-none transition placeholder:text-gray-300" />
+                                            className="w-full border border-gray-300 rounded-xl px-4 py-2.5 text-sm focus:ring-2 focus:ring-orange-500 outline-none transition" />
                                     </div>
                                     <div>
                                         <label className="block text-sm font-medium text-gray-700 mb-1">총 급여에서 공제</label>

@@ -6711,14 +6711,14 @@
             const touchStartX = useRef(null);
             const touchStartY = useRef(null);
             const isHorizontalDrag = useRef(false);
+            const carouselRef = useRef(null);
             const [calDragX, setCalDragX] = useState(0);
-            const [calSnapping, setCalSnapping] = useState(false);
-            const [calSlideAnim, setCalSlideAnim] = useState({ key: 0, dir: '' });
+            const [calTransition, setCalTransition] = useState(false);
             const handleTouchStart = (e) => {
                 touchStartX.current = e.touches[0].clientX;
                 touchStartY.current = e.touches[0].clientY;
                 isHorizontalDrag.current = false;
-                setCalSnapping(false);
+                setCalTransition(false);
                 setCalDragX(0);
             };
             const handleTouchMove = (e) => {
@@ -6738,13 +6738,19 @@
                 const wasHorizontal = isHorizontalDrag.current;
                 touchStartX.current = null;
                 if (isBulkInputOpen || editDayModal || !wasHorizontal) { setCalDragX(0); return; }
+                const w = carouselRef.current?.clientWidth || window.innerWidth;
                 if (Math.abs(dx) > 80) {
-                    setCalDragX(0); setCalSnapping(false);
-                    if (dx < 0) { nextMonth(); setCalSlideAnim(s => ({ key: s.key+1, dir: 'slide-in-left' })); }
-                    else        { prevMonth(); setCalSlideAnim(s => ({ key: s.key+1, dir: 'slide-in-right' })); }
+                    setCalTransition(true);
+                    setCalDragX(dx < 0 ? -w : w);
+                    setTimeout(() => {
+                        setCalTransition(false);
+                        setCalDragX(0);
+                        if (dx < 0) nextMonth(); else prevMonth();
+                    }, 260);
                 } else {
-                    setCalSnapping(true); setCalDragX(0);
-                    setTimeout(() => setCalSnapping(false), 220);
+                    setCalTransition(true);
+                    setCalDragX(0);
+                    setTimeout(() => setCalTransition(false), 220);
                 }
             };
 
@@ -6915,93 +6921,105 @@
                         </div>
                     </div>
 
-                    <div key={calSlideAnim.key} className={`bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden ${calSlideAnim.dir}`} style={(calDragX !== 0 || calSnapping) ? { transform: `translateX(${calDragX}px)`, transition: calSnapping ? 'transform 0.2s ease-out' : 'none' } : undefined} onTouchStart={handleTouchStart} onTouchMove={handleTouchMove} onTouchEnd={handleTouchEnd}>
-                        <div className="grid grid-cols-7 bg-gray-50 border-b border-gray-200">
-                            {['일', '월', '화', '수', '목', '금', '토'].map((day, i) => (
-                                <div key={day} className={`text-center py-3 text-sm font-bold ${i === 0 ? 'text-red-500' : i === 6 ? 'text-blue-500' : 'text-gray-600'}`}>
-                                    {day}
-                                </div>
-                            ))}
-                        </div>
-
-                        <div className="grid grid-cols-7 auto-rows-fr">
-                            {calendarDays.map((day, idx) => {
-                                if (!day) return <div key={`empty-${idx}`} className="cal-cell-empty min-h-[120px] border-b border-r border-gray-100 bg-gray-50/50"></div>;
-
-                                const dayData = currentMonthData.days[day] || { entries: {}, revenue: 0 };
-                                let dailyTotalPay = 0;
-                                const activeEntries = [];
-
-                                Object.entries(dayData.entries || {}).forEach(([empId, entry]) => {
-                                    if (entry.hours > 0) {
-                                        dailyTotalPay += entry.pay;
-                                        const currentEmp = employees.find(e => String(e.id) === String(empId));
-                                        activeEntries.push(currentEmp ? { ...entry, name: currentEmp.name } : entry);
-                                    }
-                                });
-
-                                const dailyRatio = dayData.revenue > 0 ? ((dailyTotalPay / dayData.revenue) * 100).toFixed(0) : 0;
-                                const isSunday = idx % 7 === 0;
-                                const sundayKey = isSunday ? `${year}-${month.toString().padStart(2, '0')}-${day.toString().padStart(2, '0')}` : null;
-                                const holidayEntries = sundayKey ? (holidayPayBySunday[sundayKey] || []) : [];
-                                const dateStr = `${year}-${month.toString().padStart(2,'0')}-${day.toString().padStart(2,'0')}`;
-                                const hasUnseen = unseenDates?.has(dateStr);
-                                const handleOpenDay = () => { setEditDayModal(day); onMarkSeen?.(dateStr); };
-
-                                return (
-                                    <div key={`day-${day}`} className="cal-cell min-h-[140px] border-b border-r border-gray-100 p-2 relative group hover:bg-yellow-50/50 transition cursor-pointer md:cursor-default" onClick={handleOpenDay}>
-                                        <div className="flex justify-between items-start mb-1">
-                                            <div className="relative flex items-center">
-                                                <span className={`text-sm font-bold w-6 h-6 flex items-center justify-center rounded-full ${idx % 7 === 0 ? 'text-red-500' : idx % 7 === 6 ? 'text-blue-500' : 'text-gray-700'}`}>
-                                                    {day}
-                                                </span>
-                                                {hasUnseen && <span className="absolute -top-0.5 -right-1 w-2 h-2 bg-red-500 rounded-full"></span>}
-                                            </div>
-                                            {/* PC에서만 마우스 올렸을 때 보이게 처리 */}
-                                            <div className="hidden md:flex opacity-0 group-hover:opacity-100 gap-1 transition" onClick={e => e.stopPropagation()}>
-                                                <button onClick={handleOpenDay} className="text-xs bg-gray-100 hover:bg-gray-200 text-gray-600 px-2 py-1 rounded shadow-sm">수정</button>
-                                                <button onClick={() => handleDeleteDay(day)} className="text-xs bg-red-50 hover:bg-red-100 text-red-500 px-1.5 py-1 rounded flex items-center justify-center shadow-sm" title="삭제">
-                                                    <X className="w-3 h-3" />
-                                                </button>
-                                            </div>
-                                        </div>
-
-                                        {/* 모바일 뷰 */}
-                                        <div className="md:hidden space-y-0.5 mt-1">
-                                            {activeEntries.length > 0 && <div className="text-[9px] text-green-700 font-semibold truncate">{activeEntries.length}명 근무</div>}
-                                            {dailyTotalPay > 0 && <div className="text-[9px] font-bold text-green-600 truncate">{Math.round(dailyTotalPay/10000)}만원</div>}
-                                            {holidayEntries.length > 0 && <div className="w-1.5 h-1.5 rounded-full bg-blue-400 inline-block ml-0.5" title="주휴수당 발생"></div>}
-                                        </div>
-
-                                        {/* PC 뷰 */}
-                                        <div className="hidden md:block space-y-1 mt-2">
-                                            <div className="text-xs text-gray-600 overflow-hidden">
-                                                {activeEntries.slice(0, 3).map((e, i) => <div key={i} className="truncate">{e.name}: {fmtHours(e.hours)}</div>)}
-                                                {activeEntries.length > 3 && <div className="text-gray-400 italic">+{activeEntries.length - 3}명...</div>}
-                                            </div>
-
-                                            {dailyTotalPay > 0 && (
-                                                <div className="mt-2 pt-1 border-t border-gray-100 border-dashed">
-                                                    <div className="text-xs font-semibold text-green-700">인건비: {formatCurrency(dailyTotalPay)}</div>
-                                                    <div className="text-xs text-gray-500 mt-0.5">매출: {formatCurrency(dayData.revenue || 0)}</div>
-                                                    {dayData.revenue > 0 && <div className="text-[10px] font-medium text-gray-400 mt-0.5">비율: {dailyRatio}%</div>}
-                                                </div>
-                                            )}
-
-                                            {holidayEntries.length > 0 && (
-                                                <div className="mt-1 pt-1 border-t border-blue-100 border-dashed">
-                                                    <div className="text-[10px] font-bold text-blue-600 mb-0.5">주휴수당 발생</div>
-                                                    {holidayEntries.map((h, i) => (
-                                                        <div key={i} className="text-[10px] text-blue-500 truncate">{h.name}: {formatCurrency(h.holidayPay)}</div>
-                                                    ))}
-                                                </div>
-                                            )}
-                                        </div>
+                    {(() => {
+                        const renderCalendarPanel = (py, pm, isCurrent) => {
+                            const pmKey = `${py}-${pm.toString().padStart(2,'0')}`;
+                            const pmData = monthlyData[pmKey] || { days: {} };
+                            const pDaysIn = getDaysInMonth(py, pm);
+                            const pFirstDay = getFirstDayOfMonth(py, pm);
+                            const pDays = [];
+                            for (let i = 0; i < pFirstDay; i++) pDays.push(null);
+                            for (let d = 1; d <= pDaysIn; d++) pDays.push(d);
+                            return (
+                                <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden w-full flex-shrink-0">
+                                    <div className="grid grid-cols-7 bg-gray-50 border-b border-gray-200">
+                                        {['일', '월', '화', '수', '목', '금', '토'].map((day, i) => (
+                                            <div key={day} className={`text-center py-3 text-sm font-bold ${i === 0 ? 'text-red-500' : i === 6 ? 'text-blue-500' : 'text-gray-600'}`}>{day}</div>
+                                        ))}
                                     </div>
-                                );
-                            })}
-                        </div>
-                    </div>
+                                    <div className="grid grid-cols-7 auto-rows-fr">
+                                        {pDays.map((day, idx) => {
+                                            if (!day) return <div key={`empty-${idx}`} className="cal-cell-empty min-h-[120px] border-b border-r border-gray-100 bg-gray-50/50"></div>;
+                                            const dayData = pmData.days[day] || { entries: {}, revenue: 0 };
+                                            let dailyTotalPay = 0;
+                                            const activeEntries = [];
+                                            Object.entries(dayData.entries || {}).forEach(([empId, entry]) => {
+                                                if (entry.hours > 0) {
+                                                    dailyTotalPay += entry.pay;
+                                                    const currentEmp = employees.find(e => String(e.id) === String(empId));
+                                                    activeEntries.push(currentEmp ? { ...entry, name: currentEmp.name } : entry);
+                                                }
+                                            });
+                                            const dailyRatio = dayData.revenue > 0 ? ((dailyTotalPay / dayData.revenue) * 100).toFixed(0) : 0;
+                                            const isSunday = idx % 7 === 0;
+                                            const sundayKey = isSunday ? `${py}-${pm.toString().padStart(2, '0')}-${day.toString().padStart(2, '0')}` : null;
+                                            const holidayEntries = sundayKey ? (holidayPayBySunday[sundayKey] || []) : [];
+                                            const dateStr = `${py}-${pm.toString().padStart(2,'0')}-${day.toString().padStart(2,'0')}`;
+                                            const hasUnseen = isCurrent && unseenDates?.has(dateStr);
+                                            const handleOpenDay = isCurrent ? () => { setEditDayModal(day); onMarkSeen?.(dateStr); } : undefined;
+                                            return (
+                                                <div key={`day-${day}`} className={`cal-cell min-h-[140px] border-b border-r border-gray-100 p-2 relative group ${isCurrent ? 'hover:bg-yellow-50/50 transition cursor-pointer md:cursor-default' : ''}`} onClick={handleOpenDay}>
+                                                    <div className="flex justify-between items-start mb-1">
+                                                        <div className="relative flex items-center">
+                                                            <span className={`text-sm font-bold w-6 h-6 flex items-center justify-center rounded-full ${idx % 7 === 0 ? 'text-red-500' : idx % 7 === 6 ? 'text-blue-500' : 'text-gray-700'}`}>{day}</span>
+                                                            {hasUnseen && <span className="absolute -top-0.5 -right-1 w-2 h-2 bg-red-500 rounded-full"></span>}
+                                                        </div>
+                                                        {isCurrent && (
+                                                            <div className="hidden md:flex opacity-0 group-hover:opacity-100 gap-1 transition" onClick={e => e.stopPropagation()}>
+                                                                <button onClick={handleOpenDay} className="text-xs bg-gray-100 hover:bg-gray-200 text-gray-600 px-2 py-1 rounded shadow-sm">수정</button>
+                                                                <button onClick={() => handleDeleteDay(day)} className="text-xs bg-red-50 hover:bg-red-100 text-red-500 px-1.5 py-1 rounded flex items-center justify-center shadow-sm" title="삭제">
+                                                                    <X className="w-3 h-3" />
+                                                                </button>
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                    <div className="md:hidden space-y-0.5 mt-1">
+                                                        {activeEntries.length > 0 && <div className="text-[9px] text-green-700 font-semibold truncate">{activeEntries.length}명 근무</div>}
+                                                        {dailyTotalPay > 0 && <div className="text-[9px] font-bold text-green-600 truncate">{Math.round(dailyTotalPay/10000)}만원</div>}
+                                                        {holidayEntries.length > 0 && <div className="w-1.5 h-1.5 rounded-full bg-blue-400 inline-block ml-0.5" title="주휴수당 발생"></div>}
+                                                    </div>
+                                                    <div className="hidden md:block space-y-1 mt-2">
+                                                        <div className="text-xs text-gray-600 overflow-hidden">
+                                                            {activeEntries.slice(0, 3).map((e, i) => <div key={i} className="truncate">{e.name}: {fmtHours(e.hours)}</div>)}
+                                                            {activeEntries.length > 3 && <div className="text-gray-400 italic">+{activeEntries.length - 3}명...</div>}
+                                                        </div>
+                                                        {dailyTotalPay > 0 && (
+                                                            <div className="mt-2 pt-1 border-t border-gray-100 border-dashed">
+                                                                <div className="text-xs font-semibold text-green-700">인건비: {formatCurrency(dailyTotalPay)}</div>
+                                                                <div className="text-xs text-gray-500 mt-0.5">매출: {formatCurrency(dayData.revenue || 0)}</div>
+                                                                {dayData.revenue > 0 && <div className="text-[10px] font-medium text-gray-400 mt-0.5">비율: {dailyRatio}%</div>}
+                                                            </div>
+                                                        )}
+                                                        {holidayEntries.length > 0 && (
+                                                            <div className="mt-1 pt-1 border-t border-blue-100 border-dashed">
+                                                                <div className="text-[10px] font-bold text-blue-600 mb-0.5">주휴수당 발생</div>
+                                                                {holidayEntries.map((h, i) => (
+                                                                    <div key={i} className="text-[10px] text-blue-500 truncate">{h.name}: {formatCurrency(h.holidayPay)}</div>
+                                                                ))}
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+                            );
+                        };
+                        const prevY = month === 1 ? year - 1 : year;
+                        const prevM = month === 1 ? 12 : month - 1;
+                        const nextY = month === 12 ? year + 1 : year;
+                        const nextM = month === 12 ? 1 : month + 1;
+                        return (
+                            <div ref={carouselRef} className="overflow-hidden" onTouchStart={handleTouchStart} onTouchMove={handleTouchMove} onTouchEnd={handleTouchEnd}>
+                                <div className="flex" style={{ width: '300%', transform: `translate3d(calc(-33.3333% + ${calDragX}px), 0, 0)`, transition: calTransition ? 'transform 0.25s ease-out' : 'none' }}>
+                                    <div className="w-1/3 flex-shrink-0 pr-2">{renderCalendarPanel(prevY, prevM, false)}</div>
+                                    <div className="w-1/3 flex-shrink-0 px-1">{renderCalendarPanel(year, month, true)}</div>
+                                    <div className="w-1/3 flex-shrink-0 pl-2">{renderCalendarPanel(nextY, nextM, false)}</div>
+                                </div>
+                            </div>
+                        );
+                    })()}
 
                     {isBulkInputOpen && (
                         <BulkInputModal

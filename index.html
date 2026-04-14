@@ -6990,6 +6990,13 @@
                                     }
                                     setMonthlyData(newData);
                                     onImmediateSaveMonthly?.(newData);
+                                    // 해당 월의 미확인 배지 모두 제거
+                                    if (unseenDates && onMarkSeen) {
+                                        const prefix = `${year}-${String(month).padStart(2,'0')}-`;
+                                        unseenDates.forEach(d => {
+                                            if (typeof d === 'string' && d.startsWith(prefix)) onMarkSeen(d);
+                                        });
+                                    }
                                     // 새로고침 시 직원 제출 데이터가 복원되는 버그 수정:
                                     // onSnapshot 리스너가 submissions를 재적용하지 않도록 해당 월 데이터 삭제
                                     if (workspaceId) {

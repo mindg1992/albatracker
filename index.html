@@ -111,7 +111,7 @@
     <!-- 버전 체크: 앱 버전이 바뀌면 캐시된 구버전을 쓰는 사용자도 강제 새로고침 -->
     <script>
         (function() {
-            var APP_VERSION = 'v2.1';
+            var APP_VERSION = 'v2.2';
             var KEY = 'at_app_version';
             var stored = localStorage.getItem(KEY);
             localStorage.setItem(KEY, APP_VERSION);
@@ -8125,6 +8125,13 @@
                 XLSX.writeFile(wb, `${year}.${String(month).padStart(2,'0')}. 급여명세.xlsx`);
             };
 
+            const prevY = month === 1 ? year - 1 : year;
+            const prevM = month === 1 ? 12 : month - 1;
+            const nextY = month === 12 ? year + 1 : year;
+            const nextM = month === 12 ? 1 : month + 1;
+            const prevPayrollList = useMemo(() => computePayrollList(prevY, prevM), [prevY, prevM, monthlyData, employees, workspaceInfo]);
+            const nextPayrollList = useMemo(() => computePayrollList(nextY, nextM), [nextY, nextM, monthlyData, employees, workspaceInfo]);
+
             return (
                 <>
                 <div className="space-y-4 max-w-full mx-auto">
@@ -8151,8 +8158,7 @@
                     </div>
 
                     {(() => {
-                        const renderPayrollPanel = (py, pm, isCurrent) => {
-                            const panelList = isCurrent ? payrollList : computePayrollList(py, pm);
+                        const renderPayrollPanel = (panelList, py, pm, isCurrent) => {
                             const panelGrandTotal = panelList.reduce((sum, item) => sum + item.totalPay + item.holidayPay, 0);
                             const panelGrandTotalFinal = panelList.reduce((sum, item) => sum + item.finalPay, 0);
                             return (
@@ -8374,16 +8380,12 @@
                                 </div>
                             );
                         };
-                        const prevY = month === 1 ? year - 1 : year;
-                        const prevM = month === 1 ? 12 : month - 1;
-                        const nextY = month === 12 ? year + 1 : year;
-                        const nextM = month === 12 ? 1 : month + 1;
                         return (
                             <div ref={payrollCarouselRef} className="overflow-hidden" style={{ touchAction: 'pan-y' }} onTouchStart={handlePayrollTouchStart} onTouchMove={handlePayrollTouchMove} onTouchEnd={handlePayrollTouchEnd}>
                                 <div className="flex" style={{ width: '300%', transform: `translate3d(calc(-33.3333% + ${payrollDragX}px), 0, 0)`, transition: payrollTransition ? 'transform 0.25s ease-out' : 'none' }}>
-                                    <div className="w-1/3 flex-shrink-0 pr-2">{renderPayrollPanel(prevY, prevM, false)}</div>
-                                    <div className="w-1/3 flex-shrink-0 px-1">{renderPayrollPanel(year, month, true)}</div>
-                                    <div className="w-1/3 flex-shrink-0 pl-2">{renderPayrollPanel(nextY, nextM, false)}</div>
+                                    <div className="w-1/3 flex-shrink-0 pr-2">{renderPayrollPanel(prevPayrollList, prevY, prevM, false)}</div>
+                                    <div className="w-1/3 flex-shrink-0 px-1">{renderPayrollPanel(payrollList, year, month, true)}</div>
+                                    <div className="w-1/3 flex-shrink-0 pl-2">{renderPayrollPanel(nextPayrollList, nextY, nextM, false)}</div>
                                 </div>
                             </div>
                         );

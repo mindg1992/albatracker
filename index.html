@@ -7721,17 +7721,14 @@
             const payrollTouchStartY = useRef(null);
             const payrollIsHorizontal = useRef(false);
             const payrollCarouselRef = useRef(null);
-            const payrollStripRef = useRef(null);
-            const setStripTransform = (dx, withTransition) => {
-                if (!payrollStripRef.current) return;
-                payrollStripRef.current.style.transition = withTransition ? 'transform 0.25s ease-out' : 'none';
-                payrollStripRef.current.style.setProperty('--drag-x', `${dx}px`);
-            };
+            const [payrollDragX, setPayrollDragX] = useState(0);
+            const [payrollTransition, setPayrollTransition] = useState(false);
             const handlePayrollTouchStart = (e) => {
                 payrollTouchStartX.current = e.touches[0].clientX;
                 payrollTouchStartY.current = e.touches[0].clientY;
                 payrollIsHorizontal.current = false;
-                setStripTransform(0, false);
+                setPayrollTransition(false);
+                setPayrollDragX(0);
             };
             const handlePayrollTouchMove = (e) => {
                 if (payrollTouchStartX.current === null) return;
@@ -7742,23 +7739,27 @@
                     payrollIsHorizontal.current = Math.abs(dx) > Math.abs(dy);
                     if (!payrollIsHorizontal.current) return;
                 }
-                setStripTransform(dx, false);
+                setPayrollDragX(dx);
             };
             const handlePayrollTouchEnd = (e) => {
                 if (payrollTouchStartX.current === null) return;
                 const dx = e.changedTouches[0].clientX - payrollTouchStartX.current;
                 const wasHorizontal = payrollIsHorizontal.current;
                 payrollTouchStartX.current = null;
-                if (!wasHorizontal) { setStripTransform(0, false); return; }
+                if (!wasHorizontal) { setPayrollDragX(0); return; }
                 const w = payrollCarouselRef.current?.clientWidth || window.innerWidth;
                 if (Math.abs(dx) > 80) {
-                    setStripTransform(dx < 0 ? -w : w, true);
+                    setPayrollTransition(true);
+                    setPayrollDragX(dx < 0 ? -w : w);
                     setTimeout(() => {
-                        setStripTransform(0, false);
+                        setPayrollTransition(false);
+                        setPayrollDragX(0);
                         if (dx < 0) nextMonth(); else prevMonth();
                     }, 260);
                 } else {
-                    setStripTransform(0, true);
+                    setPayrollTransition(true);
+                    setPayrollDragX(0);
+                    setTimeout(() => setPayrollTransition(false), 220);
                 }
             };
 
@@ -8379,7 +8380,7 @@
                         const nextM = month === 12 ? 1 : month + 1;
                         return (
                             <div ref={payrollCarouselRef} className="overflow-hidden" style={{ touchAction: 'pan-y' }} onTouchStart={handlePayrollTouchStart} onTouchMove={handlePayrollTouchMove} onTouchEnd={handlePayrollTouchEnd}>
-                                <div ref={payrollStripRef} className="flex carousel-strip" style={{ width: '300%' }}>
+                                <div className="flex" style={{ width: '300%', transform: `translate3d(calc(-33.3333% + ${payrollDragX}px), 0, 0)`, transition: payrollTransition ? 'transform 0.25s ease-out' : 'none' }}>
                                     <div className="w-1/3 flex-shrink-0 pr-2">{renderPayrollPanel(prevY, prevM, false)}</div>
                                     <div className="w-1/3 flex-shrink-0 px-1">{renderPayrollPanel(year, month, true)}</div>
                                     <div className="w-1/3 flex-shrink-0 pl-2">{renderPayrollPanel(nextY, nextM, false)}</div>

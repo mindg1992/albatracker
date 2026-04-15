@@ -91,8 +91,8 @@
         .slide-in-left  { animation: slideInLeft  0.28s ease-out; }
         .slide-in-right { animation: slideInRight 0.28s ease-out; }
 
-        /* Carousel strip — React가 transform을 덮어쓰지 않도록 CSS 변수로 제어 */
-        .carousel-strip { transform: translate3d(calc(-33.3333% + var(--drag-x, 0px)), 0, 0); }
+        /* Carousel strip — React가 transform을 덮어쓰지 않도록 클래스로 초기값 + ref로 inline override */
+        .carousel-strip { transform: translate3d(-33.3333%, 0, 0); will-change: transform; }
 
     </style>
 </head>
@@ -7721,14 +7721,24 @@
             const payrollTouchStartY = useRef(null);
             const payrollIsHorizontal = useRef(false);
             const payrollCarouselRef = useRef(null);
-            const [payrollDragX, setPayrollDragX] = useState(0);
-            const [payrollTransition, setPayrollTransition] = useState(false);
+            const payrollStripRef = useRef(null);
+            const setPayrollStrip = (dx, withTransition) => {
+                const el = payrollStripRef.current;
+                if (!el) return;
+                el.style.transition = withTransition ? 'transform 0.25s ease-out' : 'none';
+                el.style.transform = `translate3d(calc(-33.3333% + ${dx}px), 0, 0)`;
+            };
+            const clearPayrollStrip = () => {
+                const el = payrollStripRef.current;
+                if (!el) return;
+                el.style.transition = 'none';
+                el.style.transform = '';
+            };
             const handlePayrollTouchStart = (e) => {
                 payrollTouchStartX.current = e.touches[0].clientX;
                 payrollTouchStartY.current = e.touches[0].clientY;
                 payrollIsHorizontal.current = false;
-                setPayrollTransition(false);
-                setPayrollDragX(0);
+                clearPayrollStrip();
             };
             const handlePayrollTouchMove = (e) => {
                 if (payrollTouchStartX.current === null) return;
@@ -7739,27 +7749,24 @@
                     payrollIsHorizontal.current = Math.abs(dx) > Math.abs(dy);
                     if (!payrollIsHorizontal.current) return;
                 }
-                setPayrollDragX(dx);
+                setPayrollStrip(dx, false);
             };
             const handlePayrollTouchEnd = (e) => {
                 if (payrollTouchStartX.current === null) return;
                 const dx = e.changedTouches[0].clientX - payrollTouchStartX.current;
                 const wasHorizontal = payrollIsHorizontal.current;
                 payrollTouchStartX.current = null;
-                if (!wasHorizontal) { setPayrollDragX(0); return; }
+                if (!wasHorizontal) { clearPayrollStrip(); return; }
                 const w = payrollCarouselRef.current?.clientWidth || window.innerWidth;
                 if (Math.abs(dx) > 80) {
-                    setPayrollTransition(true);
-                    setPayrollDragX(dx < 0 ? -w : w);
+                    setPayrollStrip(dx < 0 ? -w : w, true);
                     setTimeout(() => {
-                        setPayrollTransition(false);
-                        setPayrollDragX(0);
+                        clearPayrollStrip();
                         if (dx < 0) nextMonth(); else prevMonth();
                     }, 260);
                 } else {
-                    setPayrollTransition(true);
-                    setPayrollDragX(0);
-                    setTimeout(() => setPayrollTransition(false), 220);
+                    setPayrollStrip(0, true);
+                    setTimeout(clearPayrollStrip, 260);
                 }
             };
 
@@ -8382,7 +8389,7 @@
                         };
                         return (
                             <div ref={payrollCarouselRef} className="overflow-hidden" style={{ touchAction: 'pan-y' }} onTouchStart={handlePayrollTouchStart} onTouchMove={handlePayrollTouchMove} onTouchEnd={handlePayrollTouchEnd}>
-                                <div className="flex" style={{ width: '300%', transform: `translate3d(calc(-33.3333% + ${payrollDragX}px), 0, 0)`, transition: payrollTransition ? 'transform 0.25s ease-out' : 'none' }}>
+                                <div ref={payrollStripRef} className="flex carousel-strip" style={{ width: '300%' }}>
                                     <div className="w-1/3 flex-shrink-0 pr-2">{renderPayrollPanel(prevPayrollList, prevY, prevM, false)}</div>
                                     <div className="w-1/3 flex-shrink-0 px-1">{renderPayrollPanel(payrollList, year, month, true)}</div>
                                     <div className="w-1/3 flex-shrink-0 pl-2">{renderPayrollPanel(nextPayrollList, nextY, nextM, false)}</div>

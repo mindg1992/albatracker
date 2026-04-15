@@ -7716,14 +7716,14 @@
             const payrollTouchStartX = useRef(null);
             const payrollTouchStartY = useRef(null);
             const payrollIsHorizontal = useRef(false);
+            const payrollCarouselRef = useRef(null);
             const [payrollDragX, setPayrollDragX] = useState(0);
-            const [payrollSnapping, setPayrollSnapping] = useState(false);
-            const [payrollSlideAnim, setPayrollSlideAnim] = useState({ key: 0, dir: '' });
+            const [payrollTransition, setPayrollTransition] = useState(false);
             const handlePayrollTouchStart = (e) => {
                 payrollTouchStartX.current = e.touches[0].clientX;
                 payrollTouchStartY.current = e.touches[0].clientY;
                 payrollIsHorizontal.current = false;
-                setPayrollSnapping(false);
+                setPayrollTransition(false);
                 setPayrollDragX(0);
             };
             const handlePayrollTouchMove = (e) => {
@@ -7743,20 +7743,26 @@
                 const wasHorizontal = payrollIsHorizontal.current;
                 payrollTouchStartX.current = null;
                 if (!wasHorizontal) { setPayrollDragX(0); return; }
+                const w = payrollCarouselRef.current?.clientWidth || window.innerWidth;
                 if (Math.abs(dx) > 80) {
-                    setPayrollDragX(0); setPayrollSnapping(false);
-                    if (dx < 0) { nextMonth(); setPayrollSlideAnim(s => ({ key: s.key+1, dir: 'slide-in-left' })); }
-                    else        { prevMonth(); setPayrollSlideAnim(s => ({ key: s.key+1, dir: 'slide-in-right' })); }
+                    setPayrollTransition(true);
+                    setPayrollDragX(dx < 0 ? -w : w);
+                    setTimeout(() => {
+                        setPayrollTransition(false);
+                        setPayrollDragX(0);
+                        if (dx < 0) nextMonth(); else prevMonth();
+                    }, 260);
                 } else {
-                    setPayrollSnapping(true); setPayrollDragX(0);
-                    setTimeout(() => setPayrollSnapping(false), 220);
+                    setPayrollTransition(true);
+                    setPayrollDragX(0);
+                    setTimeout(() => setPayrollTransition(false), 220);
                 }
             };
 
-            const payrollList = useMemo(() => {
+            const computePayrollList = (py, pm) => {
+                const pmKey = `${py}-${pm.toString().padStart(2,'0')}`;
                 const list = {};
-                const monthData = monthlyData[monthKey]?.days || {};
-
+                const monthData = monthlyData[pmKey]?.days || {};
                 Object.values(monthData).forEach(day => {
                     Object.entries(day.entries || {}).forEach(([empId, data]) => {
                         if (!list[empId]) {
@@ -7770,11 +7776,7 @@
                                 bank: currentEmp?.bank || '-',
                                 wage: currentEmp?.wage || data.wage || MIN_WAGE,
                                 memos: currentEmp?.memos || [],
-                                totalPay: 0,
-                                totalHours: 0,
-                                holidayPay: 0,
-                                holidayWeeks: [],
-                                wageBreakdown: {}
+                                totalPay: 0, totalHours: 0, holidayPay: 0, holidayWeeks: [], wageBreakdown: {}
                             };
                         }
                         list[empId].totalPay += data.pay;
@@ -7786,11 +7788,10 @@
                         list[empId].wageBreakdown[w].days += 1;
                     });
                 });
-
                 const holidayBySunday = calcHolidayPayBySunday(monthlyData, employees);
                 Object.entries(holidayBySunday).forEach(([sundayStr, weekData]) => {
                     const [sy, sm] = sundayStr.split('-').map(Number);
-                    if (sy !== year || sm !== month) return;
+                    if (sy !== py || sm !== pm) return;
                     weekData.forEach(({ empId, holidayPay, name, weeklyHours, weeklyPay }) => {
                         if (!list[empId]) {
                             const currentEmp = employees.find(e => e.id.toString() === empId);
@@ -7803,15 +7804,13 @@
                                 bank: currentEmp?.bank || '-',
                                 wage: currentEmp?.wage || MIN_WAGE,
                                 memos: currentEmp?.memos || [],
-                                totalPay: 0, totalHours: 0, holidayPay: 0, holidayWeeks: [],
-                                wageBreakdown: {}
+                                totalPay: 0, totalHours: 0, holidayPay: 0, holidayWeeks: [], wageBreakdown: {}
                             };
                         }
                         list[empId].holidayPay += holidayPay;
                         list[empId].holidayWeeks.push({ weeklyHours, weeklyPay, holidayPay });
                     });
                 });
-
                 const result = Object.values(list).sort((a, b) => a.displayId - b.displayId);
                 result.forEach(item => {
                     const emp = employees.find(e => e.id.toString() === item.id);
@@ -7823,7 +7822,8 @@
                     item.finalPay = gross - item.insuranceDeduction;
                 });
                 return result;
-            }, [monthKey, monthlyData, employees, year, month, workspaceInfo]);
+            };
+            const payrollList = useMemo(() => computePayrollList(year, month), [monthKey, monthlyData, employees, year, month, workspaceInfo]);
 
             const grandTotal = payrollList.reduce((sum, item) => sum + item.totalPay + item.holidayPay, 0);
             const grandTotalFinal = payrollList.reduce((sum, item) => sum + item.finalPay, 0);
@@ -8123,7 +8123,7 @@
 
             return (
                 <>
-                <div key={payrollSlideAnim.key} className={`space-y-4 max-w-full mx-auto ${payrollSlideAnim.dir}`} style={(payrollDragX !== 0 || payrollSnapping) ? { transform: `translateX(${payrollDragX}px)`, transition: payrollSnapping ? 'transform 0.2s ease-out' : 'none' } : undefined} onTouchStart={handlePayrollTouchStart} onTouchMove={handlePayrollTouchMove} onTouchEnd={handlePayrollTouchEnd}>
+                <div className="space-y-4 max-w-full mx-auto">
                     <div className="flex flex-col md:flex-row justify-center items-center bg-white p-4 md:p-5 rounded-2xl shadow-sm border border-gray-200 gap-3 md:gap-4">
                         <div className="flex items-center gap-2 md:gap-4 shrink-0">
                             <button onClick={prevMonth} className="p-2 hover:bg-gray-100 rounded-full transition"><ChevronLeft className="w-5 h-5 md:w-6 md:h-6" /></button>
@@ -8146,219 +8146,244 @@
                         )}
                     </div>
 
-                    <div className="md:hidden space-y-3">
-                        {payrollList.length === 0 ? (
-                            <div className="bg-white rounded-2xl border border-gray-200 p-8 text-center text-gray-500 min-h-[calc(100vh-280px)] flex items-center justify-center">해당 월의 인건비 지급 내역이 없습니다.</div>
-                        ) : (
-                            <>
-                                {payrollList.map(item => (
-                                    <div key={item.id} className="bg-white rounded-2xl shadow-sm border border-gray-200 p-5">
-                                        <div className="flex justify-between items-start mb-4">
-                                            <div>
-                                                <span className="text-xs font-bold text-yellow-800 bg-yellow-100 px-2.5 py-1 rounded-md">
-                                                    {item.displayId === 99999 ? '(삭제됨)' : `No. ${item.displayId}`}
-                                                </span>
-                                                <h3 className="text-lg font-bold text-gray-800 mt-2">{item.name}</h3>
-                                            </div>
-                                            <div className="text-right">
-                                                <div className="text-xl font-black text-purple-700">{formatCurrency(item.insuranceRate > 0 ? item.finalPay : item.totalPay + item.holidayPay)}</div>
-                                                <div className="text-xs font-medium text-gray-400 mt-0.5">총 지급액</div>
-                                            </div>
-                                        </div>
-                                        <div className="border-t border-gray-100 pt-4 space-y-2">
-                                            {(() => {
-                                                const wages = Object.entries(item.wageBreakdown || {}).sort((a, b) => Number(a[0]) - Number(b[0]));
-                                                if (wages.length <= 1) {
-                                                    return (
-                                                        <div className="grid grid-cols-3 gap-2 text-center text-sm">
+                    {(() => {
+                        const renderPayrollPanel = (py, pm, isCurrent) => {
+                            const panelList = isCurrent ? payrollList : computePayrollList(py, pm);
+                            const panelGrandTotal = panelList.reduce((sum, item) => sum + item.totalPay + item.holidayPay, 0);
+                            const panelGrandTotalFinal = panelList.reduce((sum, item) => sum + item.finalPay, 0);
+                            return (
+                                <div className="space-y-4 w-full flex-shrink-0">
+                                    <div className="md:hidden space-y-3">
+                                        {panelList.length === 0 ? (
+                                            <div className="bg-white rounded-2xl border border-gray-200 p-8 text-center text-gray-500 min-h-[calc(100vh-280px)] flex items-center justify-center">해당 월의 인건비 지급 내역이 없습니다.</div>
+                                        ) : (
+                                            <>
+                                                {panelList.map(item => (
+                                                    <div key={item.id} className="bg-white rounded-2xl shadow-sm border border-gray-200 p-5">
+                                                        <div className="flex justify-between items-start mb-4">
                                                             <div>
-                                                                <div className="text-gray-400 text-xs mb-1 font-medium">시급</div>
-                                                                <div className="font-bold text-gray-700">{formatCurrency(wages[0]?.[0] || item.wage)}</div>
+                                                                <span className="text-xs font-bold text-yellow-800 bg-yellow-100 px-2.5 py-1 rounded-md">
+                                                                    {item.displayId === 99999 ? '(삭제됨)' : `No. ${item.displayId}`}
+                                                                </span>
+                                                                <h3 className="text-lg font-bold text-gray-800 mt-2">{item.name}</h3>
                                                             </div>
-                                                            <div>
-                                                                <div className="text-gray-400 text-xs mb-1 font-medium">근무시간</div>
-                                                                <div className="font-bold text-gray-700">{fmtHours(item.totalHours) || '0시간'}</div>
-                                                            </div>
-                                                            <div>
-                                                                <div className="text-gray-400 text-xs mb-1 font-medium">순수급여</div>
-                                                                <div className="font-bold text-green-600">{formatCurrency(item.totalPay)}</div>
+                                                            <div className="text-right">
+                                                                <div className="text-xl font-black text-purple-700">{formatCurrency(item.insuranceRate > 0 ? item.finalPay : item.totalPay + item.holidayPay)}</div>
+                                                                <div className="text-xs font-medium text-gray-400 mt-0.5">총 지급액</div>
                                                             </div>
                                                         </div>
-                                                    );
-                                                }
-                                                return (
-                                                    <div className="space-y-2 text-sm">
-                                                        {wages.map(([wage, info]) => (
-                                                            <div key={wage} className="flex justify-between items-center bg-gray-50 rounded-lg px-3 py-2">
-                                                                <div>
-                                                                    <span className="font-bold text-gray-700">{formatCurrency(wage)}</span>
-                                                                    <span className="text-xs text-gray-400 ml-1">× {info.days}일 ({fmtHours(info.hours)})</span>
-                                                                </div>
-                                                                <span className="font-bold text-green-600">{formatCurrency(info.pay)}</span>
-                                                            </div>
-                                                        ))}
-                                                        <div className="flex justify-between items-center px-3">
-                                                            <span className="text-xs font-bold text-gray-500">순수급여 합계</span>
-                                                            <span className="font-bold text-green-600">{formatCurrency(item.totalPay)}</span>
+                                                        <div className="border-t border-gray-100 pt-4 space-y-2">
+                                                            {(() => {
+                                                                const wages = Object.entries(item.wageBreakdown || {}).sort((a, b) => Number(a[0]) - Number(b[0]));
+                                                                if (wages.length <= 1) {
+                                                                    return (
+                                                                        <div className="grid grid-cols-3 gap-2 text-center text-sm">
+                                                                            <div>
+                                                                                <div className="text-gray-400 text-xs mb-1 font-medium">시급</div>
+                                                                                <div className="font-bold text-gray-700">{formatCurrency(wages[0]?.[0] || item.wage)}</div>
+                                                                            </div>
+                                                                            <div>
+                                                                                <div className="text-gray-400 text-xs mb-1 font-medium">근무시간</div>
+                                                                                <div className="font-bold text-gray-700">{fmtHours(item.totalHours) || '0시간'}</div>
+                                                                            </div>
+                                                                            <div>
+                                                                                <div className="text-gray-400 text-xs mb-1 font-medium">순수급여</div>
+                                                                                <div className="font-bold text-green-600">{formatCurrency(item.totalPay)}</div>
+                                                                            </div>
+                                                                        </div>
+                                                                    );
+                                                                }
+                                                                return (
+                                                                    <div className="space-y-2 text-sm">
+                                                                        {wages.map(([wage, info]) => (
+                                                                            <div key={wage} className="flex justify-between items-center bg-gray-50 rounded-lg px-3 py-2">
+                                                                                <div>
+                                                                                    <span className="font-bold text-gray-700">{formatCurrency(wage)}</span>
+                                                                                    <span className="text-xs text-gray-400 ml-1">× {info.days}일 ({fmtHours(info.hours)})</span>
+                                                                                </div>
+                                                                                <span className="font-bold text-green-600">{formatCurrency(info.pay)}</span>
+                                                                            </div>
+                                                                        ))}
+                                                                        <div className="flex justify-between items-center px-3">
+                                                                            <span className="text-xs font-bold text-gray-500">순수급여 합계</span>
+                                                                            <span className="font-bold text-green-600">{formatCurrency(item.totalPay)}</span>
+                                                                        </div>
+                                                                    </div>
+                                                                );
+                                                            })()}
                                                         </div>
-                                                    </div>
-                                                );
-                                            })()}
-                                        </div>
-                                        {item.holidayPay > 0 && (
-                                            <div className="mt-3 pt-3 border-t border-blue-100 flex justify-between items-center bg-blue-50/50 -mx-5 px-5 pb-3">
-                                                <span className="text-xs text-blue-600 font-bold">주휴수당 포함</span>
-                                                <span className="text-sm font-bold text-blue-600">{formatCurrency(item.holidayPay)}</span>
-                                            </div>
-                                        )}
-                                        {item.insuranceRate > 0 && (
-                                            <div className="mt-3 pt-3 border-t border-orange-100 flex justify-between items-center bg-orange-50/50 -mx-5 px-5 pb-3">
-                                                <span className="text-xs text-orange-600 font-bold">급여 공제 (-{item.insuranceRate}%)</span>
-                                                <span className="text-sm font-bold text-orange-600">-{formatCurrency(item.insuranceDeduction)}</span>
-                                            </div>
-                                        )}
-                                        {workspaceId && item.displayId !== 99999 && (() => {
-                                            const emp = employees.find(e => e.id.toString() === item.id);
-                                            if (!emp?.empUid) return null;
-                                            const docId = `${item.id}_${year}_${month}`;
-                                            const isSent = !!sentPayslips[docId];
-                                            return (
-                                                <div className="mt-3 pt-3 border-t border-gray-100">
-                                                    <button onClick={() => handleOpenSend(item, isSent ? sentPayslips[docId] : null)}
-                                                        className={`w-full flex items-center justify-center gap-2 py-2 rounded-xl text-sm font-bold transition border ${isSent ? 'bg-gray-100 hover:bg-gray-200 text-gray-600 border-gray-300' : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-200'}`}>
-                                                        <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
-                                                        {isSent ? '발송완료 (재발송)' : '급여명세서 발송'}
-                                                    </button>
-                                                </div>
-                                            );
-                                        })()}
-                                    </div>
-                                ))}
-                                <div className="bg-purple-50 rounded-2xl border border-purple-200 p-5 flex justify-between items-center shadow-sm">
-                                    <span className="font-bold text-gray-800">총 지급 예정액</span>
-                                    <span className="text-2xl font-black text-purple-700">{formatCurrency(payrollList.some(i => i.insuranceRate > 0) ? grandTotalFinal : grandTotal)}</span>
-                                </div>
-                            </>
-                        )}
-                    </div>
-
-                    <div className="hidden md:block bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
-                        <div className="overflow-x-auto">
-                            <table className="w-full text-center border-collapse">
-                                <thead className="bg-gray-50 border-b">
-                                    <tr>
-                                        <th className="px-4 py-4 font-bold text-gray-600 whitespace-nowrap">구분번호</th>
-                                        <th className="px-4 py-4 font-bold text-gray-600 whitespace-nowrap">이름</th>
-                                        <th className="px-4 py-4 font-bold text-gray-600 whitespace-nowrap">시급</th>
-                                        <th className="px-4 py-4 font-bold text-gray-600 whitespace-nowrap">이번달 근무시간</th>
-                                        <th className="px-4 py-4 font-bold text-gray-600 whitespace-nowrap">순수 급여</th>
-                                        <th className="px-4 py-4 font-bold text-blue-600 whitespace-nowrap">주휴수당</th>
-                                        {payrollList.some(i => i.insuranceRate > 0) && <th className="px-4 py-4 font-bold text-orange-600 whitespace-nowrap">급여 공제</th>}
-                                        <th className="px-4 py-4 font-bold text-purple-600 whitespace-nowrap">{month}월 총 지급액</th>
-                                        {workspaceId && <th className="px-4 py-4 font-bold text-emerald-600 whitespace-nowrap">급여명세서</th>}
-                                    </tr>
-                                </thead>
-                                <tbody className="divide-y divide-gray-100">
-                                    {payrollList.length === 0 ? (
-                                        <tr><td colSpan={workspaceId ? 9 : 8} className="p-10 text-center text-gray-500 font-medium">해당 월의 인건비 지급 내역이 없습니다.</td></tr>
-                                    ) : (
-                                        payrollList.map(item => (
-                                            <tr key={item.id} className="hover:bg-gray-50 transition">
-                                                <td className="px-4 py-4 text-gray-600 font-medium whitespace-nowrap">
-                                                    {item.displayId === 99999 ? '- (삭제됨)' : `No. ${item.displayId}`}
-                                                </td>
-                                                <td className="px-4 py-4 font-bold text-gray-800 whitespace-nowrap">{item.name}</td>
-                                                <td className="px-4 py-4 text-gray-600 font-medium whitespace-nowrap">
-                                                    {(() => {
-                                                        const wages = Object.keys(item.wageBreakdown || {});
-                                                        if (wages.length <= 1) return formatCurrency(wages[0] || item.wage);
-                                                        return wages.sort((a, b) => Number(a) - Number(b)).map((w, i) => (
-                                                            <div key={i} className="text-xs">{formatCurrency(w)} <span className="text-gray-400">({item.wageBreakdown[w].days}일)</span></div>
-                                                        ));
-                                                    })()}
-                                                </td>
-                                                <td className="px-4 py-4 text-gray-600 font-bold whitespace-nowrap">{fmtHours(item.totalHours) || '0시간'}</td>
-                                                <td className="px-4 py-4 font-bold text-green-600 whitespace-nowrap">
-                                                    {(() => {
-                                                        const wages = Object.entries(item.wageBreakdown || {});
-                                                        if (wages.length <= 1) {
-                                                            return (
-                                                                <>
-                                                                    <div className="text-[11px] text-gray-400 font-normal">{formatCurrency(wages[0]?.[0] || item.wage)} × {fmtHours(item.totalHours)}</div>
-                                                                    <div>{formatCurrency(item.totalPay)}</div>
-                                                                </>
-                                                            );
-                                                        }
-                                                        return (
-                                                            <>
-                                                                {wages.sort((a, b) => Number(a[0]) - Number(b[0])).map(([w, info], i) => (
-                                                                    <div key={i} className="text-[11px] text-gray-400 font-normal">{formatCurrency(w)} × {fmtHours(info.hours)} = {formatCurrency(info.pay)}</div>
-                                                                ))}
-                                                                <div>{formatCurrency(item.totalPay)}</div>
-                                                            </>
-                                                        );
-                                                    })()}
-                                                </td>
-                                                <td className="px-4 py-4 font-bold text-blue-600 whitespace-nowrap">
-                                                    {item.holidayPay > 0 ? (
-                                                        <>
-                                                            {item.holidayWeeks.length === 1 ? (
-                                                                <div className="text-[11px] text-gray-400 font-normal">{formatCurrency(item.holidayWeeks[0].weeklyPay || 0)}÷5</div>
-                                                            ) : (
-                                                                <div className="text-[11px] text-gray-400 font-normal">
-                                                                    {item.holidayWeeks.map((w, i) => <div key={i}>{i + 1}주: {formatCurrency(w.weeklyPay || 0)}÷5</div>)}
-                                                                </div>
-                                                            )}
-                                                            <div>{formatCurrency(item.holidayPay)}</div>
-                                                        </>
-                                                    ) : <span className="text-gray-300 font-normal">-</span>}
-                                                </td>
-                                                {payrollList.some(i => i.insuranceRate > 0) && (
-                                                    <td className="px-4 py-4 font-bold text-orange-600 whitespace-nowrap">
-                                                        {item.insuranceRate > 0 ? (
-                                                            <>
-                                                                <div className="text-[11px] text-gray-400 font-normal">-{item.insuranceRate}%</div>
-                                                                <div>-{formatCurrency(item.insuranceDeduction)}</div>
-                                                            </>
-                                                        ) : <span className="text-gray-300 font-normal">-</span>}
-                                                    </td>
-                                                )}
-                                                <td className="px-4 py-4 font-black text-purple-700 whitespace-nowrap">
-                                                    {formatCurrency(item.insuranceRate > 0 ? item.finalPay : item.totalPay + item.holidayPay)}
-                                                </td>
-                                                {workspaceId && (
-                                                    <td className="px-4 py-4 text-center">
-                                                        {(() => {
-                                                            if (item.displayId === 99999) return <span className="text-gray-300 text-xs">-</span>;
+                                                        {item.holidayPay > 0 && (
+                                                            <div className="mt-3 pt-3 border-t border-blue-100 flex justify-between items-center bg-blue-50/50 -mx-5 px-5 pb-3">
+                                                                <span className="text-xs text-blue-600 font-bold">주휴수당 포함</span>
+                                                                <span className="text-sm font-bold text-blue-600">{formatCurrency(item.holidayPay)}</span>
+                                                            </div>
+                                                        )}
+                                                        {item.insuranceRate > 0 && (
+                                                            <div className="mt-3 pt-3 border-t border-orange-100 flex justify-between items-center bg-orange-50/50 -mx-5 px-5 pb-3">
+                                                                <span className="text-xs text-orange-600 font-bold">급여 공제 (-{item.insuranceRate}%)</span>
+                                                                <span className="text-sm font-bold text-orange-600">-{formatCurrency(item.insuranceDeduction)}</span>
+                                                            </div>
+                                                        )}
+                                                        {isCurrent && workspaceId && item.displayId !== 99999 && (() => {
                                                             const emp = employees.find(e => e.id.toString() === item.id);
-                                                            if (!emp?.empUid) return <span className="text-gray-300 text-xs">-</span>;
-                                                            const docId = `${item.id}_${year}_${month}`;
+                                                            if (!emp?.empUid) return null;
+                                                            const docId = `${item.id}_${py}_${pm}`;
                                                             const isSent = !!sentPayslips[docId];
                                                             return (
-                                                                <button onClick={() => handleOpenSend(item, isSent ? sentPayslips[docId] : null)}
-                                                                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition whitespace-nowrap border ${isSent ? 'bg-gray-100 hover:bg-gray-200 text-gray-600 border-gray-300' : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-200'}`}>
-                                                                    {isSent ? '발송완료' : '발송'}
-                                                                </button>
+                                                                <div className="mt-3 pt-3 border-t border-gray-100">
+                                                                    <button onClick={() => handleOpenSend(item, isSent ? sentPayslips[docId] : null)}
+                                                                        className={`w-full flex items-center justify-center gap-2 py-2 rounded-xl text-sm font-bold transition border ${isSent ? 'bg-gray-100 hover:bg-gray-200 text-gray-600 border-gray-300' : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-200'}`}>
+                                                                        <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+                                                                        {isSent ? '발송완료 (재발송)' : '급여명세서 발송'}
+                                                                    </button>
+                                                                </div>
                                                             );
                                                         })()}
-                                                    </td>
+                                                    </div>
+                                                ))}
+                                                <div className="bg-purple-50 rounded-2xl border border-purple-200 p-5 flex justify-between items-center shadow-sm">
+                                                    <span className="font-bold text-gray-800">총 지급 예정액</span>
+                                                    <span className="text-2xl font-black text-purple-700">{formatCurrency(panelList.some(i => i.insuranceRate > 0) ? panelGrandTotalFinal : panelGrandTotal)}</span>
+                                                </div>
+                                            </>
+                                        )}
+                                    </div>
+
+                                    <div className="hidden md:block bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
+                                        <div className="overflow-x-auto">
+                                            <table className="w-full text-center border-collapse">
+                                                <thead className="bg-gray-50 border-b">
+                                                    <tr>
+                                                        <th className="px-4 py-4 font-bold text-gray-600 whitespace-nowrap">구분번호</th>
+                                                        <th className="px-4 py-4 font-bold text-gray-600 whitespace-nowrap">이름</th>
+                                                        <th className="px-4 py-4 font-bold text-gray-600 whitespace-nowrap">시급</th>
+                                                        <th className="px-4 py-4 font-bold text-gray-600 whitespace-nowrap">이번달 근무시간</th>
+                                                        <th className="px-4 py-4 font-bold text-gray-600 whitespace-nowrap">순수 급여</th>
+                                                        <th className="px-4 py-4 font-bold text-blue-600 whitespace-nowrap">주휴수당</th>
+                                                        {panelList.some(i => i.insuranceRate > 0) && <th className="px-4 py-4 font-bold text-orange-600 whitespace-nowrap">급여 공제</th>}
+                                                        <th className="px-4 py-4 font-bold text-purple-600 whitespace-nowrap">{pm}월 총 지급액</th>
+                                                        {workspaceId && <th className="px-4 py-4 font-bold text-emerald-600 whitespace-nowrap">급여명세서</th>}
+                                                    </tr>
+                                                </thead>
+                                                <tbody className="divide-y divide-gray-100">
+                                                    {panelList.length === 0 ? (
+                                                        <tr><td colSpan={workspaceId ? 9 : 8} className="p-10 text-center text-gray-500 font-medium">해당 월의 인건비 지급 내역이 없습니다.</td></tr>
+                                                    ) : (
+                                                        panelList.map(item => (
+                                                            <tr key={item.id} className="hover:bg-gray-50 transition">
+                                                                <td className="px-4 py-4 text-gray-600 font-medium whitespace-nowrap">
+                                                                    {item.displayId === 99999 ? '- (삭제됨)' : `No. ${item.displayId}`}
+                                                                </td>
+                                                                <td className="px-4 py-4 font-bold text-gray-800 whitespace-nowrap">{item.name}</td>
+                                                                <td className="px-4 py-4 text-gray-600 font-medium whitespace-nowrap">
+                                                                    {(() => {
+                                                                        const wages = Object.keys(item.wageBreakdown || {});
+                                                                        if (wages.length <= 1) return formatCurrency(wages[0] || item.wage);
+                                                                        return wages.sort((a, b) => Number(a) - Number(b)).map((w, i) => (
+                                                                            <div key={i} className="text-xs">{formatCurrency(w)} <span className="text-gray-400">({item.wageBreakdown[w].days}일)</span></div>
+                                                                        ));
+                                                                    })()}
+                                                                </td>
+                                                                <td className="px-4 py-4 text-gray-600 font-bold whitespace-nowrap">{fmtHours(item.totalHours) || '0시간'}</td>
+                                                                <td className="px-4 py-4 font-bold text-green-600 whitespace-nowrap">
+                                                                    {(() => {
+                                                                        const wages = Object.entries(item.wageBreakdown || {});
+                                                                        if (wages.length <= 1) {
+                                                                            return (
+                                                                                <>
+                                                                                    <div className="text-[11px] text-gray-400 font-normal">{formatCurrency(wages[0]?.[0] || item.wage)} × {fmtHours(item.totalHours)}</div>
+                                                                                    <div>{formatCurrency(item.totalPay)}</div>
+                                                                                </>
+                                                                            );
+                                                                        }
+                                                                        return (
+                                                                            <>
+                                                                                {wages.sort((a, b) => Number(a[0]) - Number(b[0])).map(([w, info], i) => (
+                                                                                    <div key={i} className="text-[11px] text-gray-400 font-normal">{formatCurrency(w)} × {fmtHours(info.hours)} = {formatCurrency(info.pay)}</div>
+                                                                                ))}
+                                                                                <div>{formatCurrency(item.totalPay)}</div>
+                                                                            </>
+                                                                        );
+                                                                    })()}
+                                                                </td>
+                                                                <td className="px-4 py-4 font-bold text-blue-600 whitespace-nowrap">
+                                                                    {item.holidayPay > 0 ? (
+                                                                        <>
+                                                                            {item.holidayWeeks.length === 1 ? (
+                                                                                <div className="text-[11px] text-gray-400 font-normal">{formatCurrency(item.holidayWeeks[0].weeklyPay || 0)}÷5</div>
+                                                                            ) : (
+                                                                                <div className="text-[11px] text-gray-400 font-normal">
+                                                                                    {item.holidayWeeks.map((w, i) => <div key={i}>{i + 1}주: {formatCurrency(w.weeklyPay || 0)}÷5</div>)}
+                                                                                </div>
+                                                                            )}
+                                                                            <div>{formatCurrency(item.holidayPay)}</div>
+                                                                        </>
+                                                                    ) : <span className="text-gray-300 font-normal">-</span>}
+                                                                </td>
+                                                                {panelList.some(i => i.insuranceRate > 0) && (
+                                                                    <td className="px-4 py-4 font-bold text-orange-600 whitespace-nowrap">
+                                                                        {item.insuranceRate > 0 ? (
+                                                                            <>
+                                                                                <div className="text-[11px] text-gray-400 font-normal">-{item.insuranceRate}%</div>
+                                                                                <div>-{formatCurrency(item.insuranceDeduction)}</div>
+                                                                            </>
+                                                                        ) : <span className="text-gray-300 font-normal">-</span>}
+                                                                    </td>
+                                                                )}
+                                                                <td className="px-4 py-4 font-black text-purple-700 whitespace-nowrap">
+                                                                    {formatCurrency(item.insuranceRate > 0 ? item.finalPay : item.totalPay + item.holidayPay)}
+                                                                </td>
+                                                                {workspaceId && (
+                                                                    <td className="px-4 py-4 text-center">
+                                                                        {(() => {
+                                                                            if (!isCurrent) return <span className="text-gray-300 text-xs">-</span>;
+                                                                            if (item.displayId === 99999) return <span className="text-gray-300 text-xs">-</span>;
+                                                                            const emp = employees.find(e => e.id.toString() === item.id);
+                                                                            if (!emp?.empUid) return <span className="text-gray-300 text-xs">-</span>;
+                                                                            const docId = `${item.id}_${py}_${pm}`;
+                                                                            const isSent = !!sentPayslips[docId];
+                                                                            return (
+                                                                                <button onClick={() => handleOpenSend(item, isSent ? sentPayslips[docId] : null)}
+                                                                                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition whitespace-nowrap border ${isSent ? 'bg-gray-100 hover:bg-gray-200 text-gray-600 border-gray-300' : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-200'}`}>
+                                                                                    {isSent ? '발송완료' : '발송'}
+                                                                                </button>
+                                                                            );
+                                                                        })()}
+                                                                    </td>
+                                                                )}
+                                                            </tr>
+                                                        ))
+                                                    )}
+                                                </tbody>
+                                                {panelList.length > 0 && (
+                                                    <tfoot className="bg-gray-50 border-t-2 border-gray-200">
+                                                        <tr>
+                                                            <td colSpan={panelList.some(i => i.insuranceRate > 0) ? 7 : 6} className="px-4 py-5 text-right font-bold text-gray-700">총 지급 예정액</td>
+                                                            <td className="px-4 py-5 font-black text-xl text-purple-700 whitespace-nowrap">{formatCurrency(panelList.some(i => i.insuranceRate > 0) ? panelGrandTotalFinal : panelGrandTotal)}</td>
+                                                            {workspaceId && <td></td>}
+                                                        </tr>
+                                                    </tfoot>
                                                 )}
-                                            </tr>
-                                        ))
-                                    )}
-                                </tbody>
-                                {payrollList.length > 0 && (
-                                    <tfoot className="bg-gray-50 border-t-2 border-gray-200">
-                                        <tr>
-                                            <td colSpan={payrollList.some(i => i.insuranceRate > 0) ? 7 : 6} className="px-4 py-5 text-right font-bold text-gray-700">총 지급 예정액</td>
-                                            <td className="px-4 py-5 font-black text-xl text-purple-700 whitespace-nowrap">{formatCurrency(payrollList.some(i => i.insuranceRate > 0) ? grandTotalFinal : grandTotal)}</td>
-                                            {workspaceId && <td></td>}
-                                        </tr>
-                                    </tfoot>
-                                )}
-                            </table>
-                        </div>
-                    </div>
+                                            </table>
+                                        </div>
+                                    </div>
+                                </div>
+                            );
+                        };
+                        const prevY = month === 1 ? year - 1 : year;
+                        const prevM = month === 1 ? 12 : month - 1;
+                        const nextY = month === 12 ? year + 1 : year;
+                        const nextM = month === 12 ? 1 : month + 1;
+                        return (
+                            <div ref={payrollCarouselRef} className="overflow-hidden" onTouchStart={handlePayrollTouchStart} onTouchMove={handlePayrollTouchMove} onTouchEnd={handlePayrollTouchEnd}>
+                                <div className="flex" style={{ width: '300%', transform: `translate3d(calc(-33.3333% + ${payrollDragX}px), 0, 0)`, transition: payrollTransition ? 'transform 0.25s ease-out' : 'none' }}>
+                                    <div className="w-1/3 flex-shrink-0 pr-2">{renderPayrollPanel(prevY, prevM, false)}</div>
+                                    <div className="w-1/3 flex-shrink-0 px-1">{renderPayrollPanel(year, month, true)}</div>
+                                    <div className="w-1/3 flex-shrink-0 pl-2">{renderPayrollPanel(nextY, nextM, false)}</div>
+                                </div>
+                            </div>
+                        );
+                    })()}
                 </div>
 
                 {/* 급여명세서 발송 팝업 */}

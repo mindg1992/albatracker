@@ -59,7 +59,8 @@
     <style>
         .no-scrollbar::-webkit-scrollbar { display: none; }
         .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
-        body { font-family: 'Pretendard', sans-serif; background-color: #f9fafb; }
+        body { font-family: 'Pretendard', sans-serif; background-color: #f9fafb; overflow-x: hidden; }
+        html { overflow-x: hidden; }
 
         input[type="number"]::-webkit-outer-spin-button,
         input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
@@ -7011,7 +7012,7 @@
                         const nextY = month === 12 ? year + 1 : year;
                         const nextM = month === 12 ? 1 : month + 1;
                         return (
-                            <div ref={carouselRef} className="overflow-hidden" onTouchStart={handleTouchStart} onTouchMove={handleTouchMove} onTouchEnd={handleTouchEnd}>
+                            <div ref={carouselRef} className="overflow-hidden" style={{ touchAction: 'pan-y' }} onTouchStart={handleTouchStart} onTouchMove={handleTouchMove} onTouchEnd={handleTouchEnd}>
                                 <div className="flex" style={{ width: '300%', transform: `translate3d(calc(-33.3333% + ${calDragX}px), 0, 0)`, transition: calTransition ? 'transform 0.25s ease-out' : 'none' }}>
                                     <div className="w-1/3 flex-shrink-0 pr-2">{renderCalendarPanel(prevY, prevM, false)}</div>
                                     <div className="w-1/3 flex-shrink-0 px-1">{renderCalendarPanel(year, month, true)}</div>
@@ -8375,7 +8376,7 @@
                         const nextY = month === 12 ? year + 1 : year;
                         const nextM = month === 12 ? 1 : month + 1;
                         return (
-                            <div ref={payrollCarouselRef} className="overflow-hidden" onTouchStart={handlePayrollTouchStart} onTouchMove={handlePayrollTouchMove} onTouchEnd={handlePayrollTouchEnd}>
+                            <div ref={payrollCarouselRef} className="overflow-hidden" style={{ touchAction: 'pan-y' }} onTouchStart={handlePayrollTouchStart} onTouchMove={handlePayrollTouchMove} onTouchEnd={handlePayrollTouchEnd}>
                                 <div className="flex" style={{ width: '300%', transform: `translate3d(calc(-33.3333% + ${payrollDragX}px), 0, 0)`, transition: payrollTransition ? 'transform 0.25s ease-out' : 'none' }}>
                                     <div className="w-1/3 flex-shrink-0 pr-2">{renderPayrollPanel(prevY, prevM, false)}</div>
                                     <div className="w-1/3 flex-shrink-0 px-1">{renderPayrollPanel(year, month, true)}</div>

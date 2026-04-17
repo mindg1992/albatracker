@@ -933,6 +933,7 @@
             const [dismissedSubmitCount, setDismissedSubmitCount] = useState(0);
             const [dismissedInviteCount, setDismissedInviteCount] = useState(0);
             const [memoSeenAt, setMemoSeenAt] = useState(0);
+            const [predictOpenDate, setPredictOpenDate] = useState(null);
 
             // currentWorkspaceId 변경 시 localStorage에서 메모 seenAt 복원
             useEffect(() => {
@@ -2858,7 +2859,7 @@
                                     </div>
                                 </div>
                                 <button
-                                    onClick={() => { markSchedMemosSeen(); handleTabChange('predict'); }}
+                                    onClick={() => { setPredictOpenDate(latest.date); handleTabChange('predict'); markSchedMemosSeen(); }}
                                     className="flex-shrink-0 bg-yellow-500 text-white text-xs font-bold px-3 py-2 rounded-xl hover:bg-yellow-600 transition"
                                 >확인</button>
                             </div>
@@ -2952,6 +2953,8 @@
                                 setWorkspaceInfo={setWorkspaceInfo}
                                 workspaceId={currentWorkspaceId}
                                 firebaseUser={firebaseUser}
+                                initialOpenDate={predictOpenDate}
+                                onInitialOpenConsumed={() => setPredictOpenDate(null)}
                             />
                         )}
                         {activeTab === 'invite' && (
@@ -9878,10 +9881,19 @@
             );
         }
 
-        function TabPredict({ employees, showConfirm, showAlert, globalMinWage, workspaceInfo, setWorkspaceInfo, workspaceId, firebaseUser }) {
+        function TabPredict({ employees, showConfirm, showAlert, globalMinWage, workspaceInfo, setWorkspaceInfo, workspaceId, firebaseUser, initialOpenDate, onInitialOpenConsumed }) {
             const [currentDate, setCurrentDate] = useState(new Date());
             const [scheduleModal, setScheduleModal] = useState(null); // { schedule?, defaultDate? }
             const [dayDetailModal, setDayDetailModal] = useState(null); // 'YYYY-MM-DD'
+
+            // 외부(메모 배너 등)에서 특정 날짜 상세 팝업 열기 요청
+            useEffect(() => {
+                if (!initialOpenDate) return;
+                const [y, m] = initialOpenDate.split('-').map(Number);
+                setCurrentDate(new Date(y, m - 1, 1));
+                setDayDetailModal(initialOpenDate);
+                onInitialOpenConsumed && onInitialOpenConsumed();
+            }, [initialOpenDate]);
 
             const year = currentDate.getFullYear();
             const month = currentDate.getMonth() + 1;

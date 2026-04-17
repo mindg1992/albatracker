@@ -7196,15 +7196,18 @@
             }, [monthKey, daysInMonth, activeEmployees, monthlyData]);
 
             const handleInputChange = (day, empId, val) => {
-                setLocalData(prev => ({ ...prev, [day]: { ...prev[day], [empId]: val } }));
+                const v = String(val).replace(/[^0-9]/g, '');
+                setLocalData(prev => ({ ...prev, [day]: { ...prev[day], [empId]: v } }));
             };
 
             const handleMinuteChange = (day, empId, val) => {
-                setMinuteData(prev => ({ ...prev, [day]: { ...prev[day], [empId]: val } }));
+                const v = String(val).replace(/[^0-9]/g, '');
+                setMinuteData(prev => ({ ...prev, [day]: { ...prev[day], [empId]: v } }));
             };
 
             const handleWageChange = (day, empId, val) => {
-                setWageData(prev => ({ ...prev, [day]: { ...prev[day], [empId]: val } }));
+                const v = String(val).replace(/[^0-9]/g, '');
+                setWageData(prev => ({ ...prev, [day]: { ...prev[day], [empId]: v } }));
             };
 
             const focusHour = (day, empIdx) => {
@@ -7353,7 +7356,7 @@
                                                         <div className="flex items-center gap-0.5">
                                                             <input
                                                                 ref={el => hourRefs.current[`${day}-${emp.id}`] = el}
-                                                                type="number" min="0"
+                                                                type="text" inputMode="numeric" enterKeyHint="next" pattern="[0-9]*"
                                                                 value={localData[day]?.[emp.id] ?? ''}
                                                                 onChange={e => handleInputChange(day, emp.id, e.target.value)}
                                                                 onKeyDown={e => handleHourKeyDown(e, day, empIdx)}
@@ -7363,7 +7366,7 @@
                                                             <span className="text-gray-300 text-xs">:</span>
                                                             <input
                                                                 ref={el => minRefs.current[`${day}-${emp.id}`] = el}
-                                                                type="number" min="0" max="59"
+                                                                type="text" inputMode="numeric" enterKeyHint="next" pattern="[0-9]*"
                                                                 value={minuteData[day]?.[emp.id] ?? ''}
                                                                 onChange={e => handleMinuteChange(day, emp.id, e.target.value)}
                                                                 onKeyDown={e => handleMinKeyDown(e, day, empIdx)}
@@ -7373,7 +7376,7 @@
                                                             <span className="text-gray-200 text-xs mx-0.5">|</span>
                                                             <input
                                                                 ref={el => wageRefs.current[`${day}-${emp.id}`] = el}
-                                                                type="number" min="0"
+                                                                type="text" inputMode="numeric" enterKeyHint="next" pattern="[0-9]*"
                                                                 value={wageData[day]?.[emp.id] ?? ''}
                                                                 onChange={e => handleWageChange(day, emp.id, e.target.value)}
                                                                 onKeyDown={e => handleWageKeyDown(e, day, empIdx)}

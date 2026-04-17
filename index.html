@@ -901,6 +901,28 @@
             const [dismissedRewriteCount, setDismissedRewriteCount] = useState(0);
             const [dismissedSubmitCount, setDismissedSubmitCount] = useState(0);
             const [dismissedInviteCount, setDismissedInviteCount] = useState(0);
+            const [memoSeenAt, setMemoSeenAt] = useState(0);
+
+            // currentWorkspaceId 변경 시 localStorage에서 메모 seenAt 복원
+            useEffect(() => {
+                if (!currentWorkspaceId) { setMemoSeenAt(0); return; }
+                setMemoSeenAt(Number(localStorage.getItem(`schedMemoSeenAt_${currentWorkspaceId}`) || '0'));
+            }, [currentWorkspaceId]);
+
+            // 스케쥴 메모 미확인 목록 (관리자, 본인 작성 제외)
+            const unreadSchedMemos = useMemo(() => {
+                const all = workspaceInfo?.scheduleMemos || {};
+                const list = [];
+                Object.entries(all).forEach(([date, memos]) => {
+                    (memos || []).forEach(m => {
+                        if (m.authorId === 'boss') return;
+                        const ts = m.createdAt ? new Date(m.createdAt).getTime() : 0;
+                        if (ts > memoSeenAt) list.push({ ...m, date });
+                    });
+                });
+                list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+                return list;
+            }, [workspaceInfo?.scheduleMemos, memoSeenAt]);
 
             // 데이터 루프 및 무의미한 저장을 방지하기 위한 기준점
             const lastSyncedDataRef = useRef("");
@@ -2209,33 +2231,10 @@
                 return <LandingScreen onBossLogin={handleGoogleLogin} onEmpGoogleLogin={handleEmpGoogleLogin} modalConfig={modalConfig} />;
             }
 
-            // ── 스케쥴 메모 미확인 카운트/배너 (관리자) ──
-            const memoSeenKey = currentWorkspaceId ? `schedMemoSeenAt_${currentWorkspaceId}` : null;
-            const [memoSeenAt, setMemoSeenAt] = useState(() => {
-                if (!memoSeenKey) return 0;
-                return Number(localStorage.getItem(memoSeenKey) || '0');
-            });
-            useEffect(() => {
-                if (!memoSeenKey) return;
-                setMemoSeenAt(Number(localStorage.getItem(memoSeenKey) || '0'));
-            }, [memoSeenKey]);
-            const unreadSchedMemos = useMemo(() => {
-                const all = workspaceInfo?.scheduleMemos || {};
-                const list = [];
-                Object.entries(all).forEach(([date, memos]) => {
-                    (memos || []).forEach(m => {
-                        if (m.authorId === 'boss') return; // 본인 작성 제외
-                        const ts = m.createdAt ? new Date(m.createdAt).getTime() : 0;
-                        if (ts > memoSeenAt) list.push({ ...m, date });
-                    });
-                });
-                list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-                return list;
-            }, [workspaceInfo?.scheduleMemos, memoSeenAt]);
             const schedMemoBadgeCount = unreadSchedMemos.length;
             const markSchedMemosSeen = () => {
                 const now = Date.now();
-                if (memoSeenKey) localStorage.setItem(memoSeenKey, String(now));
+                if (currentWorkspaceId) localStorage.setItem(`schedMemoSeenAt_${currentWorkspaceId}`, String(now));
                 setMemoSeenAt(now);
             };
 

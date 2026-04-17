@@ -7325,7 +7325,7 @@
                                 <div className="h-full flex items-center justify-center text-gray-500">현재 근무 중인 직원이 없습니다.</div>
                             ) : (
                                 <table className="border-collapse">
-                                    <thead className="sticky top-0 bg-white shadow-sm z-10">
+                                    <thead className="sticky bg-white shadow-sm z-10" style={{top: '-1px'}}>
                                         <tr>
                                             <th className="border p-2 bg-gray-100 text-center whitespace-nowrap" style={{width:'50px'}}>날짜</th>
                                             {activeEmployees.map(emp => (

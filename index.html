@@ -4994,6 +4994,14 @@
                                 contractUpdateRequired: firebase.firestore.FieldValue.delete()
                             });
                         setEmployees(prev => prev.map(e => e.id === emp.id ? { ...emp, contractStatus: 'needs_resign', pendingRewrite: true, contractDeleteRequest: null, contractUpdateRequired: false } : e));
+                        // 시급 변경으로 인한 템플릿 재작성 시 시급 변경 알림 발송
+                        if (reason === 'wage_change' && emp._oldWage != null) {
+                            const oldW = Number(emp._oldWage);
+                            const newW = Number(emp.wage);
+                            if (oldW !== newW) {
+                                sendWageChangeNotification(emp.empUid, bossUid, oldW, newW).catch(() => {});
+                            }
+                        }
                         const verb = reason === 'new_contract' ? '작성' : '재작성';
                         showAlert(`${emp.name}님에게 근로계약서 ${verb}이 요청되었습니다.`, '요청 완료', 'success');
                     }
@@ -5560,7 +5568,7 @@
                             // 개별 시급 → 개별 시급 변경: 개인 근로계약서 템플릿 편집 팝업 열기
                             // setEmployees는 팝업 저장 시점에만 호출 (앱 재시작 시 시급 원복 보장)
                             setPersonalTemplateReason('wage_change');
-                            setPersonalTemplateTarget(finalData);
+                            setPersonalTemplateTarget({ ...finalData, _oldWage: oldWage });
                             setIsModalOpen(false);
                             setEditingEmp(null);
                             // early return 전에 wageBelowMin + 이름 변경 즉시 반영
@@ -7312,7 +7320,7 @@
                             <button onClick={onClose} className="p-2 hover:bg-gray-200 rounded-full transition"><X className="w-5 h-5"/></button>
                         </div>
 
-                        <div className="flex-1 overflow-auto p-4 relative">
+                        <div className="flex-1 overflow-auto px-4 pb-4 relative">
                             {activeEmployees.length === 0 ? (
                                 <div className="h-full flex items-center justify-center text-gray-500">현재 근무 중인 직원이 없습니다.</div>
                             ) : (
@@ -10037,7 +10045,6 @@
             const [confirmPin, setConfirmPin] = useState('');
             const [message, setMessage] = useState('');
             const [localTimeUnit, setLocalTimeUnit] = useState(workspaceInfo?.timeUnit || 'hour');
-            const [savingUnit, setSavingUnit] = useState(false);
             const [openPin, setOpenPin] = useState(false);
             const [openTimeUnit, setOpenTimeUnit] = useState(false);
             const [openInsurance, setOpenInsurance] = useState(false);
@@ -10045,43 +10052,60 @@
             const [empShowPay, setEmpShowPay] = useState(workspaceInfo?.empShowPay !== false);
             const [empShowHoliday, setEmpShowHoliday] = useState(!!workspaceInfo?.empShowHoliday);
             const [empShowDeduction, setEmpShowDeduction] = useState(!!workspaceInfo?.empShowDeduction);
-            const [savingEmpDisplay, setSavingEmpDisplay] = useState(false);
-
-            const handleSaveEmpDisplay = async () => {
-                if (!firebaseUser) return;
-                setSavingEmpDisplay(true);
-                try {
-                    const update = { empShowPay: empShowPay, empShowHoliday: empShowHoliday, empShowDeduction: empShowDeduction };
-                    await fbDb.collection('workspaces').doc(workspaceId || firebaseUser.uid).update(update);
-                    setWorkspaceInfo(prev => ({ ...prev, ...update }));
-                    showAlert('직원화면 설정이 저장되었습니다.', '저장 완료', 'success');
-                } catch(e) {
-                    showAlert('저장 실패: ' + e.message, '오류', 'error');
-                }
-                setSavingEmpDisplay(false);
-            };
             const [localInsuranceMode, setLocalInsuranceMode] = useState(workspaceInfo?.insuranceMode || 'none');
             const [localInsuranceName, setLocalInsuranceName] = useState(workspaceInfo?.insuranceName || '');
             const [localInsuranceRate, setLocalInsuranceRate] = useState(workspaceInfo?.insuranceRate || '');
-            const [savingInsurance, setSavingInsurance] = useState(false);
 
-            const handleSaveInsurance = async () => {
+            const currentRef = useRef(null);
+            const newRef = useRef(null);
+            const confirmRef = useRef(null);
+            const insuranceDebounceRef = useRef(null);
+
+            // 근무시간 입력 단위 자동 저장
+            const saveTimeUnit = async (value) => {
+                setLocalTimeUnit(value);
                 if (!firebaseUser) return;
-                setSavingInsurance(true);
                 try {
-                    const update = { insuranceMode: localInsuranceMode };
-                    if (localInsuranceMode === 'global') {
-                        update.insuranceName = localInsuranceName;
-                        update.insuranceRate = parseFloat(localInsuranceRate) || 0;
-                    } else if (localInsuranceMode === 'none') {
-                        update.insuranceName = '';
-                        update.insuranceRate = 0;
-                    }
-                    const wsId = workspaceId || firebaseUser.uid;
+                    await fbDb.collection('workspaces').doc(workspaceId || firebaseUser.uid).update({ timeUnit: value });
+                    setWorkspaceInfo(prev => ({ ...prev, timeUnit: value }));
+                } catch(e) {
+                    showAlert('저장 실패: ' + e.message, '오류', 'error');
+                }
+            };
+
+            // 직원화면 설정 자동 저장
+            const saveEmpDisplay = async (nextShowPay, nextShowHoliday, nextShowDeduction) => {
+                setEmpShowPay(nextShowPay);
+                setEmpShowHoliday(nextShowHoliday);
+                setEmpShowDeduction(nextShowDeduction);
+                if (!firebaseUser) return;
+                try {
+                    const update = { empShowPay: nextShowPay, empShowHoliday: nextShowHoliday, empShowDeduction: nextShowDeduction };
+                    await fbDb.collection('workspaces').doc(workspaceId || firebaseUser.uid).update(update);
+                    setWorkspaceInfo(prev => ({ ...prev, ...update }));
+                } catch(e) {
+                    showAlert('저장 실패: ' + e.message, '오류', 'error');
+                }
+            };
+
+            // 급여 공제율 설정 자동 저장 (mode 변경)
+            const saveInsuranceMode = async (mode) => {
+                setLocalInsuranceMode(mode);
+                if (!firebaseUser) return;
+                const wsId = workspaceId || firebaseUser.uid;
+                const update = { insuranceMode: mode };
+                if (mode === 'global') {
+                    update.insuranceName = localInsuranceName;
+                    update.insuranceRate = parseFloat(localInsuranceRate) || 0;
+                } else if (mode === 'none') {
+                    update.insuranceName = '';
+                    update.insuranceRate = 0;
+                }
+                try {
                     await fbDb.collection('workspaces').doc(wsId).update(update);
                     setWorkspaceInfo(prev => ({ ...prev, ...update }));
                     // 개별 적용 모드: 기존 직원들의 공제율을 workplace 문서에 일괄 동기화
-                    if (localInsuranceMode === 'individual') {
+                    if (mode === 'individual') {
                         const empsWithUid = employees.filter(e => e.empUid && e.status !== 'deleted');
                         empsWithUid.forEach(emp => {
                             fbDb.collection('employeeAccounts').doc(emp.empUid)
@@ -10090,28 +10114,23 @@
                                 .catch(() => {});
                         });
                     }
-                    showAlert('급여 공제율 설정이 저장되었습니다.', '저장 완료', 'success');
                 } catch(e) {
                     showAlert('저장 실패: ' + e.message, '오류', 'error');
                 }
-                setSavingInsurance(false);
             };
 
-            const currentRef = useRef(null);
-            const newRef = useRef(null);
-            const confirmRef = useRef(null);
-
-            const handleSaveTimeUnit = async () => {
-                if (!firebaseUser) return;
-                setSavingUnit(true);
-                try {
-                    await fbDb.collection('workspaces').doc(workspaceId || firebaseUser.uid).update({ timeUnit: localTimeUnit });
-                    setWorkspaceInfo(prev => ({ ...prev, timeUnit: localTimeUnit }));
-                    showAlert('입력 단위가 저장되었습니다.', '저장 완료', 'success');
-                } catch(e) {
-                    showAlert('저장 실패: ' + e.message, '오류', 'error');
-                }
-                setSavingUnit(false);
+            // 급여 공제율 global 필드 (공제항목/요율) 디바운스 저장
+            const saveInsuranceGlobalFields = (name, rate) => {
+                if (insuranceDebounceRef.current) clearTimeout(insuranceDebounceRef.current);
+                insuranceDebounceRef.current = setTimeout(async () => {
+                    if (!firebaseUser) return;
+                    const wsId = workspaceId || firebaseUser.uid;
+                    const update = { insuranceName: name, insuranceRate: parseFloat(rate) || 0 };
+                    try {
+                        await fbDb.collection('workspaces').doc(wsId).update(update);
+                        setWorkspaceInfo(prev => ({ ...prev, ...update }));
+                    } catch(e) {}
+                }, 600);
             };
 
             const handleInput = (e, setter, nextRef) => {
@@ -10231,7 +10250,7 @@
                                     { value: 'minute', label: '1분 단위',   desc: '예: 8시간 45분 (직접 입력)' },
                                 ].map(opt => (
                                     <label key={opt.value} className={`flex items-center gap-3 p-3 border-2 rounded-xl cursor-pointer transition ${localTimeUnit === opt.value ? 'border-blue-500 bg-blue-50' : 'border-gray-200 hover:bg-gray-50'}`}>
-                                        <input type="radio" name="timeUnit" value={opt.value} checked={localTimeUnit === opt.value} onChange={() => setLocalTimeUnit(opt.value)} className="accent-blue-600" />
+                                        <input type="radio" name="timeUnit" value={opt.value} checked={localTimeUnit === opt.value} onChange={() => saveTimeUnit(opt.value)} className="accent-blue-600" />
                                         <div>
                                             <p className="font-bold text-gray-800 text-sm">{opt.label}</p>
                                             <p className="text-xs text-gray-400">{opt.desc}</p>
@@ -10239,9 +10258,6 @@
                                     </label>
                                 ))}
                             </div>
-                            <button onClick={handleSaveTimeUnit} disabled={savingUnit} className="w-full bg-blue-600 text-white font-bold py-3.5 rounded-xl hover:bg-blue-700 transition disabled:opacity-50">
-                                {savingUnit ? '저장 중...' : '저장하기'}
-                            </button>
                         </div>
                     )}
                 </div>
@@ -10265,21 +10281,21 @@
                         <div className="px-6 pb-6 border-t border-gray-100 pt-4">
                             <div className="space-y-2 mb-5">
                                 <label className={`flex items-center gap-3 p-3 border-2 rounded-xl cursor-pointer transition ${localInsuranceMode === 'none' ? 'border-orange-500 bg-orange-50' : 'border-gray-200 hover:bg-gray-50'}`}>
-                                    <input type="radio" name="insuranceMode" value="none" checked={localInsuranceMode === 'none'} onChange={() => setLocalInsuranceMode('none')} className="accent-orange-600" />
+                                    <input type="radio" name="insuranceMode" value="none" checked={localInsuranceMode === 'none'} onChange={() => saveInsuranceMode('none')} className="accent-orange-600" />
                                     <div>
                                         <p className="font-bold text-gray-800 text-sm">공제 없음</p>
                                         <p className="text-xs text-gray-400">급여 공제를 적용하지 않음</p>
                                     </div>
                                 </label>
                                 <label className={`flex items-center gap-3 p-3 border-2 rounded-xl cursor-pointer transition ${localInsuranceMode === 'global' ? 'border-orange-500 bg-orange-50' : 'border-gray-200 hover:bg-gray-50'}`}>
-                                    <input type="radio" name="insuranceMode" value="global" checked={localInsuranceMode === 'global'} onChange={() => setLocalInsuranceMode('global')} className="accent-orange-600" />
+                                    <input type="radio" name="insuranceMode" value="global" checked={localInsuranceMode === 'global'} onChange={() => saveInsuranceMode('global')} className="accent-orange-600" />
                                     <div>
                                         <p className="font-bold text-gray-800 text-sm">전체 일괄적용</p>
                                         <p className="text-xs text-gray-400">모든 근무자에게 동일한 공제율 적용</p>
                                     </div>
                                 </label>
                                 <label className={`flex items-center gap-3 p-3 border-2 rounded-xl cursor-pointer transition ${localInsuranceMode === 'individual' ? 'border-orange-500 bg-orange-50' : 'border-gray-200 hover:bg-gray-50'}`}>
-                                    <input type="radio" name="insuranceMode" value="individual" checked={localInsuranceMode === 'individual'} onChange={() => setLocalInsuranceMode('individual')} className="accent-orange-600" />
+                                    <input type="radio" name="insuranceMode" value="individual" checked={localInsuranceMode === 'individual'} onChange={() => saveInsuranceMode('individual')} className="accent-orange-600" />
                                     <div>
                                         <p className="font-bold text-gray-800 text-sm">개별 적용</p>
                                         <p className="text-xs text-gray-400">근무자별로 다른 급여 공제율 설정</p>
@@ -10288,17 +10304,17 @@
                             </div>
 
                             {localInsuranceMode === 'global' && (
-                                <div className="space-y-3 mb-5">
+                                <div className="space-y-3">
                                     <div>
                                         <label className="block text-sm font-medium text-gray-700 mb-1">공제항목</label>
-                                        <input type="text" value={localInsuranceName} onChange={e => setLocalInsuranceName(e.target.value)}
+                                        <input type="text" value={localInsuranceName} onChange={e => { const v = e.target.value; setLocalInsuranceName(v); saveInsuranceGlobalFields(v, localInsuranceRate); }}
                                             placeholder="예) 고용보험 / 프리랜서 등등"
                                             className="w-full border border-gray-300 rounded-xl px-4 py-2.5 text-sm focus:ring-2 focus:ring-orange-500 outline-none transition" />
                                     </div>
                                     <div>
                                         <label className="block text-sm font-medium text-gray-700 mb-1">총 급여에서 공제</label>
                                         <div className="relative">
-                                            <input type="number" value={localInsuranceRate} onChange={e => setLocalInsuranceRate(e.target.value)}
+                                            <input type="number" value={localInsuranceRate} onChange={e => { const v = e.target.value; setLocalInsuranceRate(v); saveInsuranceGlobalFields(localInsuranceName, v); }}
                                                 min="0" max="100" step="0.1" placeholder="예) 3.3"
                                                 className="w-full border border-gray-300 rounded-xl px-4 py-2.5 pr-8 text-sm focus:ring-2 focus:ring-orange-500 outline-none transition" />
                                             <span className="absolute right-4 top-1/2 -translate-y-1/2 text-sm text-gray-400 font-bold">%</span>
@@ -10308,14 +10324,10 @@
                             )}
 
                             {localInsuranceMode === 'individual' && (
-                                <div className="bg-yellow-50 rounded-xl p-4 border border-yellow-200 mb-5">
+                                <div className="bg-yellow-50 rounded-xl p-4 border border-yellow-200">
                                     <p className="text-sm text-yellow-700 font-medium">근무자카드에서 개별 공제율을 설정하세요.</p>
                                 </div>
                             )}
-
-                            <button onClick={handleSaveInsurance} disabled={savingInsurance} className="w-full bg-orange-600 text-white font-bold py-3.5 rounded-xl hover:bg-orange-700 transition disabled:opacity-50">
-                                {savingInsurance ? '저장 중...' : '저장하기'}
-                            </button>
                         </div>
                     )}
                 </div>
@@ -10338,32 +10350,29 @@
                     {openEmpDisplay && (
                         <div className="px-6 pb-6 border-t border-gray-100 pt-4">
                             <p className="text-sm text-gray-500 mb-4">직원화면의 급여요약에 표시될 항목을 선택하세요.</p>
-                            <div className="space-y-3 mb-5">
+                            <div className="space-y-3">
                                 <label className="flex items-center gap-3 cursor-pointer">
-                                    <input type="checkbox" checked={empShowPay} onChange={e => { const v = e.target.checked; setEmpShowPay(v); if (!v) { setEmpShowHoliday(false); setEmpShowDeduction(false); } }} className="w-4 h-4 accent-purple-600" />
+                                    <input type="checkbox" checked={empShowPay} onChange={e => { const v = e.target.checked; saveEmpDisplay(v, v ? empShowHoliday : false, v ? empShowDeduction : false); }} className="w-4 h-4 accent-purple-600" />
                                     <div>
                                         <p className="font-bold text-gray-800 text-sm">급여 합계</p>
                                         <p className="text-xs text-gray-400">시급별 근무시간 × 시급 합산 표시</p>
                                     </div>
                                 </label>
                                 <label className={`flex items-center gap-3 ${empShowPay ? 'cursor-pointer' : 'cursor-not-allowed opacity-40'}`}>
-                                    <input type="checkbox" checked={empShowHoliday} onChange={e => setEmpShowHoliday(e.target.checked)} disabled={!empShowPay} className="w-4 h-4 accent-purple-600" />
+                                    <input type="checkbox" checked={empShowHoliday} onChange={e => saveEmpDisplay(empShowPay, e.target.checked, empShowDeduction)} disabled={!empShowPay} className="w-4 h-4 accent-purple-600" />
                                     <div>
                                         <p className="font-bold text-gray-800 text-sm">주휴수당 표시</p>
                                         <p className="text-xs text-gray-400">주휴수당 금액을 합산에 포함하여 표시</p>
                                     </div>
                                 </label>
                                 <label className={`flex items-center gap-3 ${empShowPay ? 'cursor-pointer' : 'cursor-not-allowed opacity-40'}`}>
-                                    <input type="checkbox" checked={empShowDeduction} onChange={e => setEmpShowDeduction(e.target.checked)} disabled={!empShowPay} className="w-4 h-4 accent-purple-600" />
+                                    <input type="checkbox" checked={empShowDeduction} onChange={e => saveEmpDisplay(empShowPay, empShowHoliday, e.target.checked)} disabled={!empShowPay} className="w-4 h-4 accent-purple-600" />
                                     <div>
                                         <p className="font-bold text-gray-800 text-sm">공제율 표시</p>
                                         <p className="text-xs text-gray-400">설정된 급여 공제율을 적용하여 표시</p>
                                     </div>
                                 </label>
                             </div>
-                            <button onClick={handleSaveEmpDisplay} disabled={savingEmpDisplay} className="w-full bg-purple-600 text-white font-bold py-3.5 rounded-xl hover:bg-purple-700 transition disabled:opacity-50">
-                                {savingEmpDisplay ? '저장 중...' : '저장하기'}
-                            </button>
                         </div>
                     )}
                 </div>

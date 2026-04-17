@@ -4231,7 +4231,7 @@
                                                                     gridRow: bar.row + 1,
                                                                     backgroundColor: bar.color
                                                                 }}
-                                                                className="text-[9px] font-medium text-gray-800 rounded px-1 truncate leading-[16px] text-center"
+                                                                className="text-[9px] font-medium text-gray-800 rounded px-1 overflow-hidden whitespace-nowrap leading-[16px] text-center"
                                                                 title={label}>
                                                                 {label}
                                                             </div>
@@ -10310,7 +10310,7 @@
                                                                         backgroundColor: bar.color,
                                                                         pointerEvents: isCurrent ? 'auto' : 'none'
                                                                     }}
-                                                                    className={`text-[10px] md:text-[11px] font-medium text-gray-800 rounded px-1.5 truncate leading-5 text-center ${isCurrent ? 'cursor-pointer hover:opacity-80' : ''}`}
+                                                                    className={`text-[10px] md:text-[11px] font-medium text-gray-800 rounded px-1.5 overflow-hidden whitespace-nowrap leading-5 text-center ${isCurrent ? 'cursor-pointer hover:opacity-80' : ''}`}
                                                                     title={label + (bar.memo ? ` | ${bar.memo}` : '')}>
                                                                     {label}
                                                                 </div>

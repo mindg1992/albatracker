@@ -4716,13 +4716,18 @@
                                                         return (
                                                             <div key={day} className={`min-h-[60px] border-b border-r border-gray-100 p-1.5 flex flex-col ${isToday ? 'bg-blue-50' : ''}`}>
                                                                 <span className={`text-xs font-bold mb-1 ${isToday ? 'text-blue-600' : isSun ? 'text-red-500' : isSat ? 'text-blue-500' : 'text-gray-600'}`}>{day}</span>
-                                                                {sub ? (
+                                                                {sub ? (() => {
+                                                                    const hoursText = fmtHours(sub.hours);
+                                                                    const len = hoursText.length;
+                                                                    const hoursFontPx = len <= 4 ? 12 : len <= 6 ? 11 : len <= 8 ? 10 : 9;
+                                                                    return (
                                                                     <button onClick={isCurrent ? () => setViewModal({ date: dateStr, sub }) : undefined}
-                                                                        className="flex-1 bg-green-100 hover:bg-green-200 rounded p-1 text-center transition cursor-pointer">
-                                                                        <p className="text-xs font-bold text-green-700">{fmtHours(sub.hours)}</p>
-                                                                        <p className="text-[9px] text-green-500">{sub.note ? '메모있음' : '제출완료'}</p>
+                                                                        className="flex-1 bg-green-100 hover:bg-green-200 rounded p-1 text-center transition cursor-pointer overflow-hidden">
+                                                                        <p className="font-bold text-green-700 whitespace-nowrap" style={{fontSize: `${hoursFontPx}px`}}>{hoursText}</p>
+                                                                        <p className="text-[9px] text-green-500 whitespace-nowrap">{sub.note ? '메모있음' : '제출완료'}</p>
                                                                     </button>
-                                                                ) : isCurrent && isPast && !isFullyBlocked && (
+                                                                    );
+                                                                })() : isCurrent && isPast && !isFullyBlocked && (
                                                                     <button onClick={() => handlePlusClick(dateStr)}
                                                                         className="flex-1 flex items-center justify-center rounded border border-dashed border-gray-300 hover:border-blue-400 hover:bg-blue-50 transition text-gray-400 hover:text-blue-500">
                                                                         <Plus className="w-3.5 h-3.5"/>

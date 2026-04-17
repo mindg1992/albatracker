@@ -1600,7 +1600,9 @@
                                 phone: target.phone || '',
                                 inviteCode: target.inviteCode || '',
                                 contractStatus: target.contractStatus || null,
-                                contract: target.contract || null
+                                contract: target.contract || null,
+                                insuranceName: target.insuranceName || '',
+                                insuranceRate: target.insuranceRate != null ? target.insuranceRate : 0
                             }));
                         } else {
                             setSelectedEmpBossUid(null);

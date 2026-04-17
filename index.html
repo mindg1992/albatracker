@@ -9687,6 +9687,32 @@
                 const emp = activeEmployees.find(e => String(e.id) === String(empId));
                 if (!emp) { showAlert('근무자를 찾을 수 없습니다.', '오류', 'error'); return; }
 
+                // 동일 근무자 · 날짜 · 시간대 중복 검사
+                const newStartMin = sH * 60 + sM;
+                const newEndMin = eH * 60 + eM;
+                const existingList = workspaceInfo?.schedules || [];
+                const conflict = existingList.find(s => {
+                    if (initial && s.id === initial.id) return false;
+                    if (String(s.empId) !== String(emp.id)) return false;
+                    // 날짜 범위 겹침
+                    if (s.endDate < startDate || s.startDate > endDate) return false;
+                    // 시간 범위 겹침 (경계 일치는 겹치지 않음)
+                    const sMin = s.startHour * 60 + (s.startMinute || 0);
+                    const eMin = s.endHour * 60 + (s.endMinute || 0);
+                    return sMin < newEndMin && newStartMin < eMin;
+                });
+                if (conflict) {
+                    const fmtT = (h, m) => m === 0 ? `${h}시` : `${h}시${m}분`;
+                    const rangeStr = conflict.startDate === conflict.endDate
+                        ? conflict.startDate
+                        : `${conflict.startDate}~${conflict.endDate}`;
+                    showAlert(
+                        `${emp.name}님은 이미 해당 시간대에 스케쥴이 있습니다.\n(${rangeStr} ${fmtT(conflict.startHour, conflict.startMinute||0)}~${fmtT(conflict.endHour, conflict.endMinute||0)})`,
+                        '중복 스케쥴', 'alert'
+                    );
+                    return;
+                }
+
                 const resolvedWage = Number(emp.wage) > 0
                     ? Number(emp.wage)
                     : (Number(globalMinWage) > 0 ? Number(globalMinWage) : MIN_WAGE);

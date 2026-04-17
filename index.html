@@ -4079,7 +4079,7 @@
         }
 
         // ─── 직원: 근무스케쥴 탭 ───
-        function EmpScheduleTab({ bossSchedules, bossScheduleMemos, empAccount, firebaseUser, showAlert }) {
+        function EmpScheduleTab({ bossSchedules, bossScheduleMemos, empAccount, firebaseUser, showAlert, displaySettings = {} }) {
             const [today] = useState(new Date());
             const [year, setYear] = useState(today.getFullYear());
             const [month, setMonth] = useState(today.getMonth() + 1);
@@ -4245,6 +4245,119 @@
                             </div>
                         );
                     })()}
+
+                    {/* 월 예상 급여 요약 */}
+                    <div className="mt-4 bg-white rounded-xl border border-gray-200 p-4">
+                        <h3 className="text-sm font-bold text-gray-700 mb-3">{month}월 예상 급여</h3>
+                        {(() => {
+                            const ds = displaySettings || {};
+                            const empIdKey = String(empAccount?.employeeId || '0');
+                            const monthKey = `${year}-${String(month).padStart(2,'0')}`;
+                            // 내 스케쥴만 추려 per-day 변환
+                            const mySchedules = (bossSchedules || []).filter(s => String(s.empId) === empIdKey);
+                            const myMonthData = {};
+                            const myMonthAllData = {};
+                            let totalH = 0, totalPay = 0, daysSet = new Set();
+                            const wageMap = {};
+                            mySchedules.forEach(s => {
+                                const hours = ((s.endHour * 60 + (s.endMinute||0)) - (s.startHour * 60 + (s.startMinute||0))) / 60;
+                                if (hours <= 0) return;
+                                const [sy,sm,sd] = s.startDate.split('-').map(Number);
+                                const [ey,em,ed] = s.endDate.split('-').map(Number);
+                                const start = new Date(sy, sm-1, sd);
+                                const end = new Date(ey, em-1, ed);
+                                const wage = Number(empAccount?.wage) > 0 ? Number(empAccount.wage) : 0;
+                                for (let d = new Date(start); d <= end; d.setDate(d.getDate()+1)) {
+                                    const y = d.getFullYear(), mo = d.getMonth()+1, dd = d.getDate();
+                                    const mk = `${y}-${String(mo).padStart(2,'0')}`;
+                                    if (!myMonthAllData[mk]) myMonthAllData[mk] = { days: {} };
+                                    if (!myMonthAllData[mk].days[dd]) myMonthAllData[mk].days[dd] = { entries: {} };
+                                    const cur = myMonthAllData[mk].days[dd].entries[empIdKey] || { hours: 0, pay: 0, name: empAccount?.name || '', wage };
+                                    cur.hours += hours;
+                                    cur.pay += Math.round(hours * wage);
+                                    myMonthAllData[mk].days[dd].entries[empIdKey] = cur;
+                                    if (mk === monthKey) {
+                                        daysSet.add(dd);
+                                        totalH += hours;
+                                        totalPay += Math.round(hours * wage);
+                                        if (wage > 0) {
+                                            if (!wageMap[wage]) wageMap[wage] = { hours: 0, days: new Set() };
+                                            wageMap[wage].hours += hours;
+                                            wageMap[wage].days.add(dd);
+                                        }
+                                    }
+                                }
+                            });
+                            if (mySchedules.length === 0 || totalH === 0) {
+                                return (
+                                    <div className="flex flex-wrap gap-4 text-sm">
+                                        <div><p className="text-gray-500">근무일</p><p className="font-bold text-gray-800">0일</p></div>
+                                        <div><p className="text-gray-500">총 시간</p><p className="font-bold text-gray-800">0시간</p></div>
+                                    </div>
+                                );
+                            }
+                            const wages = Object.entries(wageMap).sort((a,b) => Number(a[0]) - Number(b[0]));
+                            // 주휴수당 계산 (스케쥴 전체 month 데이터로)
+                            const holidayInfo = ds.showHoliday ? (() => {
+                                try {
+                                    const fakeEmp = [{ id: Number(empIdKey), name: empAccount?.name || '', wage: Number(empAccount?.wage) || 0, scheduledDays: '5', dailyHours: '8', status: 'working' }];
+                                    const allHoliday = calcHolidayPayBySunday(myMonthAllData, fakeEmp);
+                                    let hp = 0;
+                                    Object.entries(allHoliday).forEach(([s, wd]) => {
+                                        const [sy, sm] = s.split('-').map(Number);
+                                        if (sy === year && sm === month) wd.forEach(h => { hp += h.holidayPay; });
+                                    });
+                                    return hp;
+                                } catch(e) { return 0; }
+                            })() : 0;
+                            const deductInfo = ds.showDeduction ? (() => {
+                                const ins = getInsuranceInfo(ds, empAccount);
+                                if (ins.rate <= 0) return null;
+                                const gross = ds.showHoliday ? totalPay + holidayInfo : totalPay;
+                                const deductAmt = Math.round(gross * ins.rate / 100);
+                                return { name: ins.name || '공제', rate: ins.rate, amount: deductAmt };
+                            })() : null;
+                            const finalTotal = totalPay + (ds.showHoliday ? holidayInfo : 0) - (deductInfo?.amount || 0);
+                            return (
+                                <div className="space-y-2 text-sm">
+                                    <div className="flex flex-wrap gap-4">
+                                        <div><p className="text-gray-500">근무일</p><p className="font-bold text-gray-800">{daysSet.size}일</p></div>
+                                        <div><p className="text-gray-500">총 시간</p><p className="font-bold text-gray-800">{fmtHours(totalH) || '0시간'}</p></div>
+                                    </div>
+                                    {ds.showPay !== false && (<>
+                                        {wages.map(([w, info]) => (
+                                            <div key={w} className="flex justify-between items-center bg-gray-50 rounded-lg px-3 py-2">
+                                                <span className="text-gray-600">시급 {Number(w).toLocaleString()}원 <span className="text-gray-400">× {info.days.size}일 ({fmtHours(info.hours)})</span></span>
+                                                <span className="font-bold text-gray-800">{Math.round(info.hours * Number(w)).toLocaleString()}원</span>
+                                            </div>
+                                        ))}
+                                        <div className="flex justify-between items-center border-t border-gray-200 pt-2 px-1">
+                                            <span className="font-bold text-gray-700">{ds.showHoliday || ds.showDeduction ? '급여 합산' : '합산'}</span>
+                                            <span className="font-bold text-green-600 text-base">{totalPay.toLocaleString()}원</span>
+                                        </div>
+                                    </>)}
+                                    {ds.showHoliday && holidayInfo > 0 && (
+                                        <div className="flex justify-between items-center bg-blue-50 rounded-lg px-3 py-2">
+                                            <span className="text-blue-600 font-medium">주휴수당</span>
+                                            <span className="font-bold text-blue-600">+{holidayInfo.toLocaleString()}원</span>
+                                        </div>
+                                    )}
+                                    {ds.showDeduction && deductInfo && (
+                                        <div className="flex justify-between items-center bg-orange-50 rounded-lg px-3 py-2">
+                                            <span className="text-orange-600 font-medium">{deductInfo.name} -{deductInfo.rate}%</span>
+                                            <span className="font-bold text-orange-600">-{deductInfo.amount.toLocaleString()}원</span>
+                                        </div>
+                                    )}
+                                    {(ds.showHoliday || ds.showDeduction) && (
+                                        <div className="flex justify-between items-center border-t-2 border-gray-300 pt-2 px-1">
+                                            <span className="font-bold text-gray-800">총 금액</span>
+                                            <span className="font-black text-purple-700 text-base">{finalTotal.toLocaleString()}원</span>
+                                        </div>
+                                    )}
+                                </div>
+                            );
+                        })()}
+                    </div>
 
                     {dayDetailDate && (
                         <EmpDayDetailModal
@@ -4907,6 +5020,7 @@
                                 empAccount={empAccount}
                                 firebaseUser={firebaseUser}
                                 showAlert={showAlert}
+                                displaySettings={displaySettings}
                             />
                         )}
 

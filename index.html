@@ -4375,17 +4375,33 @@
                 if (!schedMemoSeenKey) return;
                 setEmpMemoSeenAt(Number(localStorage.getItem(schedMemoSeenKey) || '0'));
             }, [schedMemoSeenKey]);
-            const schedMemoUnreadCount = useMemo(() => {
-                let cnt = 0;
-                Object.values(bossScheduleMemos || {}).forEach(list => {
-                    (list || []).forEach(m => {
+            // 메모를 "알림" 형태로 변환 (본인 작성 제외)
+            const memoNotifications = useMemo(() => {
+                const list = [];
+                Object.entries(bossScheduleMemos || {}).forEach(([date, memos]) => {
+                    (memos || []).forEach(m => {
                         if (m.authorId === firebaseUser?.uid) return;
                         const ts = m.createdAt ? new Date(m.createdAt).getTime() : 0;
-                        if (ts > empMemoSeenAt) cnt++;
+                        list.push({
+                            id: `memo:${m.id}`,
+                            type: 'memo_new',
+                            date,
+                            authorName: m.authorName,
+                            text: m.text,
+                            createdAtISO: m.createdAt,
+                            _ts: ts,
+                            read: ts <= empMemoSeenAt,
+                            bossUid: empAccount?.bossUid || null
+                        });
                     });
                 });
-                return cnt;
-            }, [bossScheduleMemos, empMemoSeenAt, firebaseUser?.uid]);
+                return list;
+            }, [bossScheduleMemos, empMemoSeenAt, firebaseUser?.uid, empAccount?.bossUid]);
+            const schedMemoUnreadCount = memoNotifications.filter(n => !n.read).length;
+            const combinedNotifications = useMemo(() => {
+                const fs = notifications.map(n => ({ ...n, _ts: n.createdAt?.toDate ? n.createdAt.toDate().getTime() : (n.createdAt ? new Date(n.createdAt).getTime() : 0) }));
+                return [...fs, ...memoNotifications].sort((a, b) => (b._ts || 0) - (a._ts || 0));
+            }, [notifications, memoNotifications]);
             const markSchedMemosSeenEmp = () => {
                 const now = Date.now();
                 if (schedMemoSeenKey) localStorage.setItem(schedMemoSeenKey, String(now));
@@ -4895,16 +4911,16 @@
                         {activeTab === 'notifications' && (
                             <div className="space-y-3">
                                 <h2 className="text-lg font-bold text-gray-800 mb-2">변경 알림</h2>
-                                {notifications.length === 0 ? (
+                                {combinedNotifications.length === 0 ? (
                                     <div className="text-center py-12 bg-white rounded-xl border border-gray-200">
                                         <CheckCircle2 className="w-10 h-10 text-gray-300 mx-auto mb-2"/>
                                         <p className="text-gray-400 text-sm">알림이 없습니다</p>
                                     </div>
-                                ) : notifications.map(n => (
+                                ) : combinedNotifications.map(n => (
                                     <div key={n.id} className={`bg-white rounded-xl border p-4 ${n.read ? 'border-gray-200' : n.type === 'payslip' ? 'border-emerald-300 bg-emerald-50' : 'border-yellow-300 bg-yellow-50'}`}>
                                         <div className="flex items-start justify-between mb-1">
                                             <p className="text-sm font-bold text-gray-800">
-                                                {n.type === 'payslip' ? '급여명세서 도착' : n.type === 'status_change' ? '근무 상태 변경' : n.type === 'wage_change' ? '시급 변경' : n.type === 'wage_modified' ? `${n.date} 시급 변경` : n.type === 'name_change' ? '이름 변경' : n.type === 'shop_name_change' ? '업체명 변경' : n.type === 'schedule_new' ? '새 스케쥴 등록' : n.type === 'schedule_deleted' ? '스케쥴 삭제' : n.type === 'schedule_updated' ? '스케쥴 변경' : n.type === 'hours_entered' ? `${n.date} 근무시간 등록` : n.type === 'hours_deleted' ? `${n.date} 근무시간 삭제` : `${n.date} 근무시간 변경`}
+                                                {n.type === 'payslip' ? '급여명세서 도착' : n.type === 'status_change' ? '근무 상태 변경' : n.type === 'wage_change' ? '시급 변경' : n.type === 'wage_modified' ? `${n.date} 시급 변경` : n.type === 'name_change' ? '이름 변경' : n.type === 'shop_name_change' ? '업체명 변경' : n.type === 'schedule_new' ? '새 스케쥴 등록' : n.type === 'schedule_deleted' ? '스케쥴 삭제' : n.type === 'schedule_updated' ? '스케쥴 변경' : n.type === 'memo_new' ? `${(() => { const [y,m,d] = n.date.split('-'); return `${y}년 ${parseInt(m)}월 ${parseInt(d)}일`; })()} 메모 등록` : n.type === 'hours_entered' ? `${n.date} 근무시간 등록` : n.type === 'hours_deleted' ? `${n.date} 근무시간 삭제` : `${n.date} 근무시간 변경`}
                                             </p>
                                             {!n.read && <span className={`text-xs px-2 py-0.5 rounded-full font-bold ${n.type === 'payslip' ? 'bg-emerald-400 text-emerald-900' : 'bg-yellow-400 text-yellow-900'}`}>새 알림</span>}
                                         </div>
@@ -4965,6 +4981,11 @@
                                                 {n.memo && <p className="text-xs text-gray-500 mt-1 whitespace-pre-wrap">메모: {n.memo}</p>}
                                                 <p className="text-xs text-red-500 mt-1">관리자가 이 스케쥴을 삭제했습니다.</p>
                                             </div>
+                                        ) : n.type === 'memo_new' ? (
+                                            <div className="text-sm text-gray-700">
+                                                <p className="text-xs font-bold text-gray-600 mb-0.5">{n.authorName}</p>
+                                                <p className="whitespace-pre-wrap">{n.text}</p>
+                                            </div>
                                         ) : n.type === 'schedule_updated' ? (() => {
                                             const fmtDate = (s, e) => s === e
                                                 ? (() => { const [y,m,d] = s.split('-'); return `${y}년 ${parseInt(m)}월 ${parseInt(d)}일`; })()
@@ -4995,7 +5016,7 @@
                                             </>
                                         )
                                         )}
-                                        <p className="text-xs text-gray-400 mt-1">{n.createdAt?.toDate ? n.createdAt.toDate().toLocaleDateString('ko-KR') : ''}</p>
+                                        <p className="text-xs text-gray-400 mt-1">{n.createdAt?.toDate ? n.createdAt.toDate().toLocaleDateString('ko-KR') : (n.createdAtISO ? new Date(n.createdAtISO).toLocaleDateString('ko-KR') : '')}</p>
                                     </div>
                                 ))}
                             </div>

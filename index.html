@@ -409,13 +409,15 @@
         async function addEmpNotification(empUid, data) {
             const colRef = fbDb.collection('employeeAccounts').doc(empUid).collection('notifications');
             await colRef.add({ ...data, read: false, createdAt: firebase.firestore.FieldValue.serverTimestamp() });
-            // 최근 20개만 유지 — 초과분 삭제
-            const snap = await colRef.orderBy('createdAt', 'desc').get();
-            if (snap.size > 20) {
-                const batch = fbDb.batch();
-                snap.docs.slice(20).forEach(d => batch.delete(d.ref));
-                batch.commit().catch(() => {});
-            }
+            // 최근 20개만 유지 — 초과분 삭제 (권한 부족이면 조용히 스킵)
+            try {
+                const snap = await colRef.orderBy('createdAt', 'desc').get();
+                if (snap.size > 20) {
+                    const batch = fbDb.batch();
+                    snap.docs.slice(20).forEach(d => batch.delete(d.ref));
+                    batch.commit().catch(() => {});
+                }
+            } catch (_) { /* 읽기 권한 없을 수 있음 — 무시 */ }
         }
 
         async function sendChangeNotification(empUid, notif) {
@@ -1550,6 +1552,22 @@
                 return () => unsub();
             }, [firebaseUser?.uid, userRole, empAccount?.isGoogleEmployee]);
 
+            // 관리자 스케쥴/메모 실시간 sync (본 로드 외에 메모 추가 알림용 실시간 경로)
+            useEffect(() => {
+                if (!firebaseUser || userRole !== 'boss' || !currentWorkspaceId) return;
+                const unsub = fbDb.collection('workspaces').doc(currentWorkspaceId)
+                    .onSnapshot(doc => {
+                        if (!doc.exists) return;
+                        const data = doc.data();
+                        setWorkspaceInfo(prev => ({
+                            ...(prev || {}),
+                            schedules: data.schedules || [],
+                            scheduleMemos: data.scheduleMemos || {}
+                        }));
+                    }, () => {});
+                return () => unsub();
+            }, [firebaseUser, userRole, currentWorkspaceId]);
+
             // 관리자 워크스페이스 로드 — currentWorkspaceId 기반
             useEffect(() => {
                 if (!firebaseUser || userRole !== 'boss' || !currentWorkspaceId) return;
@@ -2191,6 +2209,36 @@
                 return <LandingScreen onBossLogin={handleGoogleLogin} onEmpGoogleLogin={handleEmpGoogleLogin} modalConfig={modalConfig} />;
             }
 
+            // ── 스케쥴 메모 미확인 카운트/배너 (관리자) ──
+            const memoSeenKey = currentWorkspaceId ? `schedMemoSeenAt_${currentWorkspaceId}` : null;
+            const [memoSeenAt, setMemoSeenAt] = useState(() => {
+                if (!memoSeenKey) return 0;
+                return Number(localStorage.getItem(memoSeenKey) || '0');
+            });
+            useEffect(() => {
+                if (!memoSeenKey) return;
+                setMemoSeenAt(Number(localStorage.getItem(memoSeenKey) || '0'));
+            }, [memoSeenKey]);
+            const unreadSchedMemos = useMemo(() => {
+                const all = workspaceInfo?.scheduleMemos || {};
+                const list = [];
+                Object.entries(all).forEach(([date, memos]) => {
+                    (memos || []).forEach(m => {
+                        if (m.authorId === 'boss') return; // 본인 작성 제외
+                        const ts = m.createdAt ? new Date(m.createdAt).getTime() : 0;
+                        if (ts > memoSeenAt) list.push({ ...m, date });
+                    });
+                });
+                list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+                return list;
+            }, [workspaceInfo?.scheduleMemos, memoSeenAt]);
+            const schedMemoBadgeCount = unreadSchedMemos.length;
+            const markSchedMemosSeen = () => {
+                const now = Date.now();
+                if (memoSeenKey) localStorage.setItem(memoSeenKey, String(now));
+                setMemoSeenAt(now);
+            };
+
             const allPendingEmployees = pendingGoogleEmployees;
             const contractRewriteRequests = employees.filter(e => e.status !== 'deleted' && e.contractDeleteRequest === 'employee');
             const contractRewriteRequestCount = contractRewriteRequests.length;
@@ -2685,6 +2733,9 @@
                                         {tab.id === 'invite' && allPendingEmployees.length > 0 && (
                                             <span className="absolute top-2 right-1 bg-red-500 text-white text-[10px] rounded-full w-4 h-4 flex items-center justify-center font-bold">{allPendingEmployees.length}</span>
                                         )}
+                                        {tab.id === 'predict' && schedMemoBadgeCount > 0 && (
+                                            <span className="absolute top-2 right-1 bg-red-500 text-white text-[10px] rounded-full w-4 h-4 flex items-center justify-center font-bold">{schedMemoBadgeCount}</span>
+                                        )}
                                     </button>
                                     );
                                 })}
@@ -2762,6 +2813,27 @@
                             >확인</button>
                         </div>
                     )}
+                    {unreadSchedMemos.length > 0 && (() => {
+                        const latest = unreadSchedMemos[0];
+                        const [y, m, d] = latest.date.split('-').map(Number);
+                        return (
+                            <div className="bg-yellow-50 border-b border-yellow-200 px-4 py-3 flex items-center justify-between gap-3">
+                                <div className="flex items-center gap-2 min-w-0">
+                                    <span className="text-yellow-500 text-base flex-shrink-0">📝</span>
+                                    <div className="min-w-0">
+                                        <p className="text-yellow-700 font-bold text-sm truncate">
+                                            {y}년 {m}월 {d}일 {latest.authorName}님의 메모{unreadSchedMemos.length > 1 ? ` 외 ${unreadSchedMemos.length - 1}건` : ''}
+                                        </p>
+                                        <p className="text-yellow-600 text-xs truncate">{latest.text}</p>
+                                    </div>
+                                </div>
+                                <button
+                                    onClick={() => { markSchedMemosSeen(); handleTabChange('predict'); }}
+                                    className="flex-shrink-0 bg-yellow-500 text-white text-xs font-bold px-3 py-2 rounded-xl hover:bg-yellow-600 transition"
+                                >확인</button>
+                            </div>
+                        );
+                    })()}
 
                     {workSubmitBanner && <WorkSubmitBannerBar banner={workSubmitBanner} onDismiss={() => setWorkSubmitBanner(null)} />}
 
@@ -2924,6 +2996,9 @@
                                     )}
                                     {tab.id === 'invite' && allPendingEmployees.length > 0 && (
                                         <span className="absolute top-1.5 right-2 bg-red-500 text-white text-[9px] rounded-full w-3.5 h-3.5 flex items-center justify-center font-bold">{allPendingEmployees.length}</span>
+                                    )}
+                                    {tab.id === 'predict' && schedMemoBadgeCount > 0 && (
+                                        <span className="absolute top-1.5 right-2 bg-red-500 text-white text-[9px] rounded-full w-3.5 h-3.5 flex items-center justify-center font-bold">{schedMemoBadgeCount}</span>
                                     )}
                                 </button>
                                 );
@@ -3863,7 +3938,7 @@
 
                         <div className="bg-gray-50 border border-gray-200 rounded-xl p-4 mb-2">
                             <h3 className="text-sm font-bold text-gray-800 mb-1">🍎 아이폰(iOS) 유저 사용방법</h3>
-                            <p className="text-xs text-gray-600 leading-relaxed mb-3">Safari 브라우저로 아래 앱 링크에 접속한 뒤, 하단 공유 버튼 → "홈 화면에 추가"를 선택하면 앱처럼 사용할 수 있어요.</p>
+                            <p className="text-xs text-gray-600 leading-relaxed mb-3">Safari 브라우저로 아래 앱 링크에 접속한 뒤, 홈 화면에 바로가기를 추가하거나 북마크로 저장해두면 앱처럼 사용할 수 있어요.</p>
                             <button onClick={copyLink} className="w-full flex items-center justify-center gap-2 bg-white border border-gray-300 text-gray-700 py-2.5 rounded-xl text-sm font-medium hover:bg-gray-100 transition">
                                 <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
                                 앱 링크 복사
@@ -4042,45 +4117,101 @@
                         <h2 className="text-lg font-bold text-gray-800">{year}년 {month}월 근무스케쥴</h2>
                         <button onClick={nextMonth} className="p-2 rounded-lg hover:bg-gray-200"><ChevronRight className="w-5 h-5"/></button>
                     </div>
-                    <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
-                        <div className="grid grid-cols-7 border-b border-gray-100">
-                            {['일','월','화','수','목','금','토'].map((d, i) => (
-                                <div key={d} className={`py-2 text-center text-xs font-bold ${i===0 ? 'text-red-500' : i===6 ? 'text-blue-500' : 'text-gray-500'}`}>{d}</div>
-                            ))}
-                        </div>
-                        <div className="grid grid-cols-7">
-                            {[...Array(firstDay)].map((_,i) => <div key={`e${i}`} className="min-h-[80px] border-b border-r border-gray-50"/>)}
-                            {[...Array(daysInMonth)].map((_,i) => {
-                                const day = i + 1;
-                                const dateStr = `${year}-${String(month).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
-                                const daySchedules = (schedulesByDay[dateStr] || []).slice().sort(
-                                    (a, b) => (a.startHour * 60 + (a.startMinute||0)) - (b.startHour * 60 + (b.startMinute||0))
-                                );
-                                const memoCount = (bossScheduleMemos[dateStr] || []).length;
-                                const isToday = today.getFullYear()===year && today.getMonth()+1===month && today.getDate()===day;
-                                const dayIdx = (firstDay + i) % 7;
-                                return (
-                                    <div key={day}
-                                        onClick={() => setDayDetailDate(dateStr)}
-                                        className={`min-h-[80px] border-b border-r border-gray-100 p-1 flex flex-col cursor-pointer hover:bg-yellow-50/50 ${isToday ? 'bg-blue-50' : ''}`}>
-                                        <div className="flex items-center justify-between">
-                                            <span className={`text-xs font-bold ${isToday ? 'text-blue-600' : dayIdx===0 ? 'text-red-500' : dayIdx===6 ? 'text-blue-500' : 'text-gray-600'}`}>{day}</span>
-                                            {memoCount > 0 && <span className="text-[8px] bg-yellow-100 text-yellow-700 px-1 rounded-full font-bold">{memoCount}</span>}
-                                        </div>
-                                        <div className="flex-1 space-y-0.5 mt-0.5">
-                                            {daySchedules.slice(0, 3).map(s => (
-                                                <div key={s.id} className="text-[9px] font-medium text-gray-800 rounded px-1 py-0.5 truncate"
-                                                    style={{backgroundColor: s.color}}>
-                                                    {s.empName}({fmtTime(s.startHour, s.startMinute||0)}~{fmtTime(s.endHour, s.endMinute||0)})
+                    {(() => {
+                        const pDays = [];
+                        for (let i = 0; i < firstDay; i++) pDays.push(null);
+                        for (let d = 1; d <= daysInMonth; d++) pDays.push(d);
+                        while (pDays.length % 7 !== 0) pDays.push(null);
+                        const weeks = [];
+                        for (let i = 0; i < pDays.length; i += 7) weeks.push(pDays.slice(i, i + 7));
+                        const computeWeekBars = (week) => {
+                            const dateStrs = week.map(d => d == null ? null : `${year}-${String(month).padStart(2,'0')}-${String(d).padStart(2,'0')}`);
+                            const bars = [];
+                            (bossSchedules || []).forEach(s => {
+                                let startCol = -1, endCol = -1;
+                                for (let i = 0; i < 7; i++) {
+                                    const ds = dateStrs[i];
+                                    if (!ds) continue;
+                                    if (ds >= s.startDate && ds <= s.endDate) {
+                                        if (startCol === -1) startCol = i;
+                                        endCol = i;
+                                    }
+                                }
+                                if (startCol !== -1) bars.push({ ...s, startCol, endCol });
+                            });
+                            bars.sort((a, b) =>
+                                (a.startHour * 60 + (a.startMinute||0)) - (b.startHour * 60 + (b.startMinute||0))
+                                || a.startCol - b.startCol
+                            );
+                            const rows = [];
+                            bars.forEach(bar => {
+                                let placed = false;
+                                for (let r = 0; r < rows.length; r++) {
+                                    if (rows[r].every(rb => rb.endCol < bar.startCol || rb.startCol > bar.endCol)) {
+                                        rows[r].push(bar); bar.row = r; placed = true; break;
+                                    }
+                                }
+                                if (!placed) { rows.push([bar]); bar.row = rows.length - 1; }
+                            });
+                            return { bars, rowCount: rows.length };
+                        };
+                        return (
+                            <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+                                <div className="grid grid-cols-7 border-b border-gray-100">
+                                    {['일','월','화','수','목','금','토'].map((d, i) => (
+                                        <div key={d} className={`py-2 text-center text-xs font-bold ${i===0 ? 'text-red-500' : i===6 ? 'text-blue-500' : 'text-gray-500'}`}>{d}</div>
+                                    ))}
+                                </div>
+                                {weeks.map((week, weekIdx) => {
+                                    const { bars, rowCount } = computeWeekBars(week);
+                                    const barAreaHeight = Math.max(rowCount * 18 + 4, 40);
+                                    return (
+                                        <div key={`wk-${weekIdx}`} className="relative border-b border-gray-100">
+                                            <div className="grid grid-cols-7">
+                                                {week.map((day, idx) => {
+                                                    if (!day) return <div key={`e-${weekIdx}-${idx}`} className="border-r border-gray-50" style={{minHeight: `${barAreaHeight + 24}px`}}/>;
+                                                    const dateStr = `${year}-${String(month).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+                                                    const memoCount = (bossScheduleMemos[dateStr] || []).length;
+                                                    const isToday = today.getFullYear()===year && today.getMonth()+1===month && today.getDate()===day;
+                                                    return (
+                                                        <div key={day}
+                                                            onClick={() => setDayDetailDate(dateStr)}
+                                                            className={`border-r border-gray-100 p-1 cursor-pointer hover:bg-yellow-50/50 ${isToday ? 'bg-blue-50' : ''}`}
+                                                            style={{minHeight: `${barAreaHeight + 24}px`}}>
+                                                            <div className="flex items-center justify-between">
+                                                                <span className={`text-xs font-bold ${isToday ? 'text-blue-600' : idx===0 ? 'text-red-500' : idx===6 ? 'text-blue-500' : 'text-gray-600'}`}>{day}</span>
+                                                                {memoCount > 0 && <span className="text-[8px] bg-yellow-100 text-yellow-700 px-1 rounded-full font-bold">{memoCount}</span>}
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
+                                            <div className="absolute left-0 right-0 pointer-events-none" style={{top: '22px', bottom: '0'}}>
+                                                <div className="grid grid-cols-7 h-full px-0.5"
+                                                    style={{gridAutoRows: '16px', rowGap: '2px', alignContent: 'start'}}>
+                                                    {bars.map(bar => {
+                                                        const label = `${bar.empName}(${fmtTime(bar.startHour, bar.startMinute||0)}~${fmtTime(bar.endHour, bar.endMinute||0)})`;
+                                                        return (
+                                                            <div key={`${bar.id}-wk${weekIdx}`}
+                                                                style={{
+                                                                    gridColumn: `${bar.startCol + 1} / ${bar.endCol + 2}`,
+                                                                    gridRow: bar.row + 1,
+                                                                    backgroundColor: bar.color
+                                                                }}
+                                                                className="text-[9px] font-medium text-gray-800 rounded px-1 truncate leading-[16px] text-center"
+                                                                title={label}>
+                                                                {label}
+                                                            </div>
+                                                        );
+                                                    })}
                                                 </div>
-                                            ))}
-                                            {daySchedules.length > 3 && <div className="text-[8px] text-gray-400">+{daySchedules.length - 3}</div>}
+                                            </div>
                                         </div>
-                                    </div>
-                                );
-                            })}
-                        </div>
-                    </div>
+                                    );
+                                })}
+                            </div>
+                        );
+                    })()}
 
                     {dayDetailDate && (
                         <EmpDayDetailModal
@@ -4203,6 +4334,36 @@
                     }, () => {});
                 return () => unsub();
             }, [firebaseUser, empAccount?.bossUid]);
+
+            // 스케쥴 메모 미확인 카운트 (본인 제외)
+            const schedMemoSeenKey = empAccount?.bossUid ? `schedMemoSeenAt_emp_${empAccount.bossUid}` : null;
+            const [empMemoSeenAt, setEmpMemoSeenAt] = useState(() => {
+                if (!schedMemoSeenKey) return 0;
+                return Number(localStorage.getItem(schedMemoSeenKey) || '0');
+            });
+            useEffect(() => {
+                if (!schedMemoSeenKey) return;
+                setEmpMemoSeenAt(Number(localStorage.getItem(schedMemoSeenKey) || '0'));
+            }, [schedMemoSeenKey]);
+            const schedMemoUnreadCount = useMemo(() => {
+                let cnt = 0;
+                Object.values(bossScheduleMemos || {}).forEach(list => {
+                    (list || []).forEach(m => {
+                        if (m.authorId === firebaseUser?.uid) return;
+                        const ts = m.createdAt ? new Date(m.createdAt).getTime() : 0;
+                        if (ts > empMemoSeenAt) cnt++;
+                    });
+                });
+                return cnt;
+            }, [bossScheduleMemos, empMemoSeenAt, firebaseUser?.uid]);
+            const markSchedMemosSeenEmp = () => {
+                const now = Date.now();
+                if (schedMemoSeenKey) localStorage.setItem(schedMemoSeenKey, String(now));
+                setEmpMemoSeenAt(now);
+            };
+            useEffect(() => {
+                if (activeTab === 'schedule' && schedMemoUnreadCount > 0) markSchedMemosSeenEmp();
+            }, [activeTab, schedMemoUnreadCount]);
 
             // 급여명세서 실시간 로드
             useEffect(() => {
@@ -4794,9 +4955,10 @@
                             <button onClick={() => setActiveTab('calendar')} className={`flex-1 flex flex-col items-center py-3 gap-1 text-[10px] font-medium ${activeTab==='calendar' ? 'text-blue-600' : 'text-gray-400'}`}>
                                 <CalendarIcon className="w-5 h-5"/>근무 입력
                             </button>
-                            <button onClick={() => setActiveTab('schedule')} className={`flex-1 flex flex-col items-center py-3 gap-1 text-[10px] font-medium ${activeTab==='schedule' ? 'text-blue-600' : 'text-gray-400'}`}>
+                            <button onClick={() => setActiveTab('schedule')} className={`flex-1 relative flex flex-col items-center py-3 gap-1 text-[10px] font-medium ${activeTab==='schedule' ? 'text-blue-600' : 'text-gray-400'}`}>
                                 <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
                                 근무스케쥴
+                                {schedMemoUnreadCount > 0 && <span className="absolute top-1.5 right-3 bg-red-500 text-white text-[9px] rounded-full w-4 h-4 flex items-center justify-center font-bold">{schedMemoUnreadCount}</span>}
                             </button>
                             <button onClick={() => setActiveTab('notifications')} className={`flex-1 relative flex flex-col items-center py-3 gap-1 text-[10px] font-medium ${activeTab==='notifications' ? 'text-blue-600' : 'text-gray-400'}`}>
                                 <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
@@ -9333,8 +9495,16 @@
                     const wsId = workspaceId || firebaseUser.uid;
                     await fbDb.collection('workspaces').doc(wsId).update({ schedules: newList });
                     setWorkspaceInfo(prev => ({ ...prev, schedules: newList }));
-                    if (!initial && emp.empUid) {
-                        sendScheduleNotification(emp.empUid, wsId, schedule).catch(() => {});
+                    if (!initial) {
+                        if (emp.empUid) {
+                            try {
+                                await sendScheduleNotification(emp.empUid, wsId, schedule);
+                            } catch (err) {
+                                console.warn('schedule_new 알림 발송 실패:', err);
+                            }
+                        } else {
+                            console.warn('선택된 근무자에 empUid가 없어 알림 발송 건너뜀:', emp);
+                        }
                     }
                     onClose();
                 } catch (e) {
@@ -9792,7 +9962,45 @@
                             const pDays = [];
                             for (let i = 0; i < pFirstDay; i++) pDays.push(null);
                             for (let d = 1; d <= pDaysIn; d++) pDays.push(d);
+                            while (pDays.length % 7 !== 0) pDays.push(null);
+                            const weeks = [];
+                            for (let i = 0; i < pDays.length; i += 7) weeks.push(pDays.slice(i, i + 7));
                             const fmtTime = (h, m) => m === 0 ? `${h}시` : `${h}시${m}분`;
+                            // 주별 스케쥴 세그먼트 + 겹침 방지용 row 배정
+                            const computeWeekBars = (week) => {
+                                const dateStrs = week.map(d => d == null ? null : `${py}-${String(pm).padStart(2,'0')}-${String(d).padStart(2,'0')}`);
+                                const bars = [];
+                                schedules.forEach(s => {
+                                    let startCol = -1, endCol = -1;
+                                    for (let i = 0; i < 7; i++) {
+                                        const ds = dateStrs[i];
+                                        if (!ds) continue;
+                                        if (ds >= s.startDate && ds <= s.endDate) {
+                                            if (startCol === -1) startCol = i;
+                                            endCol = i;
+                                        }
+                                    }
+                                    if (startCol !== -1) bars.push({ ...s, startCol, endCol });
+                                });
+                                bars.sort((a, b) =>
+                                    (a.startHour * 60 + (a.startMinute||0)) - (b.startHour * 60 + (b.startMinute||0))
+                                    || a.startCol - b.startCol
+                                );
+                                const rows = [];
+                                bars.forEach(bar => {
+                                    let placed = false;
+                                    for (let r = 0; r < rows.length; r++) {
+                                        if (rows[r].every(rb => rb.endCol < bar.startCol || rb.startCol > bar.endCol)) {
+                                            rows[r].push(bar);
+                                            bar.row = r;
+                                            placed = true;
+                                            break;
+                                        }
+                                    }
+                                    if (!placed) { rows.push([bar]); bar.row = rows.length - 1; }
+                                });
+                                return { bars, rowCount: rows.length };
+                            };
                             return (
                                 <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden w-full flex-shrink-0">
                                     <div className="grid grid-cols-7 bg-gray-50 border-b border-gray-200">
@@ -9800,56 +10008,68 @@
                                             <div key={day} className={`text-center py-3 text-sm font-bold ${i === 0 ? 'text-red-500' : i === 6 ? 'text-blue-500' : 'text-gray-600'}`}>{day}</div>
                                         ))}
                                     </div>
-                                    <div className="grid grid-cols-7 auto-rows-fr">
-                                        {pDays.map((day, idx) => {
-                                            if (!day) return <div key={`ep-${idx}`} className="cal-cell-empty min-h-[120px] border-b border-r border-gray-100 bg-gray-50/50"></div>;
-                                            const dateStr = `${py}-${String(pm).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
-                                            const daySchedules = (schedulesByDay[dateStr] || []).slice().sort(
-                                                (a, b) => (a.startHour * 60 + (a.startMinute||0)) - (b.startHour * 60 + (b.startMinute||0))
-                                            );
-                                            const memoCount = (scheduleMemos[dateStr] || []).length;
-                                            const isSunday = idx % 7 === 0;
-                                            const holidayEntries = isSunday ? (holidayPayBySunday[dateStr] || []) : [];
-                                            const handleOpenDay = isCurrent ? () => setDayDetailModal(dateStr) : undefined;
-                                            return (
-                                                <div key={`epd-${day}`}
-                                                    className={`cal-cell min-h-[140px] border-b border-r border-gray-100 p-1.5 relative ${isCurrent ? 'hover:bg-yellow-50/50 transition cursor-pointer' : ''}`}
-                                                    onClick={handleOpenDay}>
-                                                    <div className="flex justify-between items-center mb-1">
-                                                        <span className={`text-sm font-bold w-6 h-6 flex items-center justify-center rounded-full ${idx % 7 === 0 ? 'text-red-500' : idx % 7 === 6 ? 'text-blue-500' : 'text-gray-700'}`}>{day}</span>
-                                                        {memoCount > 0 && (
-                                                            <span className="text-[9px] bg-yellow-100 text-yellow-700 px-1.5 py-0.5 rounded-full font-bold">메모 {memoCount}</span>
-                                                        )}
-                                                    </div>
-                                                    <div className="space-y-0.5">
-                                                        {daySchedules.slice(0, 5).map(s => {
-                                                            const label = `${s.empName}(${fmtTime(s.startHour, s.startMinute||0)}~${fmtTime(s.endHour, s.endMinute||0)})`;
+                                    {weeks.map((week, weekIdx) => {
+                                        const { bars, rowCount } = computeWeekBars(week);
+                                        const barAreaHeight = Math.max(rowCount * 22 + 6, 70);
+                                        return (
+                                            <div key={`wk-${weekIdx}`} className="relative border-b border-gray-100">
+                                                <div className="grid grid-cols-7 auto-rows-fr">
+                                                    {week.map((day, idx) => {
+                                                        if (!day) return <div key={`ep-${weekIdx}-${idx}`} className="min-h-[110px] border-r border-gray-100 bg-gray-50/50"></div>;
+                                                        const dateStr = `${py}-${String(pm).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+                                                        const memoCount = (scheduleMemos[dateStr] || []).length;
+                                                        const holidayEntries = idx === 0 ? (holidayPayBySunday[dateStr] || []) : [];
+                                                        const handleOpenDay = isCurrent ? () => setDayDetailModal(dateStr) : undefined;
+                                                        return (
+                                                            <div key={`epd-${weekIdx}-${day}`}
+                                                                className={`border-r border-gray-100 p-1.5 relative ${isCurrent ? 'hover:bg-yellow-50/50 transition cursor-pointer' : ''}`}
+                                                                style={{minHeight: `${barAreaHeight + 40}px`}}
+                                                                onClick={handleOpenDay}>
+                                                                <div className="flex justify-between items-center mb-1">
+                                                                    <span className={`text-sm font-bold w-6 h-6 flex items-center justify-center rounded-full ${idx === 0 ? 'text-red-500' : idx === 6 ? 'text-blue-500' : 'text-gray-700'}`}>{day}</span>
+                                                                    {memoCount > 0 && (
+                                                                        <span className="text-[9px] bg-yellow-100 text-yellow-700 px-1.5 py-0.5 rounded-full font-bold">메모 {memoCount}</span>
+                                                                    )}
+                                                                </div>
+                                                                {holidayEntries.length > 0 && (
+                                                                    <div className="hidden md:block absolute bottom-1 left-1 right-1 pt-1 border-t border-blue-100 border-dashed">
+                                                                        <div className="text-[9px] font-bold text-blue-600">주휴수당</div>
+                                                                        {holidayEntries.slice(0, 2).map((h, i) => (
+                                                                            <div key={i} className="text-[9px] text-blue-500 truncate">{h.name}: {formatCurrency(h.holidayPay)}</div>
+                                                                        ))}
+                                                                    </div>
+                                                                )}
+                                                            </div>
+                                                        );
+                                                    })}
+                                                </div>
+                                                {/* 연속 음영바 오버레이 */}
+                                                <div className="absolute left-0 right-0 pointer-events-none"
+                                                    style={{top: '28px', bottom: '0'}}>
+                                                    <div className="grid grid-cols-7 h-full px-0.5"
+                                                        style={{gridAutoRows: '20px', rowGap: '2px', alignContent: 'start'}}>
+                                                        {bars.map(bar => {
+                                                            const label = `${bar.empName}(${fmtTime(bar.startHour, bar.startMinute||0)}~${fmtTime(bar.endHour, bar.endMinute||0)})`;
                                                             return (
-                                                                <div key={s.id}
-                                                                    onClick={(e) => { if (isCurrent) { e.stopPropagation(); setScheduleModal({ schedule: s }); } }}
-                                                                    className={`text-[10px] md:text-[11px] font-medium text-gray-800 rounded px-1.5 py-0.5 truncate ${isCurrent ? 'cursor-pointer hover:opacity-80' : ''}`}
-                                                                    style={{backgroundColor: s.color}}
-                                                                    title={label + (s.memo ? ` | ${s.memo}` : '')}>
+                                                                <div key={`${bar.id}-wk${weekIdx}`}
+                                                                    onClick={(e) => { if (isCurrent) { e.stopPropagation(); setScheduleModal({ schedule: { id: bar.id, startDate: bar.startDate, endDate: bar.endDate, startHour: bar.startHour, startMinute: bar.startMinute, endHour: bar.endHour, endMinute: bar.endMinute, empId: bar.empId, empName: bar.empName, color: bar.color, memo: bar.memo, createdAt: bar.createdAt } }); } }}
+                                                                    style={{
+                                                                        gridColumn: `${bar.startCol + 1} / ${bar.endCol + 2}`,
+                                                                        gridRow: bar.row + 1,
+                                                                        backgroundColor: bar.color,
+                                                                        pointerEvents: isCurrent ? 'auto' : 'none'
+                                                                    }}
+                                                                    className={`text-[10px] md:text-[11px] font-medium text-gray-800 rounded px-1.5 truncate leading-5 text-center ${isCurrent ? 'cursor-pointer hover:opacity-80' : ''}`}
+                                                                    title={label + (bar.memo ? ` | ${bar.memo}` : '')}>
                                                                     {label}
                                                                 </div>
                                                             );
                                                         })}
-                                                        {daySchedules.length > 5 && (
-                                                            <div className="text-[9px] text-gray-400 italic">+{daySchedules.length - 5}개...</div>
-                                                        )}
                                                     </div>
-                                                    {holidayEntries.length > 0 && (
-                                                        <div className="hidden md:block mt-1 pt-1 border-t border-blue-100 border-dashed">
-                                                            <div className="text-[9px] font-bold text-blue-600">주휴수당</div>
-                                                            {holidayEntries.slice(0, 2).map((h, i) => (
-                                                                <div key={i} className="text-[9px] text-blue-500 truncate">{h.name}: {formatCurrency(h.holidayPay)}</div>
-                                                            ))}
-                                                        </div>
-                                                    )}
                                                 </div>
-                                            );
-                                        })}
-                                    </div>
+                                            </div>
+                                        );
+                                    })}
                                 </div>
                             );
                         };

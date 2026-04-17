@@ -535,6 +535,21 @@
             });
         }
 
+        // 스케쥴 삭제 알림 발송
+        async function sendScheduleDeletedNotification(empUid, bossUid, schedule) {
+            await addEmpNotification(empUid, {
+                type: 'schedule_deleted',
+                startDate: schedule.startDate,
+                endDate: schedule.endDate,
+                startHour: schedule.startHour,
+                startMinute: schedule.startMinute,
+                endHour: schedule.endHour,
+                endMinute: schedule.endMinute,
+                memo: schedule.memo || '',
+                bossUid: bossUid || null
+            });
+        }
+
         // ─── 스케쥴 파스텔 컬러 팔레트 ───
         const PASTEL_COLORS = [
             '#fecaca', '#fed7aa', '#fef08a', '#bbf7d0', '#99f6e4',
@@ -4873,7 +4888,7 @@
                                     <div key={n.id} className={`bg-white rounded-xl border p-4 ${n.read ? 'border-gray-200' : n.type === 'payslip' ? 'border-emerald-300 bg-emerald-50' : 'border-yellow-300 bg-yellow-50'}`}>
                                         <div className="flex items-start justify-between mb-1">
                                             <p className="text-sm font-bold text-gray-800">
-                                                {n.type === 'payslip' ? '급여명세서 도착' : n.type === 'status_change' ? '근무 상태 변경' : n.type === 'wage_change' ? '시급 변경' : n.type === 'wage_modified' ? `${n.date} 시급 변경` : n.type === 'name_change' ? '이름 변경' : n.type === 'shop_name_change' ? '업체명 변경' : n.type === 'schedule_new' ? '새 스케쥴 등록' : n.type === 'hours_entered' ? `${n.date} 근무시간 등록` : n.type === 'hours_deleted' ? `${n.date} 근무시간 삭제` : `${n.date} 근무시간 변경`}
+                                                {n.type === 'payslip' ? '급여명세서 도착' : n.type === 'status_change' ? '근무 상태 변경' : n.type === 'wage_change' ? '시급 변경' : n.type === 'wage_modified' ? `${n.date} 시급 변경` : n.type === 'name_change' ? '이름 변경' : n.type === 'shop_name_change' ? '업체명 변경' : n.type === 'schedule_new' ? '새 스케쥴 등록' : n.type === 'schedule_deleted' ? '스케쥴 삭제' : n.type === 'hours_entered' ? `${n.date} 근무시간 등록` : n.type === 'hours_deleted' ? `${n.date} 근무시간 삭제` : `${n.date} 근무시간 변경`}
                                             </p>
                                             {!n.read && <span className={`text-xs px-2 py-0.5 rounded-full font-bold ${n.type === 'payslip' ? 'bg-emerald-400 text-emerald-900' : 'bg-yellow-400 text-yellow-900'}`}>새 알림</span>}
                                         </div>
@@ -4916,6 +4931,23 @@
                                                     {n.startHour}시{n.startMinute ? `${n.startMinute}분` : '0분'}~{n.endHour}시{n.endMinute ? `${n.endMinute}분` : '0분'}
                                                 </span></p>
                                                 {n.memo && <p className="text-xs text-gray-500 mt-1 whitespace-pre-wrap">메모: {n.memo}</p>}
+                                            </div>
+                                        ) : n.type === 'schedule_deleted' ? (
+                                            <div className="text-sm text-gray-700 space-y-0.5">
+                                                <p>삭제된 근무날짜: <span className="font-medium text-red-600 line-through">{
+                                                    n.startDate === n.endDate
+                                                        ? (() => { const [y,m,d] = n.startDate.split('-'); return `${y}년 ${parseInt(m)}월 ${parseInt(d)}일`; })()
+                                                        : (() => {
+                                                            const [sy,sm,sd] = n.startDate.split('-');
+                                                            const [ey,em,ed] = n.endDate.split('-');
+                                                            return `${sy}년 ${parseInt(sm)}월 ${parseInt(sd)}일 ~ ${ey}년 ${parseInt(em)}월 ${parseInt(ed)}일`;
+                                                        })()
+                                                }</span></p>
+                                                <p>근무시간: <span className="font-medium text-red-600 line-through">
+                                                    {n.startHour}시{n.startMinute ? `${n.startMinute}분` : '0분'}~{n.endHour}시{n.endMinute ? `${n.endMinute}분` : '0분'}
+                                                </span></p>
+                                                {n.memo && <p className="text-xs text-gray-500 mt-1 whitespace-pre-wrap">메모: {n.memo}</p>}
+                                                <p className="text-xs text-red-500 mt-1">관리자가 이 스케쥴을 삭제했습니다.</p>
                                             </div>
                                         ) : (
                                         n.type === 'hours_entered' ? (
@@ -9526,6 +9558,15 @@
                         const wsId = workspaceId || firebaseUser.uid;
                         await fbDb.collection('workspaces').doc(wsId).update({ schedules: newList });
                         setWorkspaceInfo(prev => ({ ...prev, schedules: newList }));
+                        // 삭제 알림 발송 (해당 근무자에게)
+                        const targetEmp = activeEmployees.find(e => String(e.id) === String(initial.empId));
+                        if (targetEmp?.empUid) {
+                            try {
+                                await sendScheduleDeletedNotification(targetEmp.empUid, wsId, initial);
+                            } catch (err) {
+                                console.warn('schedule_deleted 알림 발송 실패:', err);
+                            }
+                        }
                         onClose();
                     } catch (e) {
                         showAlert('삭제 실패: ' + e.message, '오류', 'error');

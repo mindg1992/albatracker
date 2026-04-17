@@ -584,7 +584,9 @@
                 const start = new Date(sy, sm - 1, sd);
                 const end = new Date(ey, em - 1, ed);
                 const emp = employees.find(e => String(e.id) === String(s.empId));
-                const wage = Number(emp?.wage) > 0 ? Number(emp.wage) : (Number(globalMinWage) || MIN_WAGE);
+                const wage = Number(s.wage) > 0 ? Number(s.wage)
+                    : Number(emp?.wage) > 0 ? Number(emp.wage)
+                    : (Number(globalMinWage) || MIN_WAGE);
                 for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
                     if (d.getFullYear() !== year || d.getMonth() + 1 !== month) continue;
                     const day = d.getDate();
@@ -609,7 +611,9 @@
                 const start = new Date(sy, sm - 1, sd);
                 const end = new Date(ey, em - 1, ed);
                 const emp = employees.find(e => String(e.id) === String(s.empId));
-                const wage = Number(emp?.wage) > 0 ? Number(emp.wage) : (Number(globalMinWage) || MIN_WAGE);
+                const wage = Number(s.wage) > 0 ? Number(s.wage)
+                    : Number(emp?.wage) > 0 ? Number(emp.wage)
+                    : (Number(globalMinWage) || MIN_WAGE);
                 for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
                     const y = d.getFullYear();
                     const m = d.getMonth() + 1;
@@ -4266,7 +4270,7 @@
                                 const [ey,em,ed] = s.endDate.split('-').map(Number);
                                 const start = new Date(sy, sm-1, sd);
                                 const end = new Date(ey, em-1, ed);
-                                const wage = Number(empAccount?.wage) > 0 ? Number(empAccount.wage) : 0;
+                                const wage = Number(s.wage) > 0 ? Number(s.wage) : 0;
                                 for (let d = new Date(start); d <= end; d.setDate(d.getDate()+1)) {
                                     const y = d.getFullYear(), mo = d.getMonth()+1, dd = d.getDate();
                                     const mk = `${y}-${String(mo).padStart(2,'0')}`;
@@ -9646,7 +9650,7 @@
         }
 
         // ─── 스케쥴 편집 모달 (관리자 전용) ───
-        function ScheduleEditModal({ initial, defaultDate, activeEmployees, workspaceId, firebaseUser, workspaceInfo, setWorkspaceInfo, onClose, showAlert, showConfirm }) {
+        function ScheduleEditModal({ initial, defaultDate, activeEmployees, workspaceId, firebaseUser, workspaceInfo, setWorkspaceInfo, onClose, showAlert, showConfirm, globalMinWage }) {
             const todayStr = defaultDate || (() => {
                 const t = new Date();
                 return `${t.getFullYear()}-${String(t.getMonth()+1).padStart(2,'0')}-${String(t.getDate()).padStart(2,'0')}`;
@@ -9680,6 +9684,9 @@
                 const emp = activeEmployees.find(e => String(e.id) === String(empId));
                 if (!emp) { showAlert('근무자를 찾을 수 없습니다.', '오류', 'error'); return; }
 
+                const resolvedWage = Number(emp.wage) > 0
+                    ? Number(emp.wage)
+                    : (Number(globalMinWage) > 0 ? Number(globalMinWage) : MIN_WAGE);
                 const schedule = {
                     id: initial?.id || `sched_${Date.now()}_${Math.random().toString(36).slice(2,8)}`,
                     startDate, endDate,
@@ -9687,6 +9694,7 @@
                     endHour: eH, endMinute: eM,
                     empId: emp.id,
                     empName: emp.name,
+                    wage: resolvedWage,
                     color,
                     memo: memo.trim(),
                     createdAt: initial?.createdAt || new Date().toISOString()
@@ -10351,6 +10359,7 @@
                             onClose={() => setScheduleModal(null)}
                             showAlert={showAlert}
                             showConfirm={showConfirm}
+                            globalMinWage={globalMinWage}
                         />
                     )}
                     {dayDetailModal && (

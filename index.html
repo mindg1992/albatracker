@@ -518,6 +518,81 @@
             await addEmpNotification(empUid, { type: 'wage_change', oldWage, newWage, bossUid: bossUid || null });
         }
 
+        // 스케쥴 등록 알림 발송
+        async function sendScheduleNotification(empUid, bossUid, schedule) {
+            await addEmpNotification(empUid, {
+                type: 'schedule_new',
+                startDate: schedule.startDate,
+                endDate: schedule.endDate,
+                startHour: schedule.startHour,
+                startMinute: schedule.startMinute,
+                endHour: schedule.endHour,
+                endMinute: schedule.endMinute,
+                memo: schedule.memo || '',
+                bossUid: bossUid || null
+            });
+        }
+
+        // ─── 스케쥴 파스텔 컬러 팔레트 ───
+        const PASTEL_COLORS = [
+            '#fecaca', '#fed7aa', '#fef08a', '#bbf7d0', '#99f6e4',
+            '#bfdbfe', '#e9d5ff', '#fbcfe8', '#d9f99d', '#fde68a'
+        ];
+
+        // ─── 스케쥴 → 월별 per-day 엔트리 변환 (급여 계산용) ───
+        function schedulesToMonthlyData(schedules, year, month, employees, globalMinWage) {
+            const monthKey = `${year}-${month.toString().padStart(2,'0')}`;
+            const days = {};
+            (schedules || []).forEach(s => {
+                const hours = ((s.endHour * 60 + (s.endMinute || 0)) - (s.startHour * 60 + (s.startMinute || 0))) / 60;
+                if (hours <= 0) return;
+                const [sy, sm, sd] = s.startDate.split('-').map(Number);
+                const [ey, em, ed] = s.endDate.split('-').map(Number);
+                const start = new Date(sy, sm - 1, sd);
+                const end = new Date(ey, em - 1, ed);
+                const emp = employees.find(e => String(e.id) === String(s.empId));
+                const wage = Number(emp?.wage) > 0 ? Number(emp.wage) : (Number(globalMinWage) || MIN_WAGE);
+                for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+                    if (d.getFullYear() !== year || d.getMonth() + 1 !== month) continue;
+                    const day = d.getDate();
+                    if (!days[day]) days[day] = { entries: {}, revenue: 0 };
+                    const key = String(s.empId);
+                    if (!days[day].entries[key]) days[day].entries[key] = { hours: 0, pay: 0, name: s.empName || emp?.name || '', wage };
+                    days[day].entries[key].hours += hours;
+                    days[day].entries[key].pay += Math.round(hours * wage);
+                }
+            });
+            return { [monthKey]: { days } };
+        }
+
+        // 전체 스케쥴 기반 월별맵(주휴수당용) — 여러 달 커버
+        function schedulesToAllMonthlyData(schedules, employees, globalMinWage) {
+            const out = {};
+            (schedules || []).forEach(s => {
+                const hours = ((s.endHour * 60 + (s.endMinute || 0)) - (s.startHour * 60 + (s.startMinute || 0))) / 60;
+                if (hours <= 0) return;
+                const [sy, sm, sd] = s.startDate.split('-').map(Number);
+                const [ey, em, ed] = s.endDate.split('-').map(Number);
+                const start = new Date(sy, sm - 1, sd);
+                const end = new Date(ey, em - 1, ed);
+                const emp = employees.find(e => String(e.id) === String(s.empId));
+                const wage = Number(emp?.wage) > 0 ? Number(emp.wage) : (Number(globalMinWage) || MIN_WAGE);
+                for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+                    const y = d.getFullYear();
+                    const m = d.getMonth() + 1;
+                    const day = d.getDate();
+                    const mk = `${y}-${m.toString().padStart(2,'0')}`;
+                    if (!out[mk]) out[mk] = { days: {} };
+                    if (!out[mk].days[day]) out[mk].days[day] = { entries: {}, revenue: 0 };
+                    const key = String(s.empId);
+                    if (!out[mk].days[day].entries[key]) out[mk].days[day].entries[key] = { hours: 0, pay: 0, name: s.empName || emp?.name || '', wage };
+                    out[mk].days[day].entries[key].hours += hours;
+                    out[mk].days[day].entries[key].pay += Math.round(hours * wage);
+                }
+            });
+            return out;
+        }
+
         // 관리자 거절 처리 (Google 직원)
         async function rejectGoogleEmpJoinRequest(bossUid, empUid) {
             const pendingDocId = `${empUid}_${bossUid}`;
@@ -2583,7 +2658,7 @@
                                     { id: 'calendar', label: '월별 근무현황', icon: CalendarIcon },
                                     { id: 'payroll', label: '급여명세서', icon: Wallet },
                                     { id: 'chart', label: '인건비 차트', icon: BarChart3 },
-                                    { id: 'predict', label: '급여계산기', icon: Search },
+                                    { id: 'predict', label: '스케쥴관리', icon: CalendarIcon },
                                     { id: 'invite', label: '직원 초대', icon: Users },
                                     { id: 'notices', label: '전체 공지', icon: Megaphone },
                                     { id: 'settings', label: '설정', icon: Settings },
@@ -2768,10 +2843,13 @@
                         {activeTab === 'predict' && (
                             <TabPredict
                                 employees={employeesWithDisplayId}
-                                predictData={predictData}
-                                setPredictData={setPredictData}
                                 showConfirm={showConfirm}
+                                showAlert={showAlert}
                                 globalMinWage={globalMinWage}
+                                workspaceInfo={workspaceInfo}
+                                setWorkspaceInfo={setWorkspaceInfo}
+                                workspaceId={currentWorkspaceId}
+                                firebaseUser={firebaseUser}
                             />
                         )}
                         {activeTab === 'invite' && (
@@ -2825,7 +2903,7 @@
                                 { id: 'calendar', label: '근무현황', icon: CalendarIcon },
                                 { id: 'payroll', label: '급여명세서', icon: Wallet },
                                 { id: 'chart', label: '차트', icon: BarChart3 },
-                                { id: 'predict', label: '급여계산기', icon: Search },
+                                { id: 'predict', label: '스케쥴관리', icon: CalendarIcon },
                                 { id: 'invite', label: '직원초대', icon: Users },
                                 { id: 'notices', label: '공지', icon: Megaphone },
                                 { id: 'settings', label: '설정', icon: Settings },
@@ -3892,6 +3970,215 @@
             );
         }
 
+        // ─── 직원: 근무스케쥴 탭 ───
+        function EmpScheduleTab({ bossSchedules, bossScheduleMemos, empAccount, firebaseUser, showAlert }) {
+            const [today] = useState(new Date());
+            const [year, setYear] = useState(today.getFullYear());
+            const [month, setMonth] = useState(today.getMonth() + 1);
+            const [dayDetailDate, setDayDetailDate] = useState(null);
+
+            const schedulesByDay = useMemo(() => {
+                const map = {};
+                (bossSchedules || []).forEach(s => {
+                    if (!s.startDate || !s.endDate) return;
+                    const [sy, sm, sd] = s.startDate.split('-').map(Number);
+                    const [ey, em, ed] = s.endDate.split('-').map(Number);
+                    const start = new Date(sy, sm - 1, sd);
+                    const end = new Date(ey, em - 1, ed);
+                    for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+                        const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+                        if (!map[key]) map[key] = [];
+                        map[key].push(s);
+                    }
+                });
+                return map;
+            }, [bossSchedules]);
+
+            const prevMonth = () => { let m=month-1,y=year; if(m<1){m=12;y--;} setMonth(m); setYear(y); };
+            const nextMonth = () => { let m=month+1,y=year; if(m>12){m=1;y++;} setMonth(m); setYear(y); };
+            const daysInMonth = getDaysInMonth(year, month);
+            const firstDay = getFirstDayOfMonth(year, month);
+            const fmtTime = (h, m) => m === 0 ? `${h}시` : `${h}시${m}분`;
+
+            const postMemo = async (date, text) => {
+                if (!text.trim()) return;
+                try {
+                    const memo = {
+                        id: `memo_${Date.now()}_${Math.random().toString(36).slice(2,8)}`,
+                        date,
+                        authorId: firebaseUser.uid,
+                        authorName: empAccount?.name || firebaseUser.displayName || '직원',
+                        text: text.trim(),
+                        createdAt: new Date().toISOString()
+                    };
+                    const wsId = empAccount.bossUid;
+                    const snap = await fbDb.collection('workspaces').doc(wsId).get();
+                    const existing = snap.data()?.scheduleMemos || {};
+                    const list = existing[date] || [];
+                    const newMemos = { ...existing, [date]: [...list, memo] };
+                    await fbDb.collection('workspaces').doc(wsId).update({ scheduleMemos: newMemos });
+                } catch (e) {
+                    showAlert('메모 저장 실패: ' + e.message, '오류', 'error');
+                }
+            };
+
+            const deleteMemo = async (date, id) => {
+                try {
+                    const wsId = empAccount.bossUid;
+                    const snap = await fbDb.collection('workspaces').doc(wsId).get();
+                    const existing = snap.data()?.scheduleMemos || {};
+                    const list = (existing[date] || []).filter(m => m.id !== id);
+                    const newMemos = { ...existing, [date]: list };
+                    await fbDb.collection('workspaces').doc(wsId).update({ scheduleMemos: newMemos });
+                } catch (e) {
+                    showAlert('메모 삭제 실패: ' + e.message, '오류', 'error');
+                }
+            };
+
+            return (
+                <div>
+                    <div className="flex items-center justify-between mb-4">
+                        <button onClick={prevMonth} className="p-2 rounded-lg hover:bg-gray-200"><ChevronLeft className="w-5 h-5"/></button>
+                        <h2 className="text-lg font-bold text-gray-800">{year}년 {month}월 근무스케쥴</h2>
+                        <button onClick={nextMonth} className="p-2 rounded-lg hover:bg-gray-200"><ChevronRight className="w-5 h-5"/></button>
+                    </div>
+                    <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+                        <div className="grid grid-cols-7 border-b border-gray-100">
+                            {['일','월','화','수','목','금','토'].map((d, i) => (
+                                <div key={d} className={`py-2 text-center text-xs font-bold ${i===0 ? 'text-red-500' : i===6 ? 'text-blue-500' : 'text-gray-500'}`}>{d}</div>
+                            ))}
+                        </div>
+                        <div className="grid grid-cols-7">
+                            {[...Array(firstDay)].map((_,i) => <div key={`e${i}`} className="min-h-[80px] border-b border-r border-gray-50"/>)}
+                            {[...Array(daysInMonth)].map((_,i) => {
+                                const day = i + 1;
+                                const dateStr = `${year}-${String(month).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+                                const daySchedules = (schedulesByDay[dateStr] || []).slice().sort(
+                                    (a, b) => (a.startHour * 60 + (a.startMinute||0)) - (b.startHour * 60 + (b.startMinute||0))
+                                );
+                                const memoCount = (bossScheduleMemos[dateStr] || []).length;
+                                const isToday = today.getFullYear()===year && today.getMonth()+1===month && today.getDate()===day;
+                                const dayIdx = (firstDay + i) % 7;
+                                return (
+                                    <div key={day}
+                                        onClick={() => setDayDetailDate(dateStr)}
+                                        className={`min-h-[80px] border-b border-r border-gray-100 p-1 flex flex-col cursor-pointer hover:bg-yellow-50/50 ${isToday ? 'bg-blue-50' : ''}`}>
+                                        <div className="flex items-center justify-between">
+                                            <span className={`text-xs font-bold ${isToday ? 'text-blue-600' : dayIdx===0 ? 'text-red-500' : dayIdx===6 ? 'text-blue-500' : 'text-gray-600'}`}>{day}</span>
+                                            {memoCount > 0 && <span className="text-[8px] bg-yellow-100 text-yellow-700 px-1 rounded-full font-bold">{memoCount}</span>}
+                                        </div>
+                                        <div className="flex-1 space-y-0.5 mt-0.5">
+                                            {daySchedules.slice(0, 3).map(s => (
+                                                <div key={s.id} className="text-[9px] font-medium text-gray-800 rounded px-1 py-0.5 truncate"
+                                                    style={{backgroundColor: s.color}}>
+                                                    {s.empName}({fmtTime(s.startHour, s.startMinute||0)}~{fmtTime(s.endHour, s.endMinute||0)})
+                                                </div>
+                                            ))}
+                                            {daySchedules.length > 3 && <div className="text-[8px] text-gray-400">+{daySchedules.length - 3}</div>}
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    </div>
+
+                    {dayDetailDate && (
+                        <EmpDayDetailModal
+                            date={dayDetailDate}
+                            schedules={schedulesByDay[dayDetailDate] || []}
+                            memos={bossScheduleMemos[dayDetailDate] || []}
+                            currentEmpId={firebaseUser.uid}
+                            currentEmpName={empAccount?.name || firebaseUser.displayName || '직원'}
+                            onPostMemo={postMemo}
+                            onDeleteMemo={deleteMemo}
+                            onClose={() => setDayDetailDate(null)}
+                        />
+                    )}
+                </div>
+            );
+        }
+
+        // ─── 직원용 날짜 상세 모달 (열람+메모) ───
+        function EmpDayDetailModal({ date, schedules, memos, currentEmpId, currentEmpName, onPostMemo, onDeleteMemo, onClose }) {
+            const [memoText, setMemoText] = useState('');
+            const [posting, setPosting] = useState(false);
+            const sortedSchedules = [...(schedules || [])].sort(
+                (a, b) => (a.startHour * 60 + (a.startMinute||0)) - (b.startHour * 60 + (b.startMinute||0))
+            );
+            const fmtTime = (h, m) => m === 0 ? `${h}시` : `${h}시${m}분`;
+            const [yStr, mStr, dStr] = date.split('-');
+            const displayDate = `${yStr}년 ${parseInt(mStr)}월 ${parseInt(dStr)}일`;
+
+            const handlePost = async () => {
+                setPosting(true);
+                await onPostMemo(date, memoText);
+                setMemoText('');
+                setPosting(false);
+            };
+
+            return (
+                <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-3 backdrop-blur-sm">
+                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[92vh] flex flex-col">
+                        <div className="flex items-center justify-between p-5 border-b border-gray-100 shrink-0">
+                            <h3 className="text-lg font-bold text-gray-800">{displayDate}</h3>
+                            <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-full"><X className="w-5 h-5"/></button>
+                        </div>
+                        <div className="p-5 space-y-4 overflow-y-auto">
+                            <div>
+                                <h4 className="text-sm font-bold text-gray-700 mb-2">근무 스케쥴 ({sortedSchedules.length})</h4>
+                                {sortedSchedules.length === 0 ? (
+                                    <p className="text-xs text-gray-400 bg-gray-50 rounded-xl p-3 text-center">등록된 스케쥴이 없습니다.</p>
+                                ) : (
+                                    <div className="space-y-1.5">
+                                        {sortedSchedules.map(s => (
+                                            <div key={s.id} className="rounded-xl px-3 py-2 text-sm" style={{backgroundColor: s.color}}>
+                                                <div className="font-bold text-gray-800">{s.empName}({fmtTime(s.startHour, s.startMinute||0)}~{fmtTime(s.endHour, s.endMinute||0)})</div>
+                                                {s.memo && <div className="text-xs text-gray-600 mt-0.5">{s.memo}</div>}
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+                            <div>
+                                <h4 className="text-sm font-bold text-gray-700 mb-2">메모 ({memos.length})</h4>
+                                {memos.length === 0 ? (
+                                    <p className="text-xs text-gray-400 bg-gray-50 rounded-xl p-3 text-center mb-2">메모가 없습니다.</p>
+                                ) : (
+                                    <div className="space-y-1.5 mb-2">
+                                        {memos.map(m => (
+                                            <div key={m.id} className="bg-gray-50 border border-gray-200 rounded-xl p-2.5">
+                                                <div className="flex items-start justify-between gap-2">
+                                                    <div className="flex-1">
+                                                        <div className="text-xs font-bold text-gray-700">{m.authorName}</div>
+                                                        <p className="text-sm text-gray-700 whitespace-pre-wrap mt-0.5">{m.text}</p>
+                                                    </div>
+                                                    {m.authorId === currentEmpId && (
+                                                        <button onClick={() => onDeleteMemo(date, m.id)} className="text-xs text-red-400 hover:text-red-600 shrink-0">
+                                                            <X className="w-3.5 h-3.5" />
+                                                        </button>
+                                                    )}
+                                                </div>
+                                                <div className="text-[10px] text-gray-400 mt-0.5">{new Date(m.createdAt).toLocaleString('ko-KR')}</div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                                <div className="flex gap-2">
+                                    <textarea value={memoText} onChange={e => setMemoText(e.target.value)} rows={2}
+                                        className="flex-1 border-2 border-gray-200 rounded-xl px-3 py-2 text-sm resize-none focus:border-blue-500 outline-none"
+                                        placeholder="메모 남기기..." />
+                                    <button onClick={handlePost} disabled={posting || !memoText.trim()}
+                                        className="bg-blue-600 text-white px-4 rounded-xl font-bold hover:bg-blue-700 disabled:opacity-50 text-sm">
+                                        등록
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
         function EmployeeApp({ empAccount, onSetEmpAccount, firebaseUser, mySubmissions, notifications, onLogout, onLock, showAlert, showConfirm, modalConfig, onSwitchWorkplace, onDisconnectWorkplace, onAddWorkplace, allWorkplaces, notices = [], displaySettings = {} }) {
             const [activeTab, setActiveTab] = useState('calendar');
             const [today] = useState(new Date());
@@ -3900,6 +4187,22 @@
             const [myPayslips, setMyPayslips] = useState([]);
             const [payslipBanner, setPayslipBanner] = useState(null); // { year, month, docId }
             const [viewingPayslip, setViewingPayslip] = useState(null);
+            const [bossSchedules, setBossSchedules] = useState([]);
+            const [bossScheduleMemos, setBossScheduleMemos] = useState({});
+
+            // 관리자 스케쥴/메모 실시간 로드
+            useEffect(() => {
+                if (!firebaseUser || !empAccount?.bossUid) return;
+                const unsub = fbDb.collection('workspaces').doc(empAccount.bossUid)
+                    .onSnapshot(doc => {
+                        if (doc.exists) {
+                            const data = doc.data();
+                            setBossSchedules(data.schedules || []);
+                            setBossScheduleMemos(data.scheduleMemos || {});
+                        }
+                    }, () => {});
+                return () => unsub();
+            }, [firebaseUser, empAccount?.bossUid]);
 
             // 급여명세서 실시간 로드
             useEffect(() => {
@@ -4383,6 +4686,16 @@
                             </div>
                         )}
 
+                        {activeTab === 'schedule' && (
+                            <EmpScheduleTab
+                                bossSchedules={bossSchedules}
+                                bossScheduleMemos={bossScheduleMemos}
+                                empAccount={empAccount}
+                                firebaseUser={firebaseUser}
+                                showAlert={showAlert}
+                            />
+                        )}
+
                         {activeTab === 'notifications' && (
                             <div className="space-y-3">
                                 <h2 className="text-lg font-bold text-gray-800 mb-2">변경 알림</h2>
@@ -4395,7 +4708,7 @@
                                     <div key={n.id} className={`bg-white rounded-xl border p-4 ${n.read ? 'border-gray-200' : n.type === 'payslip' ? 'border-emerald-300 bg-emerald-50' : 'border-yellow-300 bg-yellow-50'}`}>
                                         <div className="flex items-start justify-between mb-1">
                                             <p className="text-sm font-bold text-gray-800">
-                                                {n.type === 'payslip' ? '급여명세서 도착' : n.type === 'status_change' ? '근무 상태 변경' : n.type === 'wage_change' ? '시급 변경' : n.type === 'wage_modified' ? `${n.date} 시급 변경` : n.type === 'name_change' ? '이름 변경' : n.type === 'shop_name_change' ? '업체명 변경' : n.type === 'hours_entered' ? `${n.date} 근무시간 등록` : n.type === 'hours_deleted' ? `${n.date} 근무시간 삭제` : `${n.date} 근무시간 변경`}
+                                                {n.type === 'payslip' ? '급여명세서 도착' : n.type === 'status_change' ? '근무 상태 변경' : n.type === 'wage_change' ? '시급 변경' : n.type === 'wage_modified' ? `${n.date} 시급 변경` : n.type === 'name_change' ? '이름 변경' : n.type === 'shop_name_change' ? '업체명 변경' : n.type === 'schedule_new' ? '새 스케쥴 등록' : n.type === 'hours_entered' ? `${n.date} 근무시간 등록` : n.type === 'hours_deleted' ? `${n.date} 근무시간 삭제` : `${n.date} 근무시간 변경`}
                                             </p>
                                             {!n.read && <span className={`text-xs px-2 py-0.5 rounded-full font-bold ${n.type === 'payslip' ? 'bg-emerald-400 text-emerald-900' : 'bg-yellow-400 text-yellow-900'}`}>새 알림</span>}
                                         </div>
@@ -4423,6 +4736,22 @@
                                             <p className="text-sm text-gray-600">
                                                 업체명이 <span className="font-medium">{n.oldName || '(없음)'}</span> → <span className="font-bold text-blue-600">{n.newName}</span>(으)로 변경되었습니다.
                                             </p>
+                                        ) : n.type === 'schedule_new' ? (
+                                            <div className="text-sm text-gray-700 space-y-0.5">
+                                                <p>근무날짜: <span className="font-medium text-blue-600">{
+                                                    n.startDate === n.endDate
+                                                        ? (() => { const [y,m,d] = n.startDate.split('-'); return `${y}년 ${parseInt(m)}월 ${parseInt(d)}일`; })()
+                                                        : (() => {
+                                                            const [sy,sm,sd] = n.startDate.split('-');
+                                                            const [ey,em,ed] = n.endDate.split('-');
+                                                            return `${sy}년 ${parseInt(sm)}월 ${parseInt(sd)}일 ~ ${ey}년 ${parseInt(em)}월 ${parseInt(ed)}일`;
+                                                        })()
+                                                }</span></p>
+                                                <p>근무시간: <span className="font-medium text-blue-600">
+                                                    {n.startHour}시{n.startMinute ? `${n.startMinute}분` : '0분'}~{n.endHour}시{n.endMinute ? `${n.endMinute}분` : '0분'}
+                                                </span></p>
+                                                {n.memo && <p className="text-xs text-gray-500 mt-1 whitespace-pre-wrap">메모: {n.memo}</p>}
+                                            </div>
                                         ) : (
                                         n.type === 'hours_entered' ? (
                                             <p className="text-sm text-gray-600">관리자가 <span className="font-bold text-blue-600">{fmtHours(n.newHours)}</span>을 등록했습니다</p>
@@ -4462,20 +4791,24 @@
 
                     <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 z-40 mobile-nav-safe">
                         <div className="flex max-w-lg mx-auto">
-                            <button onClick={() => setActiveTab('calendar')} className={`flex-1 flex flex-col items-center py-3 gap-1 text-xs font-medium ${activeTab==='calendar' ? 'text-blue-600' : 'text-gray-400'}`}>
+                            <button onClick={() => setActiveTab('calendar')} className={`flex-1 flex flex-col items-center py-3 gap-1 text-[10px] font-medium ${activeTab==='calendar' ? 'text-blue-600' : 'text-gray-400'}`}>
                                 <CalendarIcon className="w-5 h-5"/>근무 입력
                             </button>
-                            <button onClick={() => setActiveTab('notifications')} className={`flex-1 relative flex flex-col items-center py-3 gap-1 text-xs font-medium ${activeTab==='notifications' ? 'text-blue-600' : 'text-gray-400'}`}>
+                            <button onClick={() => setActiveTab('schedule')} className={`flex-1 flex flex-col items-center py-3 gap-1 text-[10px] font-medium ${activeTab==='schedule' ? 'text-blue-600' : 'text-gray-400'}`}>
+                                <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+                                근무스케쥴
+                            </button>
+                            <button onClick={() => setActiveTab('notifications')} className={`flex-1 relative flex flex-col items-center py-3 gap-1 text-[10px] font-medium ${activeTab==='notifications' ? 'text-blue-600' : 'text-gray-400'}`}>
                                 <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
                                 알림
-                                {unreadCount > 0 && <span className="absolute top-1.5 right-6 bg-red-500 text-white text-[9px] rounded-full w-4 h-4 flex items-center justify-center font-bold">{unreadCount}</span>}
+                                {unreadCount > 0 && <span className="absolute top-1.5 right-3 bg-red-500 text-white text-[9px] rounded-full w-4 h-4 flex items-center justify-center font-bold">{unreadCount}</span>}
                             </button>
-                            <button onClick={() => setActiveTab('empnotices')} className={`flex-1 relative flex flex-col items-center py-3 gap-1 text-xs font-medium ${activeTab==='empnotices' ? 'text-blue-600' : 'text-gray-400'}`}>
+                            <button onClick={() => setActiveTab('empnotices')} className={`flex-1 relative flex flex-col items-center py-3 gap-1 text-[10px] font-medium ${activeTab==='empnotices' ? 'text-blue-600' : 'text-gray-400'}`}>
                                 <Megaphone className={`w-5 h-5 ${activeTab==='empnotices' ? 'text-blue-600' : 'text-gray-400'}`} />
                                 공지사항
-                                {unreadNoticeCount > 0 && <span className="absolute top-1.5 right-6 bg-red-500 text-white text-[9px] rounded-full w-4 h-4 flex items-center justify-center font-bold">{unreadNoticeCount > 9 ? '9+' : unreadNoticeCount}</span>}
+                                {unreadNoticeCount > 0 && <span className="absolute top-1.5 right-3 bg-red-500 text-white text-[9px] rounded-full w-4 h-4 flex items-center justify-center font-bold">{unreadNoticeCount > 9 ? '9+' : unreadNoticeCount}</span>}
                             </button>
-                            <button onClick={() => setActiveTab('myinfo')} className={`flex-1 flex flex-col items-center py-3 gap-1 text-xs font-medium ${activeTab==='myinfo' ? 'text-blue-600' : 'text-gray-400'}`}>
+                            <button onClick={() => setActiveTab('myinfo')} className={`flex-1 flex flex-col items-center py-3 gap-1 text-[10px] font-medium ${activeTab==='myinfo' ? 'text-blue-600' : 'text-gray-400'}`}>
                                 <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>
                                 내 정보
                             </button>
@@ -8888,16 +9221,377 @@
         // ==========================================
         // 주휴수당 예측 탭
         // ==========================================
-        function TabPredict({ employees, predictData, setPredictData, showConfirm, globalMinWage }) {
+        // ─── 파스텔 컬러 스와이프 선택기 ───
+        function ColorSwiper({ value, onChange }) {
+            const scrollRef = useRef(null);
+            useEffect(() => {
+                const handleKey = (e) => {
+                    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+                    const idx = PASTEL_COLORS.indexOf(value);
+                    if (idx < 0) return;
+                    const next = e.key === 'ArrowRight' ? Math.min(PASTEL_COLORS.length - 1, idx + 1) : Math.max(0, idx - 1);
+                    if (next !== idx) onChange(PASTEL_COLORS[next]);
+                };
+                const el = scrollRef.current;
+                if (!el) return;
+                el.addEventListener('keydown', handleKey);
+                return () => el.removeEventListener('keydown', handleKey);
+            }, [value, onChange]);
+            const scrollBy = (dir) => {
+                const el = scrollRef.current;
+                if (!el) return;
+                el.scrollBy({ left: dir * 120, behavior: 'smooth' });
+                const idx = PASTEL_COLORS.indexOf(value);
+                if (idx < 0) return;
+                const next = dir > 0 ? Math.min(PASTEL_COLORS.length - 1, idx + 1) : Math.max(0, idx - 1);
+                if (next !== idx) onChange(PASTEL_COLORS[next]);
+            };
+            return (
+                <div className="flex items-center gap-1">
+                    <button type="button" onClick={() => scrollBy(-1)} className="hidden md:flex p-1.5 hover:bg-gray-100 rounded-full shrink-0" title="이전 색">
+                        <ChevronLeft className="w-4 h-4" />
+                    </button>
+                    <div
+                        ref={scrollRef}
+                        tabIndex={0}
+                        className="flex-1 overflow-x-auto no-scrollbar focus:outline-none"
+                        style={{scrollSnapType: 'x mandatory'}}
+                    >
+                        <div className="flex gap-2 py-1 px-1">
+                            {PASTEL_COLORS.map(c => (
+                                <button
+                                    key={c}
+                                    type="button"
+                                    onClick={() => onChange(c)}
+                                    className={`w-10 h-10 rounded-xl shrink-0 border-2 transition ${value === c ? 'border-gray-800 scale-110 shadow' : 'border-transparent'}`}
+                                    style={{backgroundColor: c, scrollSnapAlign: 'center'}}
+                                    title={c}
+                                />
+                            ))}
+                        </div>
+                    </div>
+                    <button type="button" onClick={() => scrollBy(1)} className="hidden md:flex p-1.5 hover:bg-gray-100 rounded-full shrink-0" title="다음 색">
+                        <ChevronRight className="w-4 h-4" />
+                    </button>
+                </div>
+            );
+        }
+
+        // ─── 스케쥴 편집 모달 (관리자 전용) ───
+        function ScheduleEditModal({ initial, defaultDate, activeEmployees, workspaceId, firebaseUser, workspaceInfo, setWorkspaceInfo, onClose, showAlert, showConfirm }) {
+            const todayStr = defaultDate || (() => {
+                const t = new Date();
+                return `${t.getFullYear()}-${String(t.getMonth()+1).padStart(2,'0')}-${String(t.getDate()).padStart(2,'0')}`;
+            })();
+            const [startDate, setStartDate] = useState(initial?.startDate || todayStr);
+            const [endDate, setEndDate] = useState(initial?.endDate || todayStr);
+            const [startHour, setStartHour] = useState(initial?.startHour != null ? String(initial.startHour) : '');
+            const [startMinute, setStartMinute] = useState(initial?.startMinute != null ? String(initial.startMinute) : '');
+            const [endHour, setEndHour] = useState(initial?.endHour != null ? String(initial.endHour) : '');
+            const [endMinute, setEndMinute] = useState(initial?.endMinute != null ? String(initial.endMinute) : '');
+            const [empId, setEmpId] = useState(initial?.empId != null ? String(initial.empId) : (activeEmployees[0]?.id != null ? String(activeEmployees[0].id) : ''));
+            const [color, setColor] = useState(initial?.color || PASTEL_COLORS[0]);
+            const [memo, setMemo] = useState(initial?.memo || '');
+            const [saving, setSaving] = useState(false);
+
+            const handleSave = async () => {
+                if (!startDate || !endDate) { showAlert('날짜를 선택해주세요.', '입력 오류', 'alert'); return; }
+                if (endDate < startDate) { showAlert('종료일이 시작일보다 이전일 수 없습니다.', '입력 오류', 'alert'); return; }
+                if (!startHour || !endHour) { showAlert('시작/종료 시각(시)을 선택해주세요.', '입력 오류', 'alert'); return; }
+                if (!empId) { showAlert('근무자를 선택해주세요.', '입력 오류', 'alert'); return; }
+
+                const sM = Math.max(0, Math.min(59, parseInt(startMinute) || 0));
+                const eM = Math.max(0, Math.min(59, parseInt(endMinute) || 0));
+                const sH = parseInt(startHour);
+                const eH = parseInt(endHour);
+                const sameDay = startDate === endDate;
+                if (sameDay && (sH * 60 + sM) >= (eH * 60 + eM)) {
+                    showAlert('같은 날짜에서 종료 시각이 시작 시각보다 늦어야 합니다.', '입력 오류', 'alert'); return;
+                }
+
+                const emp = activeEmployees.find(e => String(e.id) === String(empId));
+                if (!emp) { showAlert('근무자를 찾을 수 없습니다.', '오류', 'error'); return; }
+
+                const schedule = {
+                    id: initial?.id || `sched_${Date.now()}_${Math.random().toString(36).slice(2,8)}`,
+                    startDate, endDate,
+                    startHour: sH, startMinute: sM,
+                    endHour: eH, endMinute: eM,
+                    empId: emp.id,
+                    empName: emp.name,
+                    color,
+                    memo: memo.trim(),
+                    createdAt: initial?.createdAt || new Date().toISOString()
+                };
+
+                setSaving(true);
+                try {
+                    const existing = workspaceInfo?.schedules || [];
+                    const newList = initial
+                        ? existing.map(s => s.id === initial.id ? schedule : s)
+                        : [...existing, schedule];
+                    const wsId = workspaceId || firebaseUser.uid;
+                    await fbDb.collection('workspaces').doc(wsId).update({ schedules: newList });
+                    setWorkspaceInfo(prev => ({ ...prev, schedules: newList }));
+                    if (!initial && emp.empUid) {
+                        sendScheduleNotification(emp.empUid, wsId, schedule).catch(() => {});
+                    }
+                    onClose();
+                } catch (e) {
+                    showAlert('저장 실패: ' + e.message, '오류', 'error');
+                }
+                setSaving(false);
+            };
+
+            const handleDelete = () => {
+                if (!initial) return;
+                showConfirm('이 스케쥴을 삭제하시겠습니까?', async () => {
+                    try {
+                        const existing = workspaceInfo?.schedules || [];
+                        const newList = existing.filter(s => s.id !== initial.id);
+                        const wsId = workspaceId || firebaseUser.uid;
+                        await fbDb.collection('workspaces').doc(wsId).update({ schedules: newList });
+                        setWorkspaceInfo(prev => ({ ...prev, schedules: newList }));
+                        onClose();
+                    } catch (e) {
+                        showAlert('삭제 실패: ' + e.message, '오류', 'error');
+                    }
+                }, '스케쥴 삭제');
+            };
+
+            const hourOptions = Array.from({length: 24}, (_, i) => i + 1);
+
+            return (
+                <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-3 backdrop-blur-sm">
+                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[92vh] flex flex-col">
+                        <div className="flex items-center justify-between p-5 border-b border-gray-100 shrink-0">
+                            <h3 className="text-lg font-bold text-gray-800">{initial ? '스케쥴 수정' : '새 스케쥴 등록'}</h3>
+                            <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-full"><X className="w-5 h-5"/></button>
+                        </div>
+                        <div className="p-5 space-y-4 overflow-y-auto">
+                            <div>
+                                <label className="block text-sm font-bold text-gray-700 mb-1.5">시작일</label>
+                                <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)}
+                                    className="w-full border-2 border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:border-green-500 outline-none" />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-bold text-gray-700 mb-1.5">종료일</label>
+                                <input type="date" value={endDate} min={startDate} onChange={e => setEndDate(e.target.value)}
+                                    className="w-full border-2 border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:border-green-500 outline-none" />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-bold text-gray-700 mb-1.5">근무시간</label>
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                    <select value={startHour} onChange={e => setStartHour(e.target.value)}
+                                        className="border-2 border-gray-200 rounded-xl px-2 py-2 text-sm focus:border-green-500 outline-none bg-white">
+                                        <option value="">시</option>
+                                        {hourOptions.map(h => <option key={h} value={h}>{h}</option>)}
+                                    </select>
+                                    <span className="text-sm text-gray-500">시</span>
+                                    <input type="text" inputMode="numeric" maxLength="2"
+                                        value={startMinute}
+                                        onChange={e => setStartMinute(e.target.value.replace(/[^0-9]/g,'').slice(0,2))}
+                                        placeholder="0"
+                                        className="w-12 border-2 border-gray-200 rounded-xl px-2 py-2 text-sm text-center focus:border-green-500 outline-none" />
+                                    <span className="text-sm text-gray-500">분</span>
+                                    <span className="text-gray-400 mx-1">~</span>
+                                    <select value={endHour} onChange={e => setEndHour(e.target.value)}
+                                        className="border-2 border-gray-200 rounded-xl px-2 py-2 text-sm focus:border-green-500 outline-none bg-white">
+                                        <option value="">시</option>
+                                        {hourOptions.map(h => <option key={h} value={h}>{h}</option>)}
+                                    </select>
+                                    <span className="text-sm text-gray-500">시</span>
+                                    <input type="text" inputMode="numeric" maxLength="2"
+                                        value={endMinute}
+                                        onChange={e => setEndMinute(e.target.value.replace(/[^0-9]/g,'').slice(0,2))}
+                                        placeholder="0"
+                                        className="w-12 border-2 border-gray-200 rounded-xl px-2 py-2 text-sm text-center focus:border-green-500 outline-none" />
+                                    <span className="text-sm text-gray-500">분</span>
+                                </div>
+                                <p className="text-xs text-gray-400 mt-1">분이 비어있으면 0분으로 저장됩니다.</p>
+                            </div>
+                            <div>
+                                <label className="block text-sm font-bold text-gray-700 mb-1.5">근무자</label>
+                                <select value={empId} onChange={e => setEmpId(e.target.value)}
+                                    className="w-full border-2 border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:border-green-500 outline-none bg-white">
+                                    {activeEmployees.length === 0 && <option value="">근무중인 직원이 없습니다</option>}
+                                    {activeEmployees.map(emp => (
+                                        <option key={emp.id} value={emp.id}>{emp.displayId}. {emp.name}</option>
+                                    ))}
+                                </select>
+                            </div>
+                            <div>
+                                <label className="block text-sm font-bold text-gray-700 mb-1.5">음영표시</label>
+                                <ColorSwiper value={color} onChange={setColor} />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-bold text-gray-700 mb-1.5">메모 <span className="text-xs font-normal text-gray-400">(모든 직원에게 공개)</span></label>
+                                <textarea value={memo} onChange={e => setMemo(e.target.value)} rows={3}
+                                    className="w-full border-2 border-gray-200 rounded-xl px-3 py-2 text-sm resize-none focus:border-green-500 outline-none"
+                                    placeholder="예: 오픈 담당, 준비물 지참 등" />
+                            </div>
+                        </div>
+                        <div className="p-5 border-t border-gray-100 flex gap-2 shrink-0">
+                            {initial && (
+                                <button onClick={handleDelete} disabled={saving}
+                                    className="flex-1 border-2 border-red-300 text-red-600 py-2.5 rounded-xl font-medium hover:bg-red-50 disabled:opacity-50 text-sm">
+                                    삭제
+                                </button>
+                            )}
+                            <button onClick={onClose} disabled={saving}
+                                className="flex-1 border-2 border-gray-200 py-2.5 rounded-xl font-medium hover:bg-gray-50 disabled:opacity-50 text-sm">
+                                취소
+                            </button>
+                            <button onClick={handleSave} disabled={saving}
+                                className="flex-1 bg-green-600 text-white py-2.5 rounded-xl font-bold hover:bg-green-700 disabled:opacity-50 text-sm">
+                                {saving ? '저장 중...' : '저장'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        // ─── 날짜별 상세 (스케쥴 목록 + 메모) 모달 ───
+        function DayDetailModal({ date, schedules, memos, isAdmin, authorName, authorId, workspaceId, firebaseUser, workspaceInfo, setWorkspaceInfo, onEditSchedule, onAddSchedule, onClose, showAlert }) {
+            const [memoText, setMemoText] = useState('');
+            const [posting, setPosting] = useState(false);
+            const dayMemos = memos || [];
+            const toMinutes = (s) => s.startHour * 60 + (s.startMinute || 0);
+            const sortedSchedules = [...(schedules || [])].sort((a, b) => toMinutes(a) - toMinutes(b));
+
+            const postMemo = async () => {
+                if (!memoText.trim()) return;
+                setPosting(true);
+                try {
+                    const memo = {
+                        id: `memo_${Date.now()}_${Math.random().toString(36).slice(2,8)}`,
+                        date,
+                        authorId: authorId || 'boss',
+                        authorName: authorName || (isAdmin ? '관리자' : '직원'),
+                        text: memoText.trim(),
+                        createdAt: new Date().toISOString()
+                    };
+                    const existing = workspaceInfo?.scheduleMemos || {};
+                    const list = existing[date] || [];
+                    const newMemos = { ...existing, [date]: [...list, memo] };
+                    const wsId = workspaceId || firebaseUser.uid;
+                    await fbDb.collection('workspaces').doc(wsId).update({ scheduleMemos: newMemos });
+                    setWorkspaceInfo(prev => ({ ...prev, scheduleMemos: newMemos }));
+                    setMemoText('');
+                } catch (e) {
+                    showAlert('메모 저장 실패: ' + e.message, '오류', 'error');
+                }
+                setPosting(false);
+            };
+
+            const deleteMemo = async (id) => {
+                try {
+                    const existing = workspaceInfo?.scheduleMemos || {};
+                    const list = (existing[date] || []).filter(m => m.id !== id);
+                    const newMemos = { ...existing, [date]: list };
+                    const wsId = workspaceId || firebaseUser.uid;
+                    await fbDb.collection('workspaces').doc(wsId).update({ scheduleMemos: newMemos });
+                    setWorkspaceInfo(prev => ({ ...prev, scheduleMemos: newMemos }));
+                } catch (e) {
+                    showAlert('삭제 실패: ' + e.message, '오류', 'error');
+                }
+            };
+
+            const [yStr, mStr, dStr] = date.split('-');
+            const displayDate = `${yStr}년 ${parseInt(mStr)}월 ${parseInt(dStr)}일`;
+
+            return (
+                <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-3 backdrop-blur-sm">
+                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[92vh] flex flex-col">
+                        <div className="flex items-center justify-between p-5 border-b border-gray-100 shrink-0">
+                            <h3 className="text-lg font-bold text-gray-800">{displayDate}</h3>
+                            <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-full"><X className="w-5 h-5"/></button>
+                        </div>
+                        <div className="p-5 space-y-4 overflow-y-auto">
+                            <div>
+                                <div className="flex items-center justify-between mb-2">
+                                    <h4 className="text-sm font-bold text-gray-700">근무 스케쥴 ({sortedSchedules.length})</h4>
+                                    {isAdmin && (
+                                        <button onClick={onAddSchedule}
+                                            className="text-xs bg-green-600 text-white px-3 py-1.5 rounded-lg hover:bg-green-700">
+                                            + 추가
+                                        </button>
+                                    )}
+                                </div>
+                                {sortedSchedules.length === 0 ? (
+                                    <p className="text-xs text-gray-400 bg-gray-50 rounded-xl p-3 text-center">등록된 스케쥴이 없습니다.</p>
+                                ) : (
+                                    <div className="space-y-1.5">
+                                        {sortedSchedules.map(s => {
+                                            const sh = s.startMinute === 0 ? `${s.startHour}시` : `${s.startHour}시${s.startMinute}분`;
+                                            const eh = s.endMinute === 0 ? `${s.endHour}시` : `${s.endHour}시${s.endMinute}분`;
+                                            return (
+                                                <div key={s.id}
+                                                    onClick={() => isAdmin && onEditSchedule && onEditSchedule(s)}
+                                                    className={`rounded-xl px-3 py-2 text-sm ${isAdmin ? 'cursor-pointer hover:opacity-80' : ''}`}
+                                                    style={{backgroundColor: s.color}}>
+                                                    <div className="font-bold text-gray-800">{s.empName}({sh}~{eh})</div>
+                                                    {s.memo && <div className="text-xs text-gray-600 mt-0.5">{s.memo}</div>}
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                )}
+                            </div>
+                            <div>
+                                <h4 className="text-sm font-bold text-gray-700 mb-2">메모 ({dayMemos.length})</h4>
+                                {dayMemos.length === 0 ? (
+                                    <p className="text-xs text-gray-400 bg-gray-50 rounded-xl p-3 text-center mb-2">메모가 없습니다.</p>
+                                ) : (
+                                    <div className="space-y-1.5 mb-2">
+                                        {dayMemos.map(m => (
+                                            <div key={m.id} className="bg-gray-50 border border-gray-200 rounded-xl p-2.5">
+                                                <div className="flex items-start justify-between gap-2">
+                                                    <div className="flex-1">
+                                                        <div className="text-xs font-bold text-gray-700">{m.authorName}</div>
+                                                        <p className="text-sm text-gray-700 whitespace-pre-wrap mt-0.5">{m.text}</p>
+                                                    </div>
+                                                    {(isAdmin || m.authorId === authorId) && (
+                                                        <button onClick={() => deleteMemo(m.id)} className="text-xs text-red-400 hover:text-red-600 shrink-0">
+                                                            <X className="w-3.5 h-3.5" />
+                                                        </button>
+                                                    )}
+                                                </div>
+                                                <div className="text-[10px] text-gray-400 mt-0.5">
+                                                    {new Date(m.createdAt).toLocaleString('ko-KR')}
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                                <div className="flex gap-2">
+                                    <textarea value={memoText} onChange={e => setMemoText(e.target.value)} rows={2}
+                                        className="flex-1 border-2 border-gray-200 rounded-xl px-3 py-2 text-sm resize-none focus:border-green-500 outline-none"
+                                        placeholder="메모 남기기..." />
+                                    <button onClick={postMemo} disabled={posting || !memoText.trim()}
+                                        className="bg-green-600 text-white px-4 rounded-xl font-bold hover:bg-green-700 disabled:opacity-50 text-sm">
+                                        등록
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        function TabPredict({ employees, showConfirm, showAlert, globalMinWage, workspaceInfo, setWorkspaceInfo, workspaceId, firebaseUser }) {
             const [currentDate, setCurrentDate] = useState(new Date());
-            const [isBulkInputOpen, setIsBulkInputOpen] = useState(false);
-            const [editDayModal, setEditDayModal] = useState(null);
+            const [scheduleModal, setScheduleModal] = useState(null); // { schedule?, defaultDate? }
+            const [dayDetailModal, setDayDetailModal] = useState(null); // 'YYYY-MM-DD'
 
             const year = currentDate.getFullYear();
             const month = currentDate.getMonth() + 1;
             const monthKey = `${year}-${month.toString().padStart(2, '0')}`;
 
-            const currentMonthData = predictData[monthKey] || { days: {} };
+            const schedules = workspaceInfo?.schedules || [];
+            const scheduleMemos = workspaceInfo?.scheduleMemos || {};
             const activeEmployees = employees
                 .filter(e => (e.status || (e.isWorking === false ? 'resigned' : 'working')) === 'working')
                 .sort((a, b) => a.displayId - b.displayId);
@@ -8907,14 +9601,14 @@
 
             useEffect(() => {
                 const handleKeyDown = (e) => {
-                    if (isBulkInputOpen || editDayModal) return;
+                    if (scheduleModal || dayDetailModal) return;
                     if (['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) return;
                     if (e.key === 'ArrowLeft') prevMonth();
                     if (e.key === 'ArrowRight') nextMonth();
                 };
                 window.addEventListener('keydown', handleKeyDown);
                 return () => window.removeEventListener('keydown', handleKeyDown);
-            }, [year, month, isBulkInputOpen, editDayModal]);
+            }, [year, month, scheduleModal, dayDetailModal]);
 
             const touchStartX = useRef(null);
             const touchStartY = useRef(null);
@@ -8930,7 +9624,7 @@
                 setPredDragX(0);
             };
             const handleTouchMove = (e) => {
-                if (touchStartX.current === null || isBulkInputOpen || editDayModal) return;
+                if (touchStartX.current === null || scheduleModal || dayDetailModal) return;
                 const dx = e.touches[0].clientX - touchStartX.current;
                 const dy = e.touches[0].clientY - touchStartY.current;
                 if (!isHorizontalDrag.current) {
@@ -8945,7 +9639,7 @@
                 const dx = e.changedTouches[0].clientX - touchStartX.current;
                 const wasHorizontal = isHorizontalDrag.current;
                 touchStartX.current = null;
-                if (isBulkInputOpen || editDayModal || !wasHorizontal) { setPredDragX(0); return; }
+                if (scheduleModal || dayDetailModal || !wasHorizontal) { setPredDragX(0); return; }
                 const w = predCarouselRef.current?.clientWidth || window.innerWidth;
                 if (Math.abs(dx) > 80) {
                     setPredTransition(true);
@@ -8962,39 +9656,96 @@
                 }
             };
 
-            const handleDeleteDay = (dayToDel) => {
-                showConfirm(`${year}년 ${month}월 ${dayToDel}일의 예측 정보를 정말 삭제하시겠습니까?`, () => {
-                    setPredictData(prev => {
-                        const newData = { ...prev };
-                        if (newData[monthKey]?.days) {
-                            const updatedDays = { ...newData[monthKey].days };
-                            delete updatedDays[dayToDel];
-                            newData[monthKey] = { ...newData[monthKey], days: updatedDays };
-                        }
-                        return newData;
-                    });
-                    setEditDayModal(null);
-                }, "예측 정보 삭제");
-            };
+            // 전체 스케쥴 → 월별 데이터 (주휴수당 계산은 월 경계 넘나들기 때문에 전체 필요)
+            const allMonthlyFromSchedules = useMemo(
+                () => schedulesToAllMonthlyData(schedules, employees, globalMinWage),
+                [schedules, employees, globalMinWage]
+            );
+            const holidayPayBySunday = useMemo(
+                () => calcHolidayPayBySunday(allMonthlyFromSchedules, employees),
+                [allMonthlyFromSchedules, employees]
+            );
 
-            const holidayPayBySunday = useMemo(() => calcHolidayPayBySunday(predictData, employees), [predictData, employees]);
-
+            // 당월 순수급여
+            const currentMonthDays = allMonthlyFromSchedules[monthKey]?.days || {};
             let totalMonthPay = 0;
             const daysInMonth = getDaysInMonth(year, month);
-            const firstDay = getFirstDayOfMonth(year, month);
-            const calendarDays = [];
-
-            for (let i = 0; i < firstDay; i++) calendarDays.push(null);
-            for (let d = 1; d <= daysInMonth; d++) {
-                calendarDays.push(d);
-                Object.values((currentMonthData.days[d] || {}).entries || {}).forEach(entry => {
+            Object.values(currentMonthDays).forEach(dayData => {
+                Object.values(dayData.entries || {}).forEach(entry => {
                     totalMonthPay += (entry.pay || 0);
                 });
-            }
+            });
 
             const totalMonthHolidayPay = Object.entries(holidayPayBySunday)
                 .filter(([s]) => { const [sy, sm] = s.split('-').map(Number); return sy === year && sm === month; })
                 .reduce((sum, [, wd]) => sum + wd.reduce((s, h) => s + h.holidayPay, 0), 0);
+
+            // 당월 총 공제액
+            const totalMonthDeduction = (() => {
+                const mode = workspaceInfo?.insuranceMode || 'none';
+                if (mode === 'none') return 0;
+                let deduct = 0;
+                const empIds = new Set();
+                Object.values(currentMonthDays).forEach(day => Object.keys(day.entries || {}).forEach(id => empIds.add(id)));
+                empIds.forEach(empId => {
+                    const emp = employees.find(e => e.id.toString() === empId.toString());
+                    const ins = getInsuranceInfo(workspaceInfo, emp);
+                    if (ins.rate <= 0) return;
+                    let empPay = 0;
+                    Object.values(currentMonthDays).forEach(day => { const e = day.entries?.[empId]; if (e) empPay += (e.pay || 0); });
+                    let empHoliday = 0;
+                    Object.entries(holidayPayBySunday).forEach(([s, wd]) => {
+                        const [sy, sm] = s.split('-').map(Number);
+                        if (sy !== year || sm !== month) return;
+                        wd.forEach(h => { if (h.empId === empId.toString()) empHoliday += h.holidayPay; });
+                    });
+                    deduct += Math.round((empPay + empHoliday) * ins.rate / 100);
+                });
+                return deduct;
+            })();
+
+            const totalMonthGrandPay = totalMonthPay + totalMonthHolidayPay;
+            const totalMonthFinalPay = totalMonthGrandPay - totalMonthDeduction;
+
+            // 날짜 → 그 날짜에 걸리는 스케쥴 목록
+            const schedulesByDay = useMemo(() => {
+                const map = {};
+                schedules.forEach(s => {
+                    if (!s.startDate || !s.endDate) return;
+                    const [sy, sm, sd] = s.startDate.split('-').map(Number);
+                    const [ey, em, ed] = s.endDate.split('-').map(Number);
+                    const start = new Date(sy, sm - 1, sd);
+                    const end = new Date(ey, em - 1, ed);
+                    for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+                        const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+                        if (!map[key]) map[key] = [];
+                        map[key].push(s);
+                    }
+                });
+                return map;
+            }, [schedules]);
+
+            const resetMonthSchedules = () => {
+                showConfirm(`${year}년 ${month}월의 모든 스케쥴을 정말 삭제하시겠습니까?`, async () => {
+                    try {
+                        const newSchedules = schedules.filter(s => {
+                            const [sy, sm] = s.startDate.split('-').map(Number);
+                            const [ey, em] = s.endDate.split('-').map(Number);
+                            const touchesMonth =
+                                (sy === year && sm === month) ||
+                                (ey === year && em === month) ||
+                                (new Date(sy, sm - 1, 1) < new Date(year, month - 1, 1) &&
+                                 new Date(ey, em - 1, 1) > new Date(year, month, 0));
+                            return !touchesMonth;
+                        });
+                        const wsId = workspaceId || firebaseUser.uid;
+                        await fbDb.collection('workspaces').doc(wsId).update({ schedules: newSchedules });
+                        setWorkspaceInfo(prev => ({ ...prev, schedules: newSchedules }));
+                    } catch (e) {
+                        showAlert('초기화 실패: ' + e.message, '오류', 'error');
+                    }
+                }, "스케쥴 초기화");
+            };
 
             return (
                 <div className="space-y-4">
@@ -9006,16 +9757,16 @@
                                 <button onClick={nextMonth} className="p-2 hover:bg-gray-100 rounded-full transition"><ChevronRight className="w-5 h-5 md:w-6 md:h-6" /></button>
                             </div>
                             <button
-                                onClick={() => setIsBulkInputOpen(true)}
-                                className="bg-gray-800 text-white px-3 md:px-4 py-2.5 rounded-xl hover:bg-gray-900 transition flex items-center gap-2 shadow-sm text-sm whitespace-nowrap font-medium"
+                                onClick={() => setScheduleModal({ defaultDate: `${year}-${String(month).padStart(2,'0')}-${String(new Date().getDate()).padStart(2,'0')}` })}
+                                className="bg-green-600 text-white px-3 md:px-4 py-2.5 rounded-xl hover:bg-green-700 transition flex items-center gap-2 shadow-sm text-sm whitespace-nowrap font-medium"
                             >
-                                <Edit2 className="w-4 h-4" />
-                                <span className="hidden sm:inline">예측 근무시간 일괄 입력</span>
+                                <Plus className="w-4 h-4" />
+                                <span className="hidden sm:inline">새 스케쥴</span>
                             </button>
                         </div>
                         <div className="flex flex-wrap gap-3 items-center">
                             <div className="bg-amber-50 text-amber-700 px-4 py-2.5 rounded-xl text-xs font-bold border border-amber-200 whitespace-nowrap shadow-sm">
-                                예측 모드 — 실제 데이터와 무관
+                                예상급여
                             </div>
                             <div className="bg-green-50 text-green-800 px-4 py-2.5 rounded-xl font-medium border border-green-200 whitespace-nowrap text-sm shadow-sm">
                                 순수 급여: {formatCurrency(totalMonthPay)}
@@ -9023,21 +9774,25 @@
                             <div className="bg-blue-50 text-blue-800 px-4 py-2.5 rounded-xl font-medium border border-blue-200 whitespace-nowrap text-sm shadow-sm">
                                 주휴수당: {formatCurrency(totalMonthHolidayPay)}
                             </div>
+                            {totalMonthDeduction > 0 && (
+                                <div className="bg-orange-50 text-orange-800 px-4 py-2.5 rounded-xl font-medium border border-orange-200 whitespace-nowrap text-sm shadow-sm">
+                                    총 공제액: -{formatCurrency(totalMonthDeduction)}
+                                </div>
+                            )}
                             <div className="bg-purple-50 text-purple-800 px-4 py-2.5 rounded-xl font-bold border border-purple-200 whitespace-nowrap text-sm shadow-sm">
-                                예측 총 급여: {formatCurrency(totalMonthPay + totalMonthHolidayPay)}
+                                예상 총 급여: {formatCurrency(totalMonthDeduction > 0 ? totalMonthFinalPay : totalMonthGrandPay)}
                             </div>
                         </div>
                     </div>
 
                     {(() => {
                         const renderPredictPanel = (py, pm, isCurrent) => {
-                            const pmKey = `${py}-${pm.toString().padStart(2,'0')}`;
-                            const pmData = predictData[pmKey] || { days: {} };
                             const pDaysIn = getDaysInMonth(py, pm);
                             const pFirstDay = getFirstDayOfMonth(py, pm);
                             const pDays = [];
                             for (let i = 0; i < pFirstDay; i++) pDays.push(null);
                             for (let d = 1; d <= pDaysIn; d++) pDays.push(d);
+                            const fmtTime = (h, m) => m === 0 ? `${h}시` : `${h}시${m}분`;
                             return (
                                 <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden w-full flex-shrink-0">
                                     <div className="grid grid-cols-7 bg-gray-50 border-b border-gray-200">
@@ -9048,53 +9803,49 @@
                                     <div className="grid grid-cols-7 auto-rows-fr">
                                         {pDays.map((day, idx) => {
                                             if (!day) return <div key={`ep-${idx}`} className="cal-cell-empty min-h-[120px] border-b border-r border-gray-100 bg-gray-50/50"></div>;
-                                            const dayData = pmData.days[day] || { entries: {} };
-                                            let dailyTotalPay = 0;
-                                            const activeEntries = [];
-                                            Object.values(dayData.entries || {}).forEach(entry => {
-                                                if (entry.hours > 0) { dailyTotalPay += entry.pay; activeEntries.push(entry); }
-                                            });
+                                            const dateStr = `${py}-${String(pm).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+                                            const daySchedules = (schedulesByDay[dateStr] || []).slice().sort(
+                                                (a, b) => (a.startHour * 60 + (a.startMinute||0)) - (b.startHour * 60 + (b.startMinute||0))
+                                            );
+                                            const memoCount = (scheduleMemos[dateStr] || []).length;
                                             const isSunday = idx % 7 === 0;
-                                            const sundayKey = isSunday ? `${py}-${pm.toString().padStart(2, '0')}-${day.toString().padStart(2, '0')}` : null;
-                                            const holidayEntries = sundayKey ? (holidayPayBySunday[sundayKey] || []) : [];
-                                            const handleOpenDay = isCurrent ? () => setEditDayModal(day) : undefined;
+                                            const holidayEntries = isSunday ? (holidayPayBySunday[dateStr] || []) : [];
+                                            const handleOpenDay = isCurrent ? () => setDayDetailModal(dateStr) : undefined;
                                             return (
-                                                <div key={`epd-${day}`} className={`cal-cell min-h-[140px] border-b border-r border-gray-100 p-2 relative group ${isCurrent ? 'hover:bg-yellow-50/50 transition cursor-pointer md:cursor-default' : ''}`} onClick={handleOpenDay}>
-                                                    <div className="flex justify-between items-start mb-1">
+                                                <div key={`epd-${day}`}
+                                                    className={`cal-cell min-h-[140px] border-b border-r border-gray-100 p-1.5 relative ${isCurrent ? 'hover:bg-yellow-50/50 transition cursor-pointer' : ''}`}
+                                                    onClick={handleOpenDay}>
+                                                    <div className="flex justify-between items-center mb-1">
                                                         <span className={`text-sm font-bold w-6 h-6 flex items-center justify-center rounded-full ${idx % 7 === 0 ? 'text-red-500' : idx % 7 === 6 ? 'text-blue-500' : 'text-gray-700'}`}>{day}</span>
-                                                        {isCurrent && (
-                                                            <div className="hidden md:flex opacity-0 group-hover:opacity-100 gap-1 transition" onClick={e => e.stopPropagation()}>
-                                                                <button onClick={() => setEditDayModal(day)} className="text-xs bg-gray-100 hover:bg-gray-200 text-gray-600 px-2 py-1 rounded shadow-sm">수정</button>
-                                                                <button onClick={() => handleDeleteDay(day)} className="text-xs bg-red-50 hover:bg-red-100 text-red-500 px-1.5 py-1 rounded flex items-center justify-center shadow-sm" title="삭제">
-                                                                    <X className="w-3 h-3" />
-                                                                </button>
-                                                            </div>
+                                                        {memoCount > 0 && (
+                                                            <span className="text-[9px] bg-yellow-100 text-yellow-700 px-1.5 py-0.5 rounded-full font-bold">메모 {memoCount}</span>
                                                         )}
                                                     </div>
-                                                    <div className="md:hidden space-y-0.5 mt-1">
-                                                        {activeEntries.length > 0 && <div className="text-[9px] text-green-700 font-semibold truncate">{activeEntries.length}명 근무</div>}
-                                                        {dailyTotalPay > 0 && <div className="text-[9px] font-bold text-green-600 truncate">{Math.round(dailyTotalPay/10000)}만원</div>}
-                                                        {holidayEntries.length > 0 && <div className="w-1.5 h-1.5 rounded-full bg-blue-400 inline-block ml-0.5" title="주휴수당 예측"></div>}
+                                                    <div className="space-y-0.5">
+                                                        {daySchedules.slice(0, 5).map(s => {
+                                                            const label = `${s.empName}(${fmtTime(s.startHour, s.startMinute||0)}~${fmtTime(s.endHour, s.endMinute||0)})`;
+                                                            return (
+                                                                <div key={s.id}
+                                                                    onClick={(e) => { if (isCurrent) { e.stopPropagation(); setScheduleModal({ schedule: s }); } }}
+                                                                    className={`text-[10px] md:text-[11px] font-medium text-gray-800 rounded px-1.5 py-0.5 truncate ${isCurrent ? 'cursor-pointer hover:opacity-80' : ''}`}
+                                                                    style={{backgroundColor: s.color}}
+                                                                    title={label + (s.memo ? ` | ${s.memo}` : '')}>
+                                                                    {label}
+                                                                </div>
+                                                            );
+                                                        })}
+                                                        {daySchedules.length > 5 && (
+                                                            <div className="text-[9px] text-gray-400 italic">+{daySchedules.length - 5}개...</div>
+                                                        )}
                                                     </div>
-                                                    <div className="hidden md:block space-y-1 mt-2">
-                                                        <div className="text-xs text-gray-600 overflow-hidden">
-                                                            {activeEntries.slice(0, 3).map((e, i) => <div key={i} className="truncate">{e.name}: {fmtHours(e.hours)}</div>)}
-                                                            {activeEntries.length > 3 && <div className="text-gray-400 italic">+{activeEntries.length - 3}명...</div>}
+                                                    {holidayEntries.length > 0 && (
+                                                        <div className="hidden md:block mt-1 pt-1 border-t border-blue-100 border-dashed">
+                                                            <div className="text-[9px] font-bold text-blue-600">주휴수당</div>
+                                                            {holidayEntries.slice(0, 2).map((h, i) => (
+                                                                <div key={i} className="text-[9px] text-blue-500 truncate">{h.name}: {formatCurrency(h.holidayPay)}</div>
+                                                            ))}
                                                         </div>
-                                                        {dailyTotalPay > 0 && (
-                                                            <div className="mt-2 pt-1 border-t border-gray-100 border-dashed">
-                                                                <div className="text-xs font-semibold text-green-700">예측 인건비: {formatCurrency(dailyTotalPay)}</div>
-                                                            </div>
-                                                        )}
-                                                        {holidayEntries.length > 0 && (
-                                                            <div className="mt-1 pt-1 border-t border-blue-100 border-dashed">
-                                                                <div className="text-[10px] font-bold text-blue-600 mb-0.5">주휴수당 예측</div>
-                                                                {holidayEntries.map((h, i) => (
-                                                                    <div key={i} className="text-[10px] text-blue-500 truncate">{h.name}: {formatCurrency(h.holidayPay)}</div>
-                                                                ))}
-                                                            </div>
-                                                        )}
-                                                    </div>
+                                                    )}
                                                 </div>
                                             );
                                         })}
@@ -9117,41 +9868,45 @@
                         );
                     })()}
 
-                    {isBulkInputOpen && (
-                        <BulkInputModal
-                            year={year} month={month} monthKey={monthKey} daysInMonth={daysInMonth}
-                            activeEmployees={activeEmployees} monthlyData={predictData} setMonthlyData={setPredictData}
-                            onClose={() => setIsBulkInputOpen(false)}
-                            globalMinWage={globalMinWage}
+                    {scheduleModal && (
+                        <ScheduleEditModal
+                            initial={scheduleModal.schedule}
+                            defaultDate={scheduleModal.defaultDate}
+                            activeEmployees={activeEmployees}
+                            workspaceId={workspaceId}
+                            firebaseUser={firebaseUser}
+                            workspaceInfo={workspaceInfo}
+                            setWorkspaceInfo={setWorkspaceInfo}
+                            onClose={() => setScheduleModal(null)}
+                            showAlert={showAlert}
+                            showConfirm={showConfirm}
                         />
                     )}
-                    {editDayModal && (() => {
-                        const editDateStr = `${year}-${month.toString().padStart(2, '0')}-${editDayModal.toString().padStart(2, '0')}`;
-                        const editDate = new Date(year, month - 1, editDayModal);
-                        const isSunday = editDate.getDay() === 0;
-                        const editHolidayEntries = isSunday ? (holidayPayBySunday[editDateStr] || []) : [];
-                        return (
-                            <DailyEditModal
-                                year={year} month={month} day={editDayModal} monthKey={monthKey}
-                                activeEmployees={activeEmployees} allEmployees={employees} monthlyData={predictData} setMonthlyData={setPredictData}
-                                onClose={() => setEditDayModal(null)}
-                                onDelete={() => handleDeleteDay(editDayModal)}
-                                holidayEntries={editHolidayEntries}
-                                globalMinWage={globalMinWage}
-                            />
-                        );
-                    })()}
+                    {dayDetailModal && (
+                        <DayDetailModal
+                            date={dayDetailModal}
+                            schedules={schedulesByDay[dayDetailModal] || []}
+                            memos={scheduleMemos[dayDetailModal] || []}
+                            isAdmin={true}
+                            authorName={workspaceInfo?.shopName ? `${workspaceInfo.shopName} 관리자` : '관리자'}
+                            authorId={'boss'}
+                            workspaceId={workspaceId}
+                            firebaseUser={firebaseUser}
+                            workspaceInfo={workspaceInfo}
+                            setWorkspaceInfo={setWorkspaceInfo}
+                            onEditSchedule={(s) => { setDayDetailModal(null); setScheduleModal({ schedule: s }); }}
+                            onAddSchedule={() => { const d = dayDetailModal; setDayDetailModal(null); setScheduleModal({ defaultDate: d }); }}
+                            onClose={() => setDayDetailModal(null)}
+                            showAlert={showAlert}
+                        />
+                    )}
 
                     <div className="flex justify-end mt-4">
                         <button
-                            onClick={() => {
-                                showConfirm(`${year}년 ${month}월 예측 정보를 정말 초기화하시겠습니까?`, () => {
-                                    setPredictData(prev => { const nd = { ...prev }; delete nd[monthKey]; return nd; });
-                                }, "예측 정보 초기화");
-                            }}
+                            onClick={resetMonthSchedules}
                             className="text-sm bg-red-50 text-red-600 hover:bg-red-100 px-4 py-2.5 rounded-xl transition border border-red-200 font-medium"
                         >
-                            이번달 예측 초기화
+                            이번달 스케쥴 초기화
                         </button>
                     </div>
                 </div>

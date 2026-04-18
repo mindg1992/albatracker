@@ -4163,6 +4163,8 @@
             const [year, setYear] = useState(today.getFullYear());
             const [month, setMonth] = useState(today.getMonth() + 1);
             const [dayDetailDate, setDayDetailDate] = useState(null);
+            // 이번 클릭에서 "처음 확인"한 메모 ID — 상세 모달 내 주황 테두리 강조용
+            const [justSeenMemoIds, setJustSeenMemoIds] = useState(new Set());
 
             // 확인한 메모 ID 추적 (날짜칸 클릭 시 해당 날짜 메모를 모두 확인 처리)
             const seenMemoKey = empAccount?.bossUid ? `schedMemoSeenIds_emp_${empAccount.bossUid}` : null;
@@ -4352,7 +4354,16 @@
                                             const memoCount = memosOnDate.length;
                                             const hasUnread = memosOnDate.some(m => m.authorId !== firebaseUser?.uid && m.id && !seenMemoIds.has(m.id));
                                             const isToday = today.getFullYear()===py && today.getMonth()+1===pm && today.getDate()===day;
-                                            const handleOpenDay = isCurrent ? () => { markDateMemosSeen(memosOnDate); setDayDetailDate(dateStr); } : undefined;
+                                            const handleOpenDay = isCurrent ? () => {
+                                                const newlySeen = new Set(
+                                                    memosOnDate
+                                                        .filter(mm => mm.id && !seenMemoIds.has(mm.id) && mm.authorId !== firebaseUser?.uid)
+                                                        .map(mm => mm.id)
+                                                );
+                                                setJustSeenMemoIds(newlySeen);
+                                                markDateMemosSeen(memosOnDate);
+                                                setDayDetailDate(dateStr);
+                                            } : undefined;
                                             return (
                                                 <div key={day}
                                                     onClick={handleOpenDay}
@@ -4539,7 +4550,8 @@
                             currentEmpName={empAccount?.name || firebaseUser.displayName || '직원'}
                             onPostMemo={postMemo}
                             onDeleteMemo={deleteMemo}
-                            onClose={() => setDayDetailDate(null)}
+                            onClose={() => { setDayDetailDate(null); setJustSeenMemoIds(new Set()); }}
+                            highlightMemoIds={justSeenMemoIds}
                         />
                     )}
                 </div>
@@ -4547,7 +4559,7 @@
         }
 
         // ─── 직원용 날짜 상세 모달 (열람+메모) ───
-        function EmpDayDetailModal({ date, schedules, memos, currentEmpId, currentEmpName, onPostMemo, onDeleteMemo, onClose }) {
+        function EmpDayDetailModal({ date, schedules, memos, currentEmpId, currentEmpName, onPostMemo, onDeleteMemo, onClose, highlightMemoIds = new Set() }) {
             const [memoText, setMemoText] = useState('');
             const [posting, setPosting] = useState(false);
             const sortedSchedules = [...(schedules || [])].sort(
@@ -4593,11 +4605,16 @@
                                     <p className="text-xs text-gray-400 bg-gray-50 rounded-xl p-3 text-center mb-2">메모가 없습니다.</p>
                                 ) : (
                                     <div className="space-y-1.5 mb-2">
-                                        {memos.map(m => (
-                                            <div key={m.id} className="bg-gray-50 border border-gray-200 rounded-xl p-2.5">
+                                        {memos.map(m => {
+                                            const isNewlySeen = m.id && highlightMemoIds.has(m.id);
+                                            return (
+                                            <div key={m.id} className={`rounded-xl p-2.5 ${isNewlySeen ? 'bg-orange-50 border-2 border-orange-400' : 'bg-gray-50 border border-gray-200'}`}>
                                                 <div className="flex items-start justify-between gap-2">
                                                     <div className="flex-1">
-                                                        <div className="text-xs font-bold text-gray-700">{m.authorName}</div>
+                                                        <div className="text-xs font-bold text-gray-700 flex items-center gap-1">
+                                                            {m.authorName}
+                                                            {isNewlySeen && <span className="text-[9px] bg-orange-500 text-white px-1.5 rounded-full font-bold">NEW</span>}
+                                                        </div>
                                                         <p className="text-sm text-gray-700 whitespace-pre-wrap mt-0.5">{m.text}</p>
                                                     </div>
                                                     {m.authorId === currentEmpId && (
@@ -4608,7 +4625,8 @@
                                                 </div>
                                                 <div className="text-[10px] text-gray-400 mt-0.5">{new Date(m.createdAt).toLocaleString('ko-KR')}</div>
                                             </div>
-                                        ))}
+                                            );
+                                        })}
                                     </div>
                                 )}
                                 <div className="flex gap-2">

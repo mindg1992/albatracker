@@ -1,0 +1,36 @@
+rules_version = '2';
+
+// ⚠️ 이 파일은 참조용입니다. 실제 규칙은 Firebase Console에서 관리됩니다.
+// 직원 스케쥴 메모 저장을 허용하려면 아래의 scheduleMemos 규칙을 Console에 추가하세요.
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ─── 직원이 작성한 스케쥴 메모용 서브컬렉션 ───
+    // 현재 workspaces/{wsId} 는 소유자만 쓰기 가능하므로,
+    // 직원이 메모를 쓰려면 별도 서브컬렉션에 대해 작성 권한을 부여해야 함.
+    match /workspaces/{wsId}/scheduleMemos/{memoId} {
+      // 로그인한 사용자면 읽기 가능
+      allow read: if request.auth != null;
+
+      // 본인 authorId 필드가 요청자 uid와 일치하면 생성 가능
+      // 또는 workspace 소유자(사장)도 직접 생성 가능
+      allow create: if request.auth != null
+                    && (request.resource.data.authorId == request.auth.uid
+                        || request.auth.uid == wsId);
+
+      // 본인이 작성했거나 사장이면 삭제 가능
+      allow delete: if request.auth != null
+                    && (resource.data.authorId == request.auth.uid
+                        || request.auth.uid == wsId);
+
+      // 업데이트는 사장만
+      allow update: if request.auth.uid == wsId;
+    }
+
+    // 참고: 기존 규칙(users, workspaces, submissions 등)은 Firebase Console에
+    // 이미 등록되어 있으므로 여기에 다시 명시하지 않습니다.
+    // 위 규칙만 Console에 추가하거나, 전체 규칙을 이 파일로 관리하려면
+    // firebase init firestore 를 실행한 뒤 기존 규칙과 병합하세요.
+  }
+}

@@ -883,6 +883,19 @@
             );
         }
 
+        // 문서레벨 scheduleMemos + 서브컬렉션 scheduleMemos 병합 (중복 id 제거)
+        function mergeScheduleMemoMaps(docMemos, subMemos) {
+            const merged = {};
+            Object.entries(docMemos || {}).forEach(([date, list]) => {
+                merged[date] = [...(list || [])];
+            });
+            Object.entries(subMemos || {}).forEach(([date, list]) => {
+                const seen = new Set((merged[date] || []).map(m => m.id));
+                merged[date] = [...(merged[date] || []), ...(list || []).filter(m => !seen.has(m.id))];
+            });
+            return merged;
+        }
+
         // --- 메인 애플리케이션 컴포넌트 ---
         function AlbaTracker() {
             const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -1619,11 +1632,40 @@
                     .onSnapshot(doc => {
                         if (!doc.exists) return;
                         const data = doc.data();
-                        setWorkspaceInfo(prev => ({
-                            ...(prev || {}),
-                            schedules: data.schedules || [],
-                            scheduleMemos: data.scheduleMemos || {}
-                        }));
+                        setWorkspaceInfo(prev => {
+                            const sub = prev?.scheduleMemosSub || {};
+                            return {
+                                ...(prev || {}),
+                                schedules: data.schedules || [],
+                                scheduleMemosDoc: data.scheduleMemos || {},
+                                scheduleMemos: mergeScheduleMemoMaps(data.scheduleMemos || {}, sub)
+                            };
+                        });
+                    }, () => {});
+                return () => unsub();
+            }, [firebaseUser, userRole, currentWorkspaceId]);
+
+            // 스케쥴 메모 서브컬렉션 실시간 sync (직원 작성 메모 포함)
+            useEffect(() => {
+                if (!firebaseUser || userRole !== 'boss' || !currentWorkspaceId) return;
+                const unsub = fbDb.collection('workspaces').doc(currentWorkspaceId)
+                    .collection('scheduleMemos')
+                    .onSnapshot(snap => {
+                        const byDate = {};
+                        snap.forEach(doc => {
+                            const m = doc.data();
+                            if (!m.date) return;
+                            if (!byDate[m.date]) byDate[m.date] = [];
+                            byDate[m.date].push({ ...m, id: m.id || doc.id });
+                        });
+                        setWorkspaceInfo(prev => {
+                            const docMemos = prev?.scheduleMemosDoc || prev?.scheduleMemos || {};
+                            return {
+                                ...(prev || {}),
+                                scheduleMemosSub: byDate,
+                                scheduleMemos: mergeScheduleMemoMaps(docMemos, byDate)
+                            };
+                        });
                     }, () => {});
                 return () => unsub();
             }, [firebaseUser, userRole, currentWorkspaceId]);
@@ -1637,7 +1679,15 @@
                         if (cancelled) return;
                         if (doc.exists) {
                             const data = doc.data();
-                            setWorkspaceInfo(data);
+                            setWorkspaceInfo(prev => {
+                                const sub = prev?.scheduleMemosSub || {};
+                                return {
+                                    ...data,
+                                    scheduleMemosDoc: data.scheduleMemos || {},
+                                    scheduleMemosSub: sub,
+                                    scheduleMemos: mergeScheduleMemoMaps(data.scheduleMemos || {}, sub)
+                                };
+                            });
                             // bossWorkspaceList shopName + deleteScheduledAt 최신화
                             setBossWorkspaceList(prev => prev.map(w =>
                                 w.id === currentWorkspaceId
@@ -4117,8 +4167,9 @@
             const postMemo = async (date, text) => {
                 if (!text.trim()) return;
                 try {
+                    const memoId = `memo_${Date.now()}_${Math.random().toString(36).slice(2,8)}`;
                     const memo = {
-                        id: `memo_${Date.now()}_${Math.random().toString(36).slice(2,8)}`,
+                        id: memoId,
                         date,
                         authorId: firebaseUser.uid,
                         authorName: empAccount?.name || firebaseUser.displayName || '직원',
@@ -4126,11 +4177,9 @@
                         createdAt: new Date().toISOString()
                     };
                     const wsId = empAccount.bossUid;
-                    const snap = await fbDb.collection('workspaces').doc(wsId).get();
-                    const existing = snap.data()?.scheduleMemos || {};
-                    const list = existing[date] || [];
-                    const newMemos = { ...existing, [date]: [...list, memo] };
-                    await fbDb.collection('workspaces').doc(wsId).update({ scheduleMemos: newMemos });
+                    // 직원은 workspaces 문서를 직접 수정할 수 없으므로 서브컬렉션에 저장
+                    await fbDb.collection('workspaces').doc(wsId)
+                        .collection('scheduleMemos').doc(memoId).set(memo);
                 } catch (e) {
                     showAlert('메모 저장 실패: ' + e.message, '오류', 'error');
                 }
@@ -4139,11 +4188,9 @@
             const deleteMemo = async (date, id) => {
                 try {
                     const wsId = empAccount.bossUid;
-                    const snap = await fbDb.collection('workspaces').doc(wsId).get();
-                    const existing = snap.data()?.scheduleMemos || {};
-                    const list = (existing[date] || []).filter(m => m.id !== id);
-                    const newMemos = { ...existing, [date]: list };
-                    await fbDb.collection('workspaces').doc(wsId).update({ scheduleMemos: newMemos });
+                    // 우선 서브컬렉션에서 시도 (직원 본인이 작성한 메모)
+                    await fbDb.collection('workspaces').doc(wsId)
+                        .collection('scheduleMemos').doc(id).delete();
                 } catch (e) {
                     showAlert('메모 삭제 실패: ' + e.message, '오류', 'error');
                 }
@@ -4472,9 +4519,14 @@
             const [payslipBanner, setPayslipBanner] = useState(null); // { year, month, docId }
             const [viewingPayslip, setViewingPayslip] = useState(null);
             const [bossSchedules, setBossSchedules] = useState([]);
-            const [bossScheduleMemos, setBossScheduleMemos] = useState({});
+            const [bossScheduleMemosDoc, setBossScheduleMemosDoc] = useState({}); // 사장 문서 내 메모 (legacy)
+            const [bossScheduleMemosSub, setBossScheduleMemosSub] = useState({}); // 서브컬렉션 내 메모
+            const bossScheduleMemos = useMemo(
+                () => mergeScheduleMemoMaps(bossScheduleMemosDoc, bossScheduleMemosSub),
+                [bossScheduleMemosDoc, bossScheduleMemosSub]
+            );
 
-            // 관리자 스케쥴/메모 실시간 로드
+            // 관리자 스케쥴/메모 실시간 로드 (사장 문서 레벨)
             useEffect(() => {
                 if (!firebaseUser || !empAccount?.bossUid) return;
                 const unsub = fbDb.collection('workspaces').doc(empAccount.bossUid)
@@ -4482,8 +4534,26 @@
                         if (doc.exists) {
                             const data = doc.data();
                             setBossSchedules(data.schedules || []);
-                            setBossScheduleMemos(data.scheduleMemos || {});
+                            setBossScheduleMemosDoc(data.scheduleMemos || {});
                         }
+                    }, () => {});
+                return () => unsub();
+            }, [firebaseUser, empAccount?.bossUid]);
+
+            // 스케쥴 메모 서브컬렉션 실시간 로드 (직원 작성 메모 포함)
+            useEffect(() => {
+                if (!firebaseUser || !empAccount?.bossUid) return;
+                const unsub = fbDb.collection('workspaces').doc(empAccount.bossUid)
+                    .collection('scheduleMemos')
+                    .onSnapshot(snap => {
+                        const byDate = {};
+                        snap.forEach(doc => {
+                            const m = doc.data();
+                            if (!m.date) return;
+                            if (!byDate[m.date]) byDate[m.date] = [];
+                            byDate[m.date].push({ ...m, id: m.id || doc.id });
+                        });
+                        setBossScheduleMemosSub(byDate);
                     }, () => {});
                 return () => unsub();
             }, [firebaseUser, empAccount?.bossUid]);
@@ -5652,18 +5722,28 @@
             const [loadingPersonal, setLoadingPersonal] = useState(!!emp.empUid);
 
             // 기존에 저장된 개인 템플릿이 있으면 우선 로드 (이전 수정 내용 + 서명 유지)
+            // 개인 템플릿이 없고 글로벌 템플릿도 삭제된 경우, 기존에 작성 완료된 계약서(.contract)에서 템플릿 구조 복원
             useEffect(() => {
                 if (!emp.empUid) { setLoadingPersonal(false); return; }
                 const bossUid = workspaceId || firebaseUser.uid;
                 fbDb.collection('employeeAccounts').doc(emp.empUid)
                     .collection('workplaces').doc(bossUid).get()
                     .then(doc => {
-                        const personal = doc.data()?.contractTemplate;
+                        const data = doc.data() || {};
+                        const personal = data.contractTemplate;
                         if (personal) {
                             setTitle(personal.title || '근로계약서');
                             setSections(personal.sections?.length >= 1 ? personal.sections.map(s => ({ ...s })) : [{ content: '', instruction: '' }]);
                             // signatureData도 그대로 가져옴 — 새로 그리면 덮어쓰고, 안 그리면 기존 유지
                             setOwnerInfo(personal.ownerInfo ? { ...personal.ownerInfo } : (baseTemplate?.ownerInfo ? { ...baseTemplate.ownerInfo } : { shopName: '', phone: '', address: '', representative: '', signatureData: '' }));
+                        } else if (data.contract && !(baseTemplate?.sections?.length >= 1)) {
+                            // 템플릿이 삭제되었지만 기존 작성된 계약서가 있으면 그 내용으로 폴백
+                            const c = data.contract;
+                            setTitle(c.title || '근로계약서');
+                            setSections(c.sections?.length >= 1
+                                ? c.sections.map(s => ({ content: s.content || '', instruction: s.instruction || '' }))
+                                : [{ content: '', instruction: '' }]);
+                            setOwnerInfo(c.ownerInfo ? { ...c.ownerInfo } : { shopName: '', phone: '', address: '', representative: '', signatureData: '' });
                         }
                     })
                     .catch(() => {})
@@ -5783,7 +5863,7 @@
                                         <label className="block text-xs font-bold text-gray-600 mb-1">지시 (근무자에게 어떻게 작성하게 할지)</label>
                                         <input value={s.instruction} onChange={e => updateSection(i, 'instruction', e.target.value)}
                                             className="w-full border-2 border-gray-200 rounded-xl py-2 px-3 text-sm focus:border-blue-400 outline-none"
-                                            placeholder='예: "위 내용에 동의합니다"라고 적으세요' />
+                                            placeholder='예: 위 내용에 동의합니다.' />
                                     </div>
                                 </div>
                             ))}
@@ -6011,7 +6091,7 @@
                                         <label className="block text-xs font-bold text-gray-600 mb-1">지시 (근무자에게 어떻게 작성하게 할지)</label>
                                         <input value={s.instruction} onChange={e => updateSection(i, 'instruction', e.target.value)}
                                             className="w-full border-2 border-gray-200 rounded-xl py-2 px-3 text-sm focus:border-blue-400 outline-none"
-                                            placeholder='예: "위 내용에 동의합니다"라고 적으세요' />
+                                            placeholder='예: 위 내용에 동의합니다.' />
                                     </div>
                                 </div>
                             ))}
@@ -6990,7 +7070,7 @@
                                         <label className="block text-xs font-bold text-gray-600 mb-1">지시 (근무자에게 어떻게 작성하게 할지)</label>
                                         <input value={s.instruction} onChange={e => updateSection(i, 'instruction', e.target.value)}
                                             className="w-full border-2 border-gray-200 rounded-xl py-2 px-3 text-sm focus:border-blue-400 outline-none"
-                                            placeholder='예: "위 내용에 동의합니다"라고 적으세요' />
+                                            placeholder='예: 위 내용에 동의합니다.' />
                                     </div>
                                 </div>
                             ))}
@@ -9921,12 +10001,19 @@
                         text: memoText.trim(),
                         createdAt: new Date().toISOString()
                     };
-                    const existing = workspaceInfo?.scheduleMemos || {};
-                    const list = existing[date] || [];
-                    const newMemos = { ...existing, [date]: [...list, memo] };
                     const wsId = workspaceId || firebaseUser.uid;
-                    await fbDb.collection('workspaces').doc(wsId).update({ scheduleMemos: newMemos });
-                    setWorkspaceInfo(prev => ({ ...prev, scheduleMemos: newMemos }));
+                    const docMemos = workspaceInfo?.scheduleMemosDoc || workspaceInfo?.scheduleMemos || {};
+                    const list = docMemos[date] || [];
+                    const newDocMemos = { ...docMemos, [date]: [...list, memo] };
+                    await fbDb.collection('workspaces').doc(wsId).update({ scheduleMemos: newDocMemos });
+                    setWorkspaceInfo(prev => {
+                        const sub = prev?.scheduleMemosSub || {};
+                        return {
+                            ...prev,
+                            scheduleMemosDoc: newDocMemos,
+                            scheduleMemos: mergeScheduleMemoMaps(newDocMemos, sub)
+                        };
+                    });
                     setMemoText('');
                 } catch (e) {
                     showAlert('메모 저장 실패: ' + e.message, '오류', 'error');
@@ -9936,12 +10023,25 @@
 
             const deleteMemo = async (id) => {
                 try {
-                    const existing = workspaceInfo?.scheduleMemos || {};
-                    const list = (existing[date] || []).filter(m => m.id !== id);
-                    const newMemos = { ...existing, [date]: list };
                     const wsId = workspaceId || firebaseUser.uid;
-                    await fbDb.collection('workspaces').doc(wsId).update({ scheduleMemos: newMemos });
-                    setWorkspaceInfo(prev => ({ ...prev, scheduleMemos: newMemos }));
+                    const docMemos = workspaceInfo?.scheduleMemosDoc || workspaceInfo?.scheduleMemos || {};
+                    const inDoc = (docMemos[date] || []).some(m => m.id === id);
+                    if (inDoc) {
+                        const newDocMemos = { ...docMemos, [date]: (docMemos[date] || []).filter(m => m.id !== id) };
+                        await fbDb.collection('workspaces').doc(wsId).update({ scheduleMemos: newDocMemos });
+                        setWorkspaceInfo(prev => {
+                            const sub = prev?.scheduleMemosSub || {};
+                            return {
+                                ...prev,
+                                scheduleMemosDoc: newDocMemos,
+                                scheduleMemos: mergeScheduleMemoMaps(newDocMemos, sub)
+                            };
+                        });
+                    } else {
+                        // 서브컬렉션 메모 — 관리자가 삭제
+                        await fbDb.collection('workspaces').doc(wsId)
+                            .collection('scheduleMemos').doc(id).delete();
+                    }
                 } catch (e) {
                     showAlert('삭제 실패: ' + e.message, '오류', 'error');
                 }
@@ -10298,12 +10398,12 @@
                                     </div>
                                     {weeks.map((week, weekIdx) => {
                                         const { bars, rowCount } = computeWeekBars(week);
-                                        const barAreaHeight = Math.max(rowCount * 22 + 6, 70);
+                                        const cellMinHeight = Math.max(rowCount * 22 + 44, 110);
                                         return (
                                             <div key={`wk-${weekIdx}`} className="relative border-b border-gray-100">
                                                 <div className="grid grid-cols-7 auto-rows-fr">
                                                     {week.map((day, idx) => {
-                                                        if (!day) return <div key={`ep-${weekIdx}-${idx}`} className="min-h-[110px] border-r border-gray-100 bg-gray-50/50"></div>;
+                                                        if (!day) return <div key={`ep-${weekIdx}-${idx}`} className="border-r border-gray-100 bg-gray-50/50" style={{minHeight: `${cellMinHeight}px`}}></div>;
                                                         const dateStr = `${py}-${String(pm).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
                                                         const memoCount = (scheduleMemos[dateStr] || []).length;
                                                         const holidayEntries = idx === 0 ? (holidayPayBySunday[dateStr] || []) : [];
@@ -10311,13 +10411,11 @@
                                                         return (
                                                             <div key={`epd-${weekIdx}-${day}`}
                                                                 className={`border-r border-gray-100 p-1.5 relative ${isCurrent ? 'hover:bg-yellow-50/50 transition cursor-pointer' : ''}`}
-                                                                style={{minHeight: `${barAreaHeight + 40}px`}}
+                                                                style={{minHeight: `${cellMinHeight}px`}}
                                                                 onClick={handleOpenDay}>
                                                                 <div className="flex justify-between items-center mb-1">
                                                                     <span className={`text-sm font-bold w-6 h-6 flex items-center justify-center rounded-full ${idx === 0 ? 'text-red-500' : idx === 6 ? 'text-blue-500' : 'text-gray-700'}`}>{day}</span>
-                                                                    {memoCount > 0 && (
-                                                                        <span className="text-[9px] bg-yellow-100 text-yellow-700 px-1.5 py-0.5 rounded-full font-bold">메모 {memoCount}</span>
-                                                                    )}
+                                                                    {memoCount > 0 && <span className="text-[9px] bg-yellow-100 text-yellow-700 px-1.5 rounded-full font-bold">{memoCount}</span>}
                                                                 </div>
                                                                 {holidayEntries.length > 0 && (
                                                                     <div className="hidden md:block absolute bottom-1 left-1 right-1 pt-1 border-t border-blue-100 border-dashed">
@@ -10333,7 +10431,7 @@
                                                 </div>
                                                 {/* 연속 음영바 오버레이 */}
                                                 <div className="absolute left-0 right-0 pointer-events-none"
-                                                    style={{top: '28px', bottom: '0'}}>
+                                                    style={{top: '34px', bottom: '6px'}}>
                                                     <div className="grid grid-cols-7 h-full px-0.5"
                                                         style={{gridAutoRows: '20px', rowGap: '2px', alignContent: 'start'}}>
                                                         {bars.map(bar => {
@@ -10410,10 +10508,10 @@
                         />
                     )}
 
-                    <div className="flex justify-end mt-4">
+                    <div className="flex justify-end -mt-2">
                         <button
                             onClick={resetMonthSchedules}
-                            className="text-sm bg-red-50 text-red-600 hover:bg-red-100 px-4 py-2.5 rounded-xl transition border border-red-200 font-medium"
+                            className="text-xs bg-red-50 text-red-600 hover:bg-red-100 px-3 py-1.5 rounded-lg transition border border-red-200 font-medium"
                         >
                             이번달 스케쥴 초기화
                         </button>
@@ -11088,7 +11186,7 @@
                                         <label className="block text-xs font-bold text-gray-600 mb-1">지시 (근무자에게 어떻게 작성하게 할지)</label>
                                         <input value={s.instruction} onChange={e => updateSection(i, 'instruction', e.target.value)}
                                             className="w-full border-2 border-gray-200 rounded-xl py-2 px-3 text-sm focus:border-blue-400 outline-none"
-                                            placeholder='예: 이름을 적으세요 / "위 내용에 동의합니다"라고 적으세요' />
+                                            placeholder='예: 위 내용에 동의합니다.' />
                                     </div>
                                 </div>
                             ))}
@@ -11513,7 +11611,7 @@
                                 {[
                                     { value: 'hour',   label: '1시간 단위', desc: '예: 8시간' },
                                     { value: 'half',   label: '30분 단위',  desc: '예: 8시간 / 8시간 30분' },
-                                    { value: 'ten',    label: '10분 단위',  desc: '예: 8시간 20분 (슬라이드 선택)' },
+                                    { value: 'ten',    label: '10분 단위',  desc: '예: 8시간 20분' },
                                     { value: 'minute', label: '1분 단위',   desc: '예: 8시간 45분 (직접 입력)' },
                                 ].map(opt => (
                                     <label key={opt.value} className={`flex items-center gap-3 p-3 border-2 rounded-xl cursor-pointer transition ${localTimeUnit === opt.value ? 'border-blue-500 bg-blue-50' : 'border-gray-200 hover:bg-gray-50'}`}>

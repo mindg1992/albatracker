@@ -4141,6 +4141,32 @@
             const [month, setMonth] = useState(today.getMonth() + 1);
             const [dayDetailDate, setDayDetailDate] = useState(null);
 
+            // 확인한 메모 ID 추적 (날짜칸 클릭 시 해당 날짜 메모를 모두 확인 처리)
+            const seenMemoKey = empAccount?.bossUid ? `schedMemoSeenIds_emp_${empAccount.bossUid}` : null;
+            const [seenMemoIds, setSeenMemoIds] = useState(() => {
+                if (!seenMemoKey) return new Set();
+                try {
+                    const raw = localStorage.getItem(seenMemoKey);
+                    return new Set(raw ? JSON.parse(raw) : []);
+                } catch { return new Set(); }
+            });
+            useEffect(() => {
+                if (!seenMemoKey) { setSeenMemoIds(new Set()); return; }
+                try {
+                    const raw = localStorage.getItem(seenMemoKey);
+                    setSeenMemoIds(new Set(raw ? JSON.parse(raw) : []));
+                } catch { setSeenMemoIds(new Set()); }
+            }, [seenMemoKey]);
+            const markDateMemosSeen = (memosOnDate) => {
+                if (!seenMemoKey || !memosOnDate || memosOnDate.length === 0) return;
+                setSeenMemoIds(prev => {
+                    const next = new Set(prev);
+                    memosOnDate.forEach(m => { if (m.id) next.add(m.id); });
+                    try { localStorage.setItem(seenMemoKey, JSON.stringify([...next])); } catch {}
+                    return next;
+                });
+            };
+
             const schedulesByDay = useMemo(() => {
                 const map = {};
                 (bossSchedules || []).forEach(s => {
@@ -4257,16 +4283,22 @@
                                                 {week.map((day, idx) => {
                                                     if (!day) return <div key={`e-${weekIdx}-${idx}`} className="border-r border-gray-50" style={{minHeight: `${barAreaHeight + 24}px`}}/>;
                                                     const dateStr = `${year}-${String(month).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
-                                                    const memoCount = (bossScheduleMemos[dateStr] || []).length;
+                                                    const memosOnDate = bossScheduleMemos[dateStr] || [];
+                                                    const memoCount = memosOnDate.length;
+                                                    const hasUnread = memosOnDate.some(m => m.authorId !== firebaseUser?.uid && m.id && !seenMemoIds.has(m.id));
                                                     const isToday = today.getFullYear()===year && today.getMonth()+1===month && today.getDate()===day;
                                                     return (
                                                         <div key={day}
-                                                            onClick={() => setDayDetailDate(dateStr)}
+                                                            onClick={() => { markDateMemosSeen(memosOnDate); setDayDetailDate(dateStr); }}
                                                             className={`border-r border-gray-100 p-1 cursor-pointer hover:bg-yellow-50/50 ${isToday ? 'bg-blue-50' : ''}`}
                                                             style={{minHeight: `${barAreaHeight + 24}px`}}>
                                                             <div className="flex items-center justify-between">
                                                                 <span className={`text-xs font-bold ${isToday ? 'text-blue-600' : idx===0 ? 'text-red-500' : idx===6 ? 'text-blue-500' : 'text-gray-600'}`}>{day}</span>
-                                                                {memoCount > 0 && <span className="text-[8px] bg-yellow-100 text-yellow-700 px-1 rounded-full font-bold">{memoCount}</span>}
+                                                                {memoCount > 0 && (
+                                                                    hasUnread
+                                                                        ? <span className="text-[8px] bg-red-500 text-white w-3.5 h-3.5 flex items-center justify-center rounded-full font-bold">{memoCount}</span>
+                                                                        : <span className="text-[8px] bg-yellow-100 text-yellow-700 px-1 rounded-full font-bold">{memoCount}</span>
+                                                                )}
                                                             </div>
                                                         </div>
                                                     );

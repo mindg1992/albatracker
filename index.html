@@ -952,11 +952,31 @@
             const [memoSeenAt, setMemoSeenAt] = useState(0);
             const [predictOpenDate, setPredictOpenDate] = useState(null);
 
-            // currentWorkspaceId 변경 시 localStorage에서 메모 seenAt 복원
+            // currentWorkspaceId 변경 시 localStorage에서 메모 seenAt + seenMemoIds 복원
             useEffect(() => {
                 if (!currentWorkspaceId) { setMemoSeenAt(0); return; }
                 setMemoSeenAt(Number(localStorage.getItem(`schedMemoSeenAt_${currentWorkspaceId}`) || '0'));
             }, [currentWorkspaceId]);
+
+            // 확인한 메모 ID 추적 (스케쥴관리 탭 배지와 날짜칸 배지 공유)
+            const seenMemoKey = currentWorkspaceId ? `schedMemoSeenIds_${currentWorkspaceId}` : null;
+            const [seenMemoIds, setSeenMemoIds] = useState(new Set());
+            useEffect(() => {
+                if (!seenMemoKey) { setSeenMemoIds(new Set()); return; }
+                try {
+                    const raw = localStorage.getItem(seenMemoKey);
+                    setSeenMemoIds(new Set(raw ? JSON.parse(raw) : []));
+                } catch { setSeenMemoIds(new Set()); }
+            }, [seenMemoKey]);
+            const markDateMemosSeen = (memosOnDate) => {
+                if (!seenMemoKey || !memosOnDate || memosOnDate.length === 0) return;
+                setSeenMemoIds(prev => {
+                    const next = new Set(prev);
+                    memosOnDate.forEach(m => { if (m.id) next.add(m.id); });
+                    try { localStorage.setItem(seenMemoKey, JSON.stringify([...next])); } catch {}
+                    return next;
+                });
+            };
 
             // 스케쥴 메모 미확인 목록 (관리자, 본인 작성 제외)
             const unreadSchedMemos = useMemo(() => {
@@ -965,13 +985,14 @@
                 Object.entries(all).forEach(([date, memos]) => {
                     (memos || []).forEach(m => {
                         if (m.authorId === 'boss') return;
+                        if (m.id && seenMemoIds.has(m.id)) return;
                         const ts = m.createdAt ? new Date(m.createdAt).getTime() : 0;
                         if (ts > memoSeenAt) list.push({ ...m, date });
                     });
                 });
                 list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
                 return list;
-            }, [workspaceInfo?.scheduleMemos, memoSeenAt]);
+            }, [workspaceInfo?.scheduleMemos, memoSeenAt, seenMemoIds]);
 
             // 데이터 루프 및 무의미한 저장을 방지하기 위한 기준점
             const lastSyncedDataRef = useRef("");
@@ -3011,6 +3032,8 @@
                                 firebaseUser={firebaseUser}
                                 initialOpenDate={predictOpenDate}
                                 onInitialOpenConsumed={() => setPredictOpenDate(null)}
+                                seenMemoIds={seenMemoIds}
+                                markDateMemosSeen={markDateMemosSeen}
                             />
                         )}
                         {activeTab === 'invite' && (
@@ -10224,36 +10247,10 @@
             );
         }
 
-        function TabPredict({ employees, showConfirm, showAlert, globalMinWage, workspaceInfo, setWorkspaceInfo, workspaceId, firebaseUser, initialOpenDate, onInitialOpenConsumed }) {
+        function TabPredict({ employees, showConfirm, showAlert, globalMinWage, workspaceInfo, setWorkspaceInfo, workspaceId, firebaseUser, initialOpenDate, onInitialOpenConsumed, seenMemoIds = new Set(), markDateMemosSeen = () => {} }) {
             const [currentDate, setCurrentDate] = useState(new Date());
             const [scheduleModal, setScheduleModal] = useState(null); // { schedule?, defaultDate? }
             const [dayDetailModal, setDayDetailModal] = useState(null); // 'YYYY-MM-DD'
-
-            // 확인한 메모 ID 추적 (날짜칸 클릭 시 해당 날짜 메모를 모두 확인 처리)
-            const seenMemoKey = workspaceId ? `schedMemoSeenIds_${workspaceId}` : null;
-            const [seenMemoIds, setSeenMemoIds] = useState(() => {
-                if (!seenMemoKey) return new Set();
-                try {
-                    const raw = localStorage.getItem(seenMemoKey);
-                    return new Set(raw ? JSON.parse(raw) : []);
-                } catch { return new Set(); }
-            });
-            useEffect(() => {
-                if (!seenMemoKey) { setSeenMemoIds(new Set()); return; }
-                try {
-                    const raw = localStorage.getItem(seenMemoKey);
-                    setSeenMemoIds(new Set(raw ? JSON.parse(raw) : []));
-                } catch { setSeenMemoIds(new Set()); }
-            }, [seenMemoKey]);
-            const markDateMemosSeen = (date, memosOnDate) => {
-                if (!seenMemoKey || !memosOnDate || memosOnDate.length === 0) return;
-                setSeenMemoIds(prev => {
-                    const next = new Set(prev);
-                    memosOnDate.forEach(m => { if (m.id) next.add(m.id); });
-                    try { localStorage.setItem(seenMemoKey, JSON.stringify([...next])); } catch {}
-                    return next;
-                });
-            };
 
             // 외부(메모 배너 등)에서 특정 날짜 상세 팝업 열기 요청
             useEffect(() => {
@@ -10529,7 +10526,7 @@
                                                         const memoCount = memosOnDate.length;
                                                         const hasUnread = memosOnDate.some(m => m.authorId !== 'boss' && m.id && !seenMemoIds.has(m.id));
                                                         const holidayEntries = idx === 0 ? (holidayPayBySunday[dateStr] || []) : [];
-                                                        const handleOpenDay = isCurrent ? () => { markDateMemosSeen(dateStr, memosOnDate); setDayDetailModal(dateStr); } : undefined;
+                                                        const handleOpenDay = isCurrent ? () => { markDateMemosSeen(memosOnDate); setDayDetailModal(dateStr); } : undefined;
                                                         return (
                                                             <div key={`epd-${weekIdx}-${day}`}
                                                                 className={`border-r border-gray-100 p-1.5 relative ${isCurrent ? 'hover:bg-yellow-50/50 transition cursor-pointer' : ''}`}
